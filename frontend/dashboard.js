@@ -4,12 +4,14 @@ const THEME_KEY = 'themePreference';
 let autoRefreshInterval;
 let monthShift = 0;
 let yearShift = 0;
+let tradesLimit = 10;
+let activeTradeFilter = null;
+let exposureSort = { key: 'size', direction: 'desc' };
 
 const charts = {
     equityCurve: null,
     winLoss: null,
     dailyPnl: null,
-    symbolExposure: null,
 };
 
 const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
@@ -138,6 +140,33 @@ function setupEventListeners() {
         loadDashboard();
     });
 
+    document.getElementById('resetTradesFilterBtn').addEventListener('click', () => {
+        activeTradeFilter = null;
+        tradesLimit = 10;
+        loadDashboard();
+    });
+
+    document.getElementById('loadMoreTradesBtn').addEventListener('click', () => {
+        tradesLimit += 10;
+        loadDashboard();
+    });
+
+    document.querySelectorAll('[data-exposure-sort]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const key = btn.getAttribute('data-exposure-sort');
+            if (!key) {
+                return;
+            }
+            if (exposureSort.key === key) {
+                exposureSort.direction = exposureSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                exposureSort.key = key;
+                exposureSort.direction = key === 'symbol' ? 'asc' : 'desc';
+            }
+            loadDashboard();
+        });
+    });
+
     themeMedia.addEventListener('change', applyThemeFromSystemIfNeeded);
 }
 
@@ -166,7 +195,18 @@ function syncAccountSelector(accounts) {
 
 async function fetchAnalytics(accountId) {
     const scope = accountId || 'all';
-    const url = `${API_URL}/account/analytics?accountId=${encodeURIComponent(scope)}&days=365&monthShift=${monthShift}&yearShift=${yearShift}`;
+    const params = new URLSearchParams({
+        accountId: scope,
+        days: '365',
+        monthShift: String(monthShift),
+        yearShift: String(yearShift),
+        recentTradesLimit: String(tradesLimit),
+    });
+    if (activeTradeFilter) {
+        params.set('tradeFromMs', String(activeTradeFilter.fromMs));
+        params.set('tradeToMs', String(activeTradeFilter.toMs));
+    }
+    const url = `${API_URL}/account/analytics?${params.toString()}`;
     const res = await fetch(url);
     if (!res.ok) {
         throw new Error('Failed to load analytics');
@@ -185,13 +225,11 @@ function updateKpis(summary, periods, tradeMetrics) {
     const floatingEl = document.getElementById('floatingPnl');
     const dailyEl = document.getElementById('dailyPnl');
     const winRateEl = document.getElementById('winRate');
-    const marginEl = document.getElementById('marginLevel');
 
     equityEl.textContent = formatMoney(summary.equity);
     floatingEl.textContent = formatMoney(summary.floating_pnl);
     dailyEl.textContent = formatMoney(periods.today.pnl);
     winRateEl.textContent = formatPct(tradeMetrics.win_rate_pct);
-    marginEl.textContent = formatPct(summary.margin_level_pct);
 
     applyPnlClass(floatingEl, summary.floating_pnl);
     applyPnlClass(dailyEl, periods.today.pnl);
@@ -266,8 +304,8 @@ function updateTradesTable(trades) {
     }
 
     tbody.innerHTML = trades.map((trade) => {
-        const entryTime = formatDateTimeMs(trade.entry_time_ms);
-        const direction = toNum(trade.profit) > 0 ? 'SELL' : toNum(trade.profit) < 0 ? 'BUY' : '-';
+        const openTime = formatDateTimeMs(trade.entry_time_ms);
+        const closeTime = formatDateTimeMs(trade.exit_time_ms);
         return `
         <tr>
             <td>${trade.symbol}</td>
@@ -276,10 +314,71 @@ function updateTradesTable(trades) {
             <td>${Number(trade.size || 0).toFixed(2)}</td>
             <td class="${pnlClass(trade.profit || 0)}">${formatMoney(trade.profit || 0)}</td>
             <td>${trade.result || '-'}</td>
-            <td>${direction}</td>
-            <td>${entryTime}</td>
+            <td>${openTime}</td>
+            <td>${closeTime}</td>
         </tr>
     `}).join('');
+}
+
+function updateExposureTable(exposureRows) {
+    const tbody = document.getElementById('exposureTable');
+    const rows = Array.isArray(exposureRows) ? [...exposureRows] : [];
+    rows.sort((a, b) => {
+        if (exposureSort.key === 'symbol') {
+            const cmp = String(a.symbol || '').localeCompare(String(b.symbol || ''));
+            return exposureSort.direction === 'asc' ? cmp : -cmp;
+        }
+        const diff = toNum(a.size) - toNum(b.size);
+        return exposureSort.direction === 'asc' ? diff : -diff;
+    });
+
+    if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;">No exposure</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = rows.map((row) => `
+        <tr>
+            <td>${row.symbol || '-'}</td>
+            <td>${toNum(row.size).toFixed(2)}</td>
+        </tr>
+    `).join('');
+}
+
+function updateTradeControls(data) {
+    const filterLabel = document.getElementById('tradesFilterLabel');
+    const countInfo = document.getElementById('tradesCountInfo');
+    const resetBtn = document.getElementById('resetTradesFilterBtn');
+    const loadMoreBtn = document.getElementById('loadMoreTradesBtn');
+
+    filterLabel.textContent = activeTradeFilter ? `Filter: ${activeTradeFilter.label}` : 'Filter: None';
+    countInfo.textContent = `Showing ${toNum(data.trades_returned)} of ${toNum(data.trades_total_matching)} trades`;
+    resetBtn.disabled = !activeTradeFilter;
+    loadMoreBtn.disabled = toNum(data.trades_returned) >= toNum(data.trades_total_matching);
+}
+
+function setDayFilter(year, month, day) {
+    const from = new Date(year, month - 1, day, 0, 0, 0, 0).getTime();
+    const to = new Date(year, month - 1, day, 23, 59, 59, 999).getTime();
+    activeTradeFilter = {
+        fromMs: from,
+        toMs: to,
+        label: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+    };
+    tradesLimit = 10;
+    loadDashboard();
+}
+
+function setMonthFilter(year, month) {
+    const from = new Date(year, month - 1, 1, 0, 0, 0, 0).getTime();
+    const to = new Date(year, month, 0, 23, 59, 59, 999).getTime();
+    activeTradeFilter = {
+        fromMs: from,
+        toMs: to,
+        label: `${year}-${String(month).padStart(2, '0')}`,
+    };
+    tradesLimit = 10;
+    loadDashboard();
 }
 
 function destroyChart(chart) {
@@ -296,7 +395,6 @@ function updateCharts(data) {
     destroyChart(charts.equityCurve);
     destroyChart(charts.winLoss);
     destroyChart(charts.dailyPnl);
-    destroyChart(charts.symbolExposure);
 
     const positive = getChartColorVar('--pnl-positive');
     const negative = getChartColorVar('--pnl-negative');
@@ -327,9 +425,9 @@ function updateCharts(data) {
         },
     });
 
-    const wins = data.recent_trades.filter((t) => toNum(t.profit) > 0).length;
-    const losses = data.recent_trades.filter((t) => toNum(t.profit) < 0).length;
-    const neutralCount = data.recent_trades.length - wins - losses;
+    const wins = toNum(data.filtered_distribution?.wins);
+    const losses = toNum(data.filtered_distribution?.losses);
+    const neutralCount = toNum(data.filtered_distribution?.neutral);
 
     charts.winLoss = new Chart(document.getElementById('winLossChart'), {
         type: 'doughnut',
@@ -340,22 +438,16 @@ function updateCharts(data) {
         options: { responsive: true, maintainAspectRatio: false },
     });
 
-    const pnlByDay = new Map();
-    const from = Date.now() - (30 * 24 * 60 * 60 * 1000);
-    data.recent_trades.forEach((t) => {
-        const ts = toNum(t.exit_time_ms || t.entry_time_ms);
-        if (!ts || ts < from) {
-            return;
-        }
-        const key = formatDateMs(ts);
-        if (!key) {
-            return;
-        }
-        pnlByDay.set(key, (pnlByDay.get(key) || 0) + toNum(t.profit));
-    });
+    const dailyRows = Array.isArray(data.filtered_daily_pnl) ? data.filtered_daily_pnl : [];
+    const dailyLabels = dailyRows.map((r) => r.date || '');
+    const dailyValues = dailyRows.map((r) => toNum(r.pnl));
 
-    const dailyLabels = Array.from(pnlByDay.keys());
-    const dailyValues = Array.from(pnlByDay.values());
+    const dailyTitle = document.getElementById('dailyPnlChartTitle');
+    if (dailyTitle) {
+        dailyTitle.textContent = activeTradeFilter
+            ? `Daily PnL (${activeTradeFilter.label})`
+            : 'Daily PnL (Last 30 Days)';
+    }
 
     charts.dailyPnl = new Chart(document.getElementById('dailyPnlChart'), {
         type: 'bar',
@@ -373,24 +465,6 @@ function updateCharts(data) {
             plugins: { legend: { labels: { color: text } } },
         },
     });
-
-    charts.symbolExposure = new Chart(document.getElementById('symbolExposureChart'), {
-        type: 'bar',
-        data: {
-            labels: data.symbol_exposure.slice(0, 10).map((s) => s.symbol),
-            datasets: [{
-                label: 'Exposure',
-                data: data.symbol_exposure.slice(0, 10).map((s) => s.size),
-                backgroundColor: positive,
-            }],
-        },
-        options: {
-            indexAxis: 'y',
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { labels: { color: text } } },
-        },
-    });
 }
 
 function renderMonthlyCalendar(monthly) {
@@ -403,8 +477,9 @@ function renderMonthlyCalendar(monthly) {
     }
 
     monthly.days.forEach((d) => {
+        const canFilter = toNum(d.trades) > 0;
         cells.push(`
-            <div class="calendar-cell">
+            <div class="calendar-cell ${canFilter ? 'filterable' : ''}" ${canFilter ? `data-day="${d.day}"` : ''}>
                 <div class="day">${d.day}</div>
                 <div class="${pnlClass(d.pnl)}">${formatMoney(d.pnl)}</div>
                 <div>${d.trades} trades</div>
@@ -413,6 +488,15 @@ function renderMonthlyCalendar(monthly) {
     });
 
     target.innerHTML = cells.join('');
+
+    target.querySelectorAll('.calendar-cell.filterable[data-day]').forEach((el) => {
+        el.addEventListener('click', () => {
+            const day = toNum(el.getAttribute('data-day'));
+            if (day > 0) {
+                setDayFilter(monthly.year, monthly.month, day);
+            }
+        });
+    });
 }
 
 function renderYearlyCalendar(yearly) {
@@ -421,12 +505,21 @@ function renderYearlyCalendar(yearly) {
 
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     target.innerHTML = yearly.months.map((m) => `
-        <div class="year-card">
+        <div class="year-card ${toNum(m.trades) > 0 ? 'filterable' : ''}" ${toNum(m.trades) > 0 ? `data-month="${m.month}"` : ''}>
             <div class="month">${monthNames[m.month - 1]}</div>
             <div class="${pnlClass(m.pnl)}">${formatMoney(m.pnl)}</div>
             <div>${m.trades} trades</div>
         </div>
     `).join('');
+
+    target.querySelectorAll('.year-card.filterable[data-month]').forEach((el) => {
+        el.addEventListener('click', () => {
+            const month = toNum(el.getAttribute('data-month'));
+            if (month > 0) {
+                setMonthFilter(yearly.year, month);
+            }
+        });
+    });
 }
 
 async function loadDashboard() {
@@ -442,7 +535,9 @@ async function loadDashboard() {
         renderPeriodStats(data.periods);
         renderTradeMetrics(data.trade_metrics);
         updatePositionsTable(data.positions);
+        updateExposureTable(data.symbol_exposure);
         updateTradesTable(data.recent_trades);
+        updateTradeControls(data);
         updateCharts(data);
         renderMonthlyCalendar(data.calendars.monthly);
         renderYearlyCalendar(data.calendars.yearly);

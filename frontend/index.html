@@ -17,6 +17,7 @@
                 </select>
             </div>
             <div class="header-right">
+                <button id="resetTradesFilterBtn" class="icon-btn" type="button">Reset Filter</button>
                 <button id="themeToggleBtn" class="icon-btn" aria-label="Toggle theme">Theme</button>
             </div>
         </header>
@@ -45,10 +46,6 @@
                     <label>Win Rate</label>
                     <div class="value" id="winRate">0%</div>
                 </div>
-                <div class="card">
-                    <label>Margin Level</label>
-                    <div class="value" id="marginLevel">0%</div>
-                </div>
             </section>
 
             <section class="table-section">
@@ -66,20 +63,43 @@
                     <h3>Equity Curve</h3>
                     <canvas id="equityCurveChart"></canvas>
                 </div>
-                <div class="chart-container">
-                    <h3>Win/Loss Distribution</h3>
-                    <canvas id="winLossChart"></canvas>
+                <div class="table-section">
+                    <div class="exposure-head">
+                        <h3>Symbol Exposure</h3>
+                    </div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th><button class="sort-btn" type="button" data-exposure-sort="symbol">Symbol</button></th>
+                                <th><button class="sort-btn" type="button" data-exposure-sort="size">Exposure</button></th>
+                            </tr>
+                        </thead>
+                        <tbody id="exposureTable">
+                            <tr><td colspan="2" style="text-align:center;">No exposure</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </section>
 
             <section class="charts-row">
-                <div class="chart-container">
-                    <h3>Daily PnL (Last 30 Days)</h3>
-                    <canvas id="dailyPnlChart"></canvas>
-                </div>
-                <div class="chart-container">
-                    <h3>Symbol Exposure</h3>
-                    <canvas id="symbolExposureChart"></canvas>
+                <div class="table-section">
+                    <h3>Open Positions</h3>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Size</th>
+                                <th>Entry</th>
+                                <th>Current</th>
+                                <th>PnL</th>
+                                <th>SL</th>
+                                <th>TP</th>
+                            </tr>
+                        </thead>
+                        <tbody id="positionsTable">
+                            <tr><td colspan="7" style="text-align:center;">No open positions</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </section>
 
@@ -107,27 +127,13 @@
             </section>
 
             <section class="table-section">
-                <h3>Open Positions</h3>
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Symbol</th>
-                            <th>Size</th>
-                            <th>Entry</th>
-                            <th>Current</th>
-                            <th>PnL</th>
-                            <th>SL</th>
-                            <th>TP</th>
-                        </tr>
-                    </thead>
-                    <tbody id="positionsTable">
-                        <tr><td colspan="7" style="text-align:center;">No open positions</td></tr>
-                    </tbody>
-                </table>
-            </section>
-
-            <section class="table-section">
-                <h3>Recent Closed Trades</h3>
+                <div class="trades-head">
+                    <h3 id="tradesSectionTitle">Historic Trades</h3>
+                    <div class="trades-controls">
+                        <span id="tradesFilterLabel" class="trades-filter-label">Filter: None</span>
+                        <button id="loadMoreTradesBtn" class="icon-btn" type="button">Load More</button>
+                    </div>
+                </div>
                 <table class="data-table">
                     <thead>
                         <tr>
@@ -137,13 +143,26 @@
                             <th>Size</th>
                             <th>PnL</th>
                             <th>Result</th>
-                            <th>Entry Time</th>
+                            <th>Open Time</th>
+                            <th>Close Time</th>
                         </tr>
                     </thead>
                     <tbody id="tradesTable">
-                        <tr><td colspan="7" style="text-align:center;">No trades</td></tr>
+                        <tr><td colspan="8" style="text-align:center;">No trades</td></tr>
                     </tbody>
                 </table>
+                <div id="tradesCountInfo" class="trades-count-info">Showing 0 of 0 trades</div>
+            </section>
+
+            <section class="charts-row">
+                <div class="chart-container">
+                    <h3>Win/Loss Distribution</h3>
+                    <canvas id="winLossChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3 id="dailyPnlChartTitle">Daily PnL (Last 30 Days)</h3>
+                    <canvas id="dailyPnlChart"></canvas>
+                </div>
             </section>
         </main>
     </div>

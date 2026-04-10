@@ -158,7 +158,6 @@ const buildEmptyAnalyticsResponse = (
       equity: 0,
       balance: 0,
       floating_pnl: 0,
-      margin_level_pct: 0,
     },
     periods: {
       today: zeroPeriod,
@@ -177,6 +176,10 @@ const buildEmptyAnalyticsResponse = (
     },
     positions: [],
     recent_trades: [],
+    trades_total_matching: 0,
+    trades_returned: 0,
+    filtered_distribution: { wins: 0, losses: 0, neutral: 0 },
+    filtered_daily_pnl: [],
     equity_curve: [],
     symbol_exposure: [],
     calendars: {
@@ -200,8 +203,12 @@ router.get('/analytics', async (req: Request, res: Response) => {
   try {
     const accountIdParam = (req.query.accountId as string) || 'all';
     const curveDays = Math.min(parseInt(req.query.days as string, 10) || 90, 3650);
+    const recentTradesLimit = Math.min(Math.max(parseInt(req.query.recentTradesLimit as string, 10) || 10, 1), 500);
     const monthShift = parseInt(req.query.monthShift as string, 10) || 0;
     const yearShift = parseInt(req.query.yearShift as string, 10) || 0;
+    const tradeFromMs = Number(req.query.tradeFromMs);
+    const tradeToMs = Number(req.query.tradeToMs);
+    const hasTradeFilter = Number.isFinite(tradeFromMs) || Number.isFinite(tradeToMs);
     const nowMs = Date.now();
 
     const allAccounts = await accountQueries.list();
@@ -258,12 +265,46 @@ router.get('/analytics', async (req: Request, res: Response) => {
     }
 
     const floatingPnl = positions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
-    const freeMargin = Math.max(0, equity - Math.max(0, floatingPnl));
-    const marginLevelPct = equity > 0 ? (freeMargin / equity) * 100 : 0;
-    const recentTrades = trades
+    const sortedTrades = trades
       .slice()
-      .sort((a, b) => (b.exit_time_ms || b.entry_time_ms) - (a.exit_time_ms || a.entry_time_ms))
-      .slice(0, 50);
+      .sort((a, b) => (b.exit_time_ms || b.entry_time_ms) - (a.exit_time_ms || a.entry_time_ms));
+
+    const filteredTrades = sortedTrades.filter((t) => {
+      const ts = t.exit_time_ms || t.entry_time_ms || 0;
+      if (Number.isFinite(tradeFromMs) && ts < tradeFromMs) {
+        return false;
+      }
+      if (Number.isFinite(tradeToMs) && ts > tradeToMs) {
+        return false;
+      }
+      return true;
+    });
+    const recentTrades = filteredTrades.slice(0, recentTradesLimit);
+    const distribution = {
+      wins: filteredTrades.filter((t) => (t.profit || 0) > 0).length,
+      losses: filteredTrades.filter((t) => (t.profit || 0) < 0).length,
+      neutral: filteredTrades.filter((t) => (t.profit || 0) === 0).length,
+    };
+
+    const dailySource = hasTradeFilter
+      ? filteredTrades
+      : filteredTrades.filter((t) => {
+          const ts = t.exit_time_ms || t.entry_time_ms || 0;
+          return ts >= (nowMs - (30 * 24 * 60 * 60 * 1000));
+        });
+
+    const filteredDailyMap = new Map<string, number>();
+    dailySource.forEach((t) => {
+      const ts = t.exit_time_ms || t.entry_time_ms || 0;
+      if (!ts) {
+        return;
+      }
+      const key = dayKey(ts);
+      filteredDailyMap.set(key, (filteredDailyMap.get(key) || 0) + (t.profit || 0));
+    });
+    const filteredDailyPnl = Array.from(filteredDailyMap.entries())
+      .map(([date, pnl]) => ({ date, pnl }))
+      .sort((a, b) => a.date.localeCompare(b.date));
 
     const periods = {
       today: calcPeriodStats(trades, getRangeStart('today', nowMs), nowMs),
@@ -347,12 +388,15 @@ router.get('/analytics', async (req: Request, res: Response) => {
         equity,
         balance,
         floating_pnl: floatingPnl,
-        margin_level_pct: marginLevelPct,
       },
       periods,
       trade_metrics: tradeMetrics,
       positions,
       recent_trades: recentTrades,
+      trades_total_matching: filteredTrades.length,
+      trades_returned: recentTrades.length,
+      filtered_distribution: distribution,
+      filtered_daily_pnl: filteredDailyPnl,
       equity_curve: equityCurve,
       symbol_exposure: symbolExposure,
       calendars: {

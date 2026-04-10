@@ -39,7 +39,10 @@ router.post(
 
       const { positions, closed_trades, account: accountData, sync_id, ea_latest_closed_time_ms, ea_latest_closed_deal_id } = req.body;
 
-      // Upsert positions
+      // Positions payload is a full snapshot; clear stale rows first.
+      await positionQueries.deleteByAccount(accountId);
+
+      // Reinsert current open positions.
       for (const pos of positions) {
         await positionQueries.upsertPosition({
           account_id: accountId,
@@ -55,23 +58,27 @@ router.post(
         });
       }
 
-      // Insert closed trades (idempotent)
-      for (const trade of closed_trades) {
-        const tradeRecord: Omit<Trade, 'id'> = {
-          account_id: accountId,
-          symbol: trade.symbol,
-          size: trade.volume,
-          entry_price: trade.entry,
-          exit_price: trade.exit,
-          profit: trade.profit,
-          profit_pct: trade.volume > 0 ? (trade.profit / (trade.volume * trade.entry)) * 100 : 0,
-          entry_time_ms: trade.entry_time_ms,
-          exit_time_ms: trade.exit_time_ms,
-          duration_sec: trade.duration_sec,
-          result: trade.profit > 0 ? 'win' : trade.profit < 0 ? 'loss' : 'breakeven',
-          close_method: trade.method,
-        };
-        await tradeQueries.insertTrade(tradeRecord);
+      // Closed trades payload from EA is a full snapshot of MT5 history.
+      // Replace server-side history when non-empty so all-time PnL matches MT5 exactly.
+      if (closed_trades.length > 0) {
+        await tradeQueries.deleteByAccount(accountId);
+        for (const trade of closed_trades) {
+          const tradeRecord: Omit<Trade, 'id'> = {
+            account_id: accountId,
+            symbol: trade.symbol,
+            size: trade.volume,
+            entry_price: trade.entry,
+            exit_price: trade.exit,
+            profit: trade.profit,
+            profit_pct: trade.volume > 0 ? (trade.profit / (trade.volume * trade.entry)) * 100 : 0,
+            entry_time_ms: trade.entry_time_ms,
+            exit_time_ms: trade.exit_time_ms,
+            duration_sec: trade.duration_sec,
+            result: trade.profit > 0 ? 'win' : trade.profit < 0 ? 'loss' : 'breakeven',
+            close_method: trade.method,
+          };
+          await tradeQueries.insertTrade(tradeRecord);
+        }
       }
 
       // Create daily snapshot

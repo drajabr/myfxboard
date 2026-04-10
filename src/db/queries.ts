@@ -79,6 +79,10 @@ export const positionQueries = {
 };
 
 export const tradeQueries = {
+  async deleteByAccount(account_id: string) {
+    await query('DELETE FROM trades WHERE account_id = $1', [account_id]);
+  },
+
   async insertTrade(trade: Omit<Trade, 'id'>) {
     const result = await query(
       `INSERT INTO trades (account_id, symbol, size, entry_price, exit_price, profit, profit_pct, entry_time_ms, exit_time_ms, duration_sec, result, close_method)
