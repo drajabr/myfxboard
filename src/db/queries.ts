@@ -19,6 +19,20 @@ export const accountQueries = {
     return result.rows[0];
   },
 
+  async ensureByAccountNumber(account_id: string, shared_secret: string, broker: string = 'MT5') {
+    const now = Date.now();
+    const account_name = `MT5 ${account_id}`;
+    const secret_hash = crypto.createHash('sha256').update(shared_secret).digest('hex');
+    const result = await query(
+      `INSERT INTO accounts (account_id, account_name, secret_hash, broker, created_at, last_sync_at, history_in_sync)
+       VALUES ($1, $2, $3, $4, $5, $6, false)
+       ON CONFLICT (account_id) DO UPDATE SET last_sync_at = EXCLUDED.last_sync_at
+       RETURNING *`,
+      [account_id, account_name, secret_hash, broker, now, now]
+    );
+    return result.rows[0];
+  },
+
   async updateWatermarks(
     account_id: string,
     last_closed_deal_id: string,
@@ -89,6 +103,14 @@ export const tradeQueries = {
     const result = await query(
       'SELECT * FROM trades WHERE account_id = $1 AND entry_time_ms >= $2 ORDER BY entry_time_ms ASC LIMIT $3',
       [account_id, from_time_ms, limit]
+    );
+    return result.rows;
+  },
+
+  async findAllByAccount(account_id: string): Promise<Trade[]> {
+    const result = await query(
+      'SELECT * FROM trades WHERE account_id = $1 ORDER BY entry_time_ms DESC',
+      [account_id]
     );
     return result.rows;
   },

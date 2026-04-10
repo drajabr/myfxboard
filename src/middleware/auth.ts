@@ -1,6 +1,5 @@
 import { Response, NextFunction } from 'express';
 import crypto from 'crypto';
-import { accountQueries } from '../db/queries.js';
 
 declare global {
   namespace Express {
@@ -13,17 +12,18 @@ declare global {
 
 /**
  * Validate HMAC-SHA256 signed ingestion request
- * Authorization header: "HMAC-SHA256 {account_id}:{signature}"
+ * Authorization header: "HMAC-SHA256 {signature}"
  * X-Signature-Timestamp: unix milliseconds
- * Expected signature over: {account_id}:{timestamp}
+ * Expected signature over: {account_number}:{timestamp}
  */
 export const validateIngestionAuth = async (req: any, _res: Response, next: NextFunction) => {
   try {
     const authHeader = req.headers.authorization || '';
     const timestamp = req.headers['x-signature-timestamp'];
+    const accountNumber = req.body?.account_number;
 
-    if (!authHeader || !timestamp) {
-      return _res.status(401).json({ error: 'Missing authorization or timestamp header' });
+    if (!authHeader || !timestamp || accountNumber === undefined || accountNumber === null) {
+      return _res.status(401).json({ error: 'Missing authorization, timestamp, or account_number' });
     }
 
     const [scheme, creds] = authHeader.split(' ');
@@ -31,8 +31,8 @@ export const validateIngestionAuth = async (req: any, _res: Response, next: Next
       return _res.status(401).json({ error: 'Invalid authorization scheme' });
     }
 
-    const [accountId, signature] = creds.split(':');
-    if (!accountId || !signature) {
+    const signature = creds.trim();
+    if (!signature) {
       return _res.status(401).json({ error: 'Invalid credentials format' });
     }
 
@@ -45,58 +45,30 @@ export const validateIngestionAuth = async (req: any, _res: Response, next: Next
       return _res.status(401).json({ error: 'Request timestamp out of window' });
     }
 
-    // Fetch account and verify secret
-    const account = await accountQueries.findById(accountId);
-    if (!account) {
-      return _res.status(404).json({ error: 'Account not found' });
+    const sharedSecret = process.env.CONNECTOR_SHARED_SECRET;
+    if (!sharedSecret) {
+      return _res.status(500).json({ error: 'CONNECTOR_SHARED_SECRET is not configured' });
     }
 
     // Recompute expected signature
-    const message = `${accountId}:${timestampMs}`;
-    const expectedSignature = crypto.createHmac('sha256', account.secret_hash).update(message).digest('hex');
+    const normalizedAccountNumber = String(accountNumber).trim();
+    const message = `${normalizedAccountNumber}:${timestampMs}`;
+    const expectedHmacSignature = crypto.createHmac('sha256', sharedSecret).update(message).digest('hex');
+    const expectedCompatSignature = `dashboard_v2_${normalizedAccountNumber}_${timestampMs}_${sharedSecret}`;
 
-    // Constant-time comparison to prevent timing attacks
-    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
+    const hmacMatch = signature.length === expectedHmacSignature.length
+      && crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedHmacSignature));
+    const compatMatch = signature === expectedCompatSignature;
+
+    if (!hmacMatch && !compatMatch) {
       return _res.status(401).json({ error: 'Invalid signature' });
     }
 
-    req.accountId = accountId;
+    req.accountId = normalizedAccountNumber;
     req.timestamp = timestampMs;
     next();
   } catch (error) {
     console.error('Auth validation error', error);
     _res.status(500).json({ error: 'Auth validation failed' });
   }
-};
-
-/**
- * Validate unlock token for settings endpoints
- * Bearer token in Authorization header
- */
-export const validateUnlockToken = async (req: any, _res: Response, next: NextFunction) => {
-  try {
-    const authHeader = req.headers.authorization || '';
-    const match = authHeader.match(/Bearer\s+(\S+)/);
-
-    if (!match || !match[1]) {
-      // Settings are readonly, allow but mark as locked
-      req.unlocked = false;
-      return next();
-    }
-
-    // TODO: Validate token against database unlock_sessions table
-    req.unlocked = true;
-    next();
-  } catch (error) {
-    console.error('Unlock token validation error', error);
-    req.unlocked = false;
-    next();
-  }
-};
-
-export const requireUnlocked = (_req: any, _res: Response, next: NextFunction) => {
-  if (!_req.unlocked) {
-    return _res.status(403).json({ error: 'Settings locked. Unlock required.' });
-  }
-  next();
 };

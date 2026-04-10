@@ -6,23 +6,35 @@ import { Trade } from '../types/index.js';
 
 const router = Router();
 
+const resolveAccountId = (req: Request) => String(req.accountId || req.body?.account_number || '').trim();
+
+const assertSharedSecret = (res: Response) => {
+  const sharedSecret = process.env.CONNECTOR_SHARED_SECRET;
+  if (!sharedSecret) {
+    res.status(500).json({ status: 'error', error: 'CONNECTOR_SHARED_SECRET is not configured' });
+    return null;
+  }
+  return sharedSecret;
+};
+
 /**
- * POST /api/ingestion/:accountId
+ * POST /api/ingestion
  * EA sends sync data here every N seconds
  * Requires HMAC-SHA256 signed request
  */
 router.post(
-  '/:accountId',
+  '/',
   validateIngestionAuth,
   validateRequestBody(ingestPayloadSchema),
   async (req: Request, res: Response) => {
     try {
-      const { accountId } = req.params;
-
-      const account = await accountQueries.findById(accountId);
-      if (!account) {
-        return res.status(404).json({ error: 'Account not found' });
+      const accountId = resolveAccountId(req);
+      const sharedSecret = assertSharedSecret(res);
+      if (!sharedSecret) {
+        return;
       }
+
+      const account = await accountQueries.ensureByAccountNumber(accountId, sharedSecret);
 
       const { positions, closed_trades, account: accountData, sync_id, ea_latest_closed_time_ms, ea_latest_closed_deal_id } = req.body;
 
@@ -101,16 +113,21 @@ router.post(
 );
 
 /**
- * POST /api/ingestion/:accountId/backfill
+ * POST /api/ingestion/backfill
  * EA sends closed trade history chunks for backfill
  */
 router.post(
-  '/:accountId/backfill',
+  '/backfill',
   validateIngestionAuth,
   validateRequestBody(ingestPayloadSchema),
   async (req: Request, res: Response) => {
     try {
-      const { accountId } = req.params;
+      const accountId = resolveAccountId(req);
+      const sharedSecret = assertSharedSecret(res);
+      if (!sharedSecret) {
+        return;
+      }
+      await accountQueries.ensureByAccountNumber(accountId, sharedSecret);
       const { closed_trades, sync_id } = req.body;
 
       // Insert closed trades (idempotent -- duplicates rejected)

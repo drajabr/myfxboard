@@ -10,7 +10,7 @@
 #include <Trade\PositionInfo.mqh>
 #include <Trade\OrderInfo.mqh>
 #include <Trade\DealInfo.mqh>
-#include "DashboardConnector.mqh"
+#include "myfxboard-Connector.mqh"
 
 #define PARTIAL_MAGIC 999999
 #define DEFAULT_TIMER_BASE_INTERVAL_MS 50
@@ -132,8 +132,7 @@ input int  InpPriceDecimals = 2;                    // Decimals
 input group "Dashboard Sync - Real-time position sync to web dashboard"
 input bool   InpEnableDashboardSync = false;         // Enable Dashboard Sync
 input string InpDashboardUrl = "http://localhost:3000";  // Server URL
-input string InpDashboardAccountId = "";             // Account ID (from dashboard)
-input string InpDashboardPSK = "";                   // Pre-Shared Key (from dashboard)
+input string InpDashboardPSK = "";                   // Shared connector secret
 input int    InpDashboardSyncIntervalSec = 3;        // Sync Interval (seconds)
 input bool   InpDashboardDebugLog = false;           // Debug Logging
 
@@ -2545,7 +2544,6 @@ int OnInit() {
    if(InpEnableDashboardSync) {
       DashboardConnector::Init(
          InpDashboardUrl,
-         InpDashboardAccountId,
          InpDashboardPSK,
          InpDashboardSyncIntervalSec,
          InpDashboardDebugLog

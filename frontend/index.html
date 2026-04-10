@@ -9,7 +9,6 @@
 </head>
 <body>
     <div class="app-container">
-        <!-- Header -->
         <header class="header">
             <div class="header-left">
                 <h1>myfxboard</h1>
@@ -18,14 +17,18 @@
                 </select>
             </div>
             <div class="header-right">
-                <span id="lockStatus" class="lock-badge locked">🔒 Readonly</span>
-                <button id="unlockBtn" class="unlock-btn">🔓 Settings</button>
+                <button id="themeToggleBtn" class="icon-btn" aria-label="Toggle theme">Theme</button>
+                <button id="unlockBtn" class="unlock-btn">Settings</button>
             </div>
         </header>
 
-        <!-- Main Content -->
         <main class="main-content">
-            <!-- KPI Cards -->
+            <section class="status-strip">
+                <div id="lastRefresh">Last refresh: --</div>
+                <div id="accountsCount">Accounts: 0</div>
+                <div id="positionsCount">Open positions: 0</div>
+            </section>
+
             <section class="kpi-cards">
                 <div class="card">
                     <label>Equity</label>
@@ -36,7 +39,7 @@
                     <div class="value" id="floatingPnl">$ 0.00</div>
                 </div>
                 <div class="card">
-                    <label>Daily PnL</label>
+                    <label>Today PnL</label>
                     <div class="value" id="dailyPnl">$ 0.00</div>
                 </div>
                 <div class="card">
@@ -49,10 +52,19 @@
                 </div>
             </section>
 
-            <!-- Charts Row 1 -->
+            <section class="table-section">
+                <h3>Historical PnL Windows</h3>
+                <div class="metric-grid" id="periodStatsGrid"></div>
+            </section>
+
+            <section class="table-section">
+                <h3>Trade Metrics</h3>
+                <div class="metric-grid" id="tradeMetricsGrid"></div>
+            </section>
+
             <section class="charts-row">
                 <div class="chart-container">
-                    <h3>Equity Curve (90 days)</h3>
+                    <h3>Equity Curve</h3>
                     <canvas id="equityCurveChart"></canvas>
                 </div>
                 <div class="chart-container">
@@ -61,10 +73,9 @@
                 </div>
             </section>
 
-            <!-- Charts Row 2 -->
             <section class="charts-row">
                 <div class="chart-container">
-                    <h3>Daily PnL (30 days)</h3>
+                    <h3>Daily PnL (Last 30 Days)</h3>
                     <canvas id="dailyPnlChart"></canvas>
                 </div>
                 <div class="chart-container">
@@ -73,7 +84,29 @@
                 </div>
             </section>
 
-            <!-- Positions Table -->
+            <section class="charts-row">
+                <div class="table-section calendar-card">
+                    <div class="calendar-head">
+                        <h3 id="monthCalendarTitle">Monthly Calendar</h3>
+                        <div class="calendar-nav">
+                            <button id="monthPrevBtn" class="icon-btn">&lt;</button>
+                            <button id="monthNextBtn" class="icon-btn">&gt;</button>
+                        </div>
+                    </div>
+                    <div id="monthCalendar" class="calendar-grid"></div>
+                </div>
+                <div class="table-section calendar-card">
+                    <div class="calendar-head">
+                        <h3 id="yearCalendarTitle">Yearly Calendar</h3>
+                        <div class="calendar-nav">
+                            <button id="yearPrevBtn" class="icon-btn">&lt;</button>
+                            <button id="yearNextBtn" class="icon-btn">&gt;</button>
+                        </div>
+                    </div>
+                    <div id="yearCalendar" class="year-grid"></div>
+                </div>
+            </section>
+
             <section class="table-section">
                 <h3>Open Positions</h3>
                 <table class="data-table">
@@ -94,7 +127,6 @@
                 </table>
             </section>
 
-            <!-- Trades Table -->
             <section class="table-section">
                 <h3>Recent Closed Trades</h3>
                 <table class="data-table">
@@ -117,7 +149,6 @@
         </main>
     </div>
 
-    <!-- Settings Modal -->
     <div id="settingsModal" class="modal hidden">
         <div class="modal-content">
             <span class="close">&times;</span>
@@ -137,7 +168,7 @@
                 </div>
                 <div class="form-group">
                     <label for="refreshInterval">Refresh Interval (ms):</label>
-                    <input type="number" id="refreshInterval" value="3000" min="1000" max="60000">
+                    <input type="number" id="refreshInterval" value="5000" min="1000" max="60000">
                 </div>
                 <button onclick="saveSettings()">Save</button>
             </div>

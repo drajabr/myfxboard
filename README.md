@@ -47,12 +47,12 @@ Use the included full EA:
 
 - `connectors/smaGUY Trade Manger-myfxboard.mq5`
 
-### 1. Create account in dashboard
+### 1. Configure shared connector secret
 
-1. Open Settings.
-2. Unlock with `MASTER_TOKEN` from `.env`.
-3. Create an account ID (example: `EURUSD_001`).
-4. Copy generated secret key.
+1. Set `CONNECTOR_SHARED_SECRET` in `.env`.
+2. Restart server if already running.
+3. No dashboard account creation is needed.
+4. Account records are auto-created from connector account number.
 
 ### 2. Configure EA inputs
 
@@ -61,8 +61,7 @@ Set these values in MT5 inputs:
 ```mql5
 InpEnableDashboardSync = true
 InpDashboardUrl = "http://localhost:3000"
-InpDashboardAccountId = "EURUSD_001"
-InpDashboardPSK = "<secret key from dashboard>"
+InpDashboardPSK = "<CONNECTOR_SHARED_SECRET from .env>"
 InpDashboardSyncIntervalSec = 3
 InpDashboardDebugLog = true
 ```
@@ -75,8 +74,8 @@ InpDashboardDebugLog = true
 
 ### Troubleshooting
 
-- Confirm account ID in EA matches dashboard account ID exactly.
-- Confirm PSK in EA matches generated dashboard key.
+- Confirm `InpDashboardPSK` exactly matches `CONNECTOR_SHARED_SECRET`.
+- Confirm connector can POST to `/api/ingestion`.
 - Check backend logs: `docker compose logs server`.
 
 ## Core commands
@@ -95,9 +94,8 @@ npm run lint
 
 - `GET /api/accounts`
 - `GET /api/account/{accountId}/dashboard`
-- `POST /api/account/create`
-- `POST /api/ingestion/{accountId}`
-- `POST /api/ingestion/{accountId}/backfill`
+- `POST /api/ingestion`
+- `POST /api/ingestion/backfill`
 
 ## Project layout
 

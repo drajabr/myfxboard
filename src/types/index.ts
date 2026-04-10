@@ -80,6 +80,7 @@ export interface SyncLog {
 }
 
 export interface IngestPayload {
+  account_number: string;
   positions: Array<{
     symbol: string;
     volume: number;

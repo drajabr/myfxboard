@@ -39,6 +39,9 @@ export const validateQueryParams = (schema: z.ZodSchema) => {
 
 // Validation schemas for ingestion payload
 export const ingestPayloadSchema = z.object({
+  account_number: z.union([z.string(), z.number()]).transform((v) => String(v).trim()).refine((v) => v.length > 0, {
+    message: 'account_number is required',
+  }),
   positions: z.array(z.object({
     symbol: z.string(),
     volume: z.number().positive(),
@@ -64,24 +67,8 @@ export const ingestPayloadSchema = z.object({
     balance: z.number(),
     margin_used: z.number(),
   }),
-  sync_id: z.string().uuid(),
+  sync_id: z.string().min(1),
   ea_latest_closed_time_ms: z.number(),
   ea_latest_closed_deal_id: z.string(),
   open_positions_hash: z.string(),
-});
-
-export const createAccountSchema = z.object({
-  account_id: z.string().min(3).max(50),
-  secret_key: z.string().min(16),
-  account_name: z.string().max(100),
-});
-
-export const rotateSecretSchema = z.object({
-  new_secret_key: z.string().min(16),
-});
-
-export const settingsUpdateSchema = z.object({
-  theme: z.enum(['light', 'dark']).optional(),
-  refresh_interval_ms: z.number().min(1000).max(60000).optional(),
-  account_nickname: z.string().max(100).optional(),
 });

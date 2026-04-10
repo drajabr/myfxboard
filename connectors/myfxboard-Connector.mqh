@@ -11,7 +11,6 @@
 class DashboardConnector {
 private:
    static string   s_url;
-   static string   s_account_id;
    static string   s_psk;
    static int      s_sync_interval_ms;
    static ulong    s_last_sync_ms;
@@ -23,9 +22,8 @@ private:
 
 public:
    // Initialize connector with dashboard server details
-   static void Init(string url, string account_id, string psk, int interval_sec, bool debug = false) {
+   static void Init(string url, string psk, int interval_sec, bool debug = false) {
       s_url = url;
-      s_account_id = account_id;
       s_psk = psk;
       s_sync_interval_ms = interval_sec * 1000;
       s_debug_log = debug;
@@ -35,13 +33,13 @@ public:
       s_error_count = 0;
       
       if (s_debug_log) {
-         Print("[DashboardConnector] Initialized: url=", s_url, " account=", s_account_id, " interval=", interval_sec, "s");
+         Print("[DashboardConnector] Initialized: url=", s_url, " interval=", interval_sec, "s");
       }
    }
 
    // Call this periodically to sync data
    static bool Sync() {
-      if (s_url == "" || s_account_id == "" || s_psk == "") {
+      if (s_url == "" || s_psk == "") {
          return false;  // Not configured
       }
 
@@ -59,22 +57,15 @@ public:
          return false;  // Not yet time
       }
 
-      // Guard: Verify account ID matches
       string current_account = IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN));
-      if (current_account != s_account_id) {
-         if (s_debug_log) {
-            Print("[DashboardConnector] Account mismatch: current=", current_account, " configured=", s_account_id);
-         }
-         return false;
-      }
 
       s_last_sync_ms = now_ms;
       s_in_flight = true;
 
       // Build payload and send
-      string payload = BuildPayload(now_ms);
-      string signature = CreateSignature(s_account_id, now_ms, s_psk);
-      PostSync(payload, signature, now_ms);
+      string payload = BuildPayload(now_ms, current_account);
+      string signature = CreateSignature(current_account, now_ms, s_psk);
+      PostSync(payload, current_account, signature, now_ms);
 
       return true;
    }
@@ -88,7 +79,7 @@ public:
 
 private:
    // Build JSON payload with current positions and account data
-   static string BuildPayload(ulong sync_time_ms) {
+   static string BuildPayload(ulong sync_time_ms, string account_number) {
       string positions_json = "[";
       bool first_pos = true;
 
@@ -108,7 +99,7 @@ private:
          ENUM_POSITION_TYPE dir = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
 
          positions_json += StringFormat(
-            "{\"symbol\":\"%s\",\"volume\":%.2f,\"open_price\":%.5f,\"sl\":%.5f,\"tp\":%.5f,\"open_time_ms\":%lld,\"pnl\":%.2f,\"direction\":%d}",
+            "{\"symbol\":\"%s\",\"volume\":%.2f,\"open_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"open_time_ms\":%lld,\"pnl\":%.2f,\"direction\":%d}",
             symbol, volume, open_price, sl, tp, open_time_ms, pnl, (int)dir
          );
       }
@@ -127,8 +118,8 @@ private:
       );
 
       string payload = StringFormat(
-         "{\"positions\":%s,\"closed_trades\":[],\"account\":%s,\"sync_id\":\"%lld\",\"ea_latest_closed_time_ms\":%lld,\"ea_latest_closed_deal_id\":\"\"}",
-         positions_json, account_json, sync_time_ms, sync_time_ms
+         "{\"account_number\":\"%s\",\"positions\":%s,\"closed_trades\":[],\"account\":%s,\"sync_id\":\"%lld\",\"ea_latest_closed_time_ms\":%lld,\"ea_latest_closed_deal_id\":\"\",\"open_positions_hash\":\"\"}",
+         account_number, positions_json, account_json, sync_time_ms, sync_time_ms
       );
 
       if (s_debug_log) {
@@ -139,20 +130,19 @@ private:
    }
 
    // Create HMAC signature
-   static string CreateSignature(string account_id, ulong timestamp_ms, string psk) {
-      // Simplified signature for MVP (production needs real HMAC-SHA256)
-      return "dashboard_v1_" + IntegerToString(timestamp_ms);
+   static string CreateSignature(string account_number, ulong timestamp_ms, string psk) {
+      return "dashboard_v2_" + account_number + "_" + IntegerToString((int)timestamp_ms) + "_" + psk;
    }
 
    // Post sync request to server
-   static void PostSync(string payload, string signature, long timestamp_ms) {
-      string url = s_url + "/api/ingestion/" + s_account_id;
+   static void PostSync(string payload, string account_number, string signature, long timestamp_ms) {
+      string url = s_url + "/api/ingestion";
 
       char request_data[];
       char response_data[];
 
       string headers = "Content-Type: application/json\r\n";
-      headers += "Authorization: HMAC-SHA256 " + s_account_id + ":" + signature + "\r\n";
+      headers += "Authorization: HMAC-SHA256 " + signature + "\r\n";
       headers += "X-Signature-Timestamp: " + (string)timestamp_ms + "\r\n";
 
       int payload_len = StringLen(payload);
@@ -173,7 +163,7 @@ private:
          s_in_flight = false;
       } else {
          if (s_debug_log) {
-            Print("[DashboardConnector] Sync sent (", StringLen(payload), " bytes, response=", res, ")");
+            Print("[DashboardConnector] Sync sent for account ", account_number, " (", StringLen(payload), " bytes, response=", res, ")");
          }
          s_success_count++;
          s_in_flight = false;
@@ -183,7 +173,6 @@ private:
 
 // Static member initialization
 string   DashboardConnector::s_url = "";
-string   DashboardConnector::s_account_id = "";
 string   DashboardConnector::s_psk = "";
 int      DashboardConnector::s_sync_interval_ms = 3000;
 ulong    DashboardConnector::s_last_sync_ms = 0;
