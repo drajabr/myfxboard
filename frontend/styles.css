@@ -130,6 +130,23 @@ body {
     display: inline-block;
     background: var(--pnl-neutral);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--surface-alt) 70%, transparent);
+    transition: background-color 180ms ease, box-shadow 180ms ease;
+}
+
+@keyframes statusHeartbeat {
+    0%,
+    100% {
+        filter: saturate(1);
+        transform: scale(1);
+    }
+    45% {
+        filter: saturate(1.35);
+        transform: scale(1.06);
+    }
+    70% {
+        filter: saturate(1.1);
+        transform: scale(1.02);
+    }
 }
 
 .status-dot--idle {
@@ -138,14 +155,19 @@ body {
 
 .status-dot--loading {
     background: #d69f1a;
+    animation: statusHeartbeat 850ms ease-in-out infinite;
+    box-shadow: 0 0 0 2px color-mix(in srgb, #d69f1a 25%, var(--surface-alt));
 }
 
 .status-dot--ok {
     background: #27a35f;
+    animation: statusHeartbeat 1100ms ease-in-out infinite;
+    box-shadow: 0 0 0 2px color-mix(in srgb, #27a35f 25%, var(--surface-alt));
 }
 
 .status-dot--error {
     background: var(--pnl-negative);
+    animation: none;
 }
 
 .icon-btn,
@@ -194,8 +216,28 @@ body {
 
 .summary-spotlight {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 220px));
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 0.75rem;
+}
+
+.spotlight-card--equity {
+    padding: 0.75rem;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface-alt);
+    box-shadow: none;
+}
+
+.spotlight-card--equity .value {
+    font-size: 1.05rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.spotlight-card--equity .floating-pnl-label {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    margin-top: 0.35rem;
 }
 
 .metric-card--spotlight .value {
@@ -536,6 +578,15 @@ body {
     margin-top: 0.6rem;
 }
 
+.trades-footer {
+    margin-top: 0.6rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+
 .icon-btn:disabled {
     opacity: 0.55;
     cursor: not-allowed;
@@ -586,7 +637,7 @@ body {
     }
 
     .spotlight-card--equity {
-        width: min(100%, 280px);
+        width: 100%;
     }
 
     .year-grid {
