@@ -11,12 +11,11 @@ smaGUY Trade Manager → 3-second sync → Dashboard Server → Web UI
 
 ```
 myfxboard/
-├── connectors/                              # Standalone connector module
-│   ├── DashboardConnector.mqh               # Reusable MQL5 connector
-│   ├── smaGUY Trade Manger-myfxboard.mq5    # Full Trade Manager (migrated)
-│   ├── smaGUY_with_connector.mq5            # Minimal example integration
-│   ├── README.md                            # Connector documentation
-│   └── QUICK-START.md                       # Quick integration guide
+├── connectors/                              # Standalone full EA package
+│   ├── DashboardConnector.mqh               # Internal sync helper for full EA
+│   ├── smaGUY Trade Manger-myfxboard.mq5    # Full Trade Manager (supported EA)
+│   ├── README.md                            # Full EA package notes
+│   └── QUICK-START.md                       # Full EA quick start
 │
 ├── src/                                     # TypeScript backend
 │   ├── index.ts                             # Express app entry point
@@ -99,7 +98,7 @@ In MetaTrader 5, open your EA inputs:
 
 ## 🏗️ Architecture
 
-## 📦 Connector Module (Reusable)
+## 📦 MT5 Integration
 ### Services
 - **postgres:16** (Alpine) - Data layer with 8 normalized tables
 - **server** (Node.js 20 Alpine) - Express.js server serving API and frontend

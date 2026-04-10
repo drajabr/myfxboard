@@ -1,10 +1,8 @@
 //+------------------------------------------------------------------+
 //|                     Dashboard Connector v1.0                     |
-//|                  Standalone sync module for myfxboard            |
+//|             Internal sync helper for myfxboard full EA           |
 //|                                                                  |
-//| How to use: #include this in your EA, then call:               |
-//|   DashboardConnector::Init(url, account_id, psk, interval);    |
-//|   DashboardConnector::Sync();  // Call every tick or timer      |
+//| Maintained as part of the standalone full EA package only.       |
 //+------------------------------------------------------------------+
 
 #ifndef DASHBOARD_CONNECTOR_H

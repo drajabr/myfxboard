@@ -1,6 +1,6 @@
 # 🎉 Dashboard Integration Complete - EA Ready
 
-Your smaGUY Trade Manager EA has been fully migrated into the connectors folder and integrated with the myfxboard connector module.
+Your smaGUY Trade Manager EA has been fully prepared as a standalone myfxboard edition in the connectors folder.
 
 ## ✅ What Was Integrated
 
@@ -16,10 +16,10 @@ input int    InpDashboardSyncIntervalSec = 3;
 input bool   InpDashboardDebugLog = false;
 ```
 
-### 2. Connector Module
-- `connectors/DashboardConnector.mqh` handles payload/signature/post flow
-- `DashboardConnector::Init(...)` is called in `OnInit()`
-- `DashboardConnector::Sync()` is called in `OnTimer()`
+### 2. Built-in Sync Engine
+- `connectors/DashboardConnector.mqh` handles payload/signature/post flow internally
+- Sync is initialized in `OnInit()`
+- Sync is triggered in `OnTimer()`
 
 ### 3. Event Hooks
 - **OnInit()** initializes connector when sync is enabled
@@ -124,7 +124,7 @@ Example log output:
 - Includes `DashboardConnector.mqh`
 - Initializes connector in `OnInit()`
 - Calls `DashboardConnector::Sync()` in `OnTimer()`
-- Uses connector module for payload/signature/post logic
+- Uses built-in sync implementation for payload/signature/post logic
 
 **Status**: Full Trade Manager migrated and integrated in connectors folder
 

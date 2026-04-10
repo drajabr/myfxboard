@@ -31,9 +31,9 @@ Your myfxboard repository now contains **everything needed** to run a production
 - **Health Checks**: All services monitored
 
 ### MT5 EA Integration ✅
-- **Standalone Dashboard Connector** (reusable MQL5 module)
-- **smaGUY Trade Manager** pre-integrated with connector
-- **Easy Integration**: Include connector in ANY EA with 3 lines of code
+- **Standalone Full EA** pre-integrated for myfxboard sync
+- **smaGUY Trade Manager myfxboard edition** included
+- **Single supported path**: configure and run the provided full EA
 - **Inputs**: URL, Account ID, PSK, Interval (3 sec)
 - **Account Guard**: Prevents cross-account confusion
 - **Error Tracking**: Success/error counters with logging
@@ -113,36 +113,13 @@ Debug Logging: ✓ (for testing)
 
 ---
 
-## 🔌 Dashboard Connector Module
+## 🔌 Full EA Package
 
-Your repository includes a **standalone connector module** that you can use with ANY Expert Advisor, not just smaGUY Trade Manager.
+Use the included EA directly:
 
-### Files
+- **`connectors/smaGUY Trade Manger-myfxboard.mq5`** - full EA with dashboard sync
 
-- **`connectors/DashboardConnector.mqh`** - Reusable connector module
-- **`connectors/smaGUY_with_connector.mq5`** - Example: smaGUY using connector
-- **`connectors/README.md`** - Complete connector documentation
-
-### How to Use with Your Own EA
-
-Include the connector in any EA with just 3 lines:
-
-```mql5
-// 1. Include at top of your EA
-#include "connectors/DashboardConnector.mqh"
-
-// 2. Initialize in OnInit
-void OnInit() {
-   DashboardConnector::Init("http://localhost:3000", "EURUSD_001", "secret_key", 3);
-}
-
-// 3. Call in OnTimer or OnTick
-void OnTimer() {
-   DashboardConnector::Sync();
-}
-```
-
-See `connectors/README.md` for full documentation and examples.
+`connectors/DashboardConnector.mqh` remains part of internal implementation for this EA package.
 
 ---
 

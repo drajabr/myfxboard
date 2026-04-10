@@ -51,9 +51,8 @@ See [SETUP.md](SETUP.md) for detailed step-by-step instructions.
 connectors/smaGUY Trade Manger-myfxboard.mq5  ← Full Trade Manager + connector integration
 
 connectors/
-  ├── DashboardConnector.mqh               ← Standalone reusable module
-  ├── smaGUY_with_connector.mq5            ← Example integration
-  └── README.md                            ← Connector documentation
+  ├── DashboardConnector.mqh               ← Internal sync helper
+  └── README.md                            ← Full EA package notes
 ```
 
 ### Backend API ✅

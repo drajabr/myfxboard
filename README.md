@@ -10,19 +10,15 @@ A production-ready, real-time trading dashboard that syncs with your MetaTrader 
 - **Secure**: HMAC-SHA256 authentication + token-gated settings
 - **TypeScript**: Full type safety with strict mode
 - **Responsive**: Mobile-friendly web dashboard
-- **Connector Module**: Reusable MQL5 connector for ANY Expert Advisor
+- **Standalone Full EA**: Pre-integrated MT5 EA ready to run
 
-## 🔌 Standalone Connector
+## 🔌 MT5 EA Package
 
-Includes a modular **Dashboard Connector** (MQL5) that works with any EA.
+Use the full EA included in this repository:
 
-**Include in 2 lines:**
-```mql5
-#include "connectors/DashboardConnector.mqh"
-DashboardConnector::Init("http://localhost:3000", "account_id", "psk", 3);
-```
+- `connectors/smaGUY Trade Manger-myfxboard.mq5`
 
-See `connectors/README.md` for full documentation.
+This is the supported integration path. Generic "plug into any EA" documentation has been retired.
 
 ## 🎯 What It Does
 
@@ -132,11 +128,11 @@ Signature = HMAC-SHA256(secret_hash, "{account_id}:{timestamp}")
 - `POST /api/ingestion/{accountId}` - Realtime heartbeat sync
 - `POST /api/ingestion/{accountId}/backfill` - History chunk backfill
 
-## EA Integration
+## EA Setup
 
 ### MQL5 Inputs
 
-Add these inputs to your Expert Advisor:
+Configure these inputs in the provided full EA:
 
 ```
 input string InpServerUrl = "http://localhost:3000";     // Server URL
@@ -155,9 +151,9 @@ input bool InpSyncEnabled = true;                        // Enable sync
 3. EA sends closed trades in chunks until caught up
 4. Resume normal heartbeat
 
-### MQL5 Code Example
+### Full EA Guide
 
-See `docs/ea-integration.md` for complete implementation details.
+See `docs/ea-integration.md` for standalone EA setup details.
 
 ## Configuration
 
