@@ -15,7 +15,7 @@ const toNum = (value: unknown, fallback = 0): number => {
 const normalizePosition = (p: any) => ({
   ...p,
   size: toNum(p.size),
-  direction: toNum(p.direction),
+  direction: String(p.direction || ''),
   entry_price: toNum(p.entry_price),
   current_price: p.current_price === null ? null : toNum(p.current_price),
   avg_sl: p.avg_sl === null ? null : toNum(p.avg_sl),
@@ -105,6 +105,10 @@ const calcTradeMetrics = (
     avg_loss: losses.length > 0 ? losses.reduce((a, b) => a + b, 0) / losses.length : 0,
     max_win: wins.length > 0 ? Math.max(...wins) : 0,
     max_loss: losses.length > 0 ? Math.min(...losses) : 0,
+    expectancy: tradesCount > 0 ? closed.reduce((sum, t) => sum + (t.profit || 0), 0) / tradesCount : 0,
+    profit_factor: losses.length > 0
+      ? (wins.reduce((sum, p) => sum + p, 0) / Math.abs(losses.reduce((sum, p) => sum + p, 0)))
+      : (wins.length > 0 ? 999 : 0),
     avg_hold_seconds: durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0,
   };
 };
@@ -114,11 +118,22 @@ const dayKey = (ts: number) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+const buildFlatZeroCurve = (days: number, nowMs: number) => {
+  const totalDays = Math.min(Math.max(days, 2), 3650);
+  const points: Array<{ ts: number; equity: number }> = [];
+  for (let offset = totalDays - 1; offset >= 0; offset -= 1) {
+    const ts = new Date(nowMs - (offset * 24 * 60 * 60 * 1000)).setHours(0, 0, 0, 0);
+    points.push({ ts, equity: 0 });
+  }
+  return points;
+};
+
 const buildEmptyAnalyticsResponse = (
   accountIdParam: string,
   nowMs: number,
   monthShift: number,
-  yearShift: number
+  yearShift: number,
+  curveDays: number
 ) => {
   const monthBase = new Date(nowMs);
   monthBase.setMonth(monthBase.getMonth() + monthShift);
@@ -172,6 +187,8 @@ const buildEmptyAnalyticsResponse = (
       avg_loss: 0,
       max_win: 0,
       max_loss: 0,
+      expectancy: 0,
+      profit_factor: 0,
       avg_hold_seconds: 0,
     },
     positions: [],
@@ -180,7 +197,7 @@ const buildEmptyAnalyticsResponse = (
     trades_returned: 0,
     filtered_distribution: { wins: 0, losses: 0, neutral: 0 },
     filtered_daily_pnl: [],
-    equity_curve: [],
+    equity_curve: buildFlatZeroCurve(curveDays, nowMs),
     symbol_exposure: [],
     calendars: {
       monthly: {
@@ -218,7 +235,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
 
     if (accountIds.length === 0) {
       if (accountIdParam === 'all') {
-        return res.json(buildEmptyAnalyticsResponse(accountIdParam, nowMs, monthShift, yearShift));
+        return res.json(buildEmptyAnalyticsResponse(accountIdParam, nowMs, monthShift, yearShift, curveDays));
       }
       return res.status(404).json({ error: 'No matching accounts found' });
     }
@@ -251,12 +268,16 @@ router.get('/analytics', async (req: Request, res: Response) => {
       balance += latestSnapshot?.balance || 0;
 
       snapshots.forEach((s) => {
+        if (!s.snapshot_time_ms) {
+          return;
+        }
+        const equityValue = toNum(s.equity, 0);
         const key = dayKey(s.snapshot_time_ms);
         const existing = curveByDay.get(key);
         if (!existing) {
-          curveByDay.set(key, { ts: s.snapshot_time_ms, equity: s.equity });
+          curveByDay.set(key, { ts: s.snapshot_time_ms, equity: equityValue });
         } else {
-          existing.equity += s.equity;
+          existing.equity += equityValue;
           if (s.snapshot_time_ms > existing.ts) {
             existing.ts = s.snapshot_time_ms;
           }
@@ -377,7 +398,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
       trades: yearMonthMap.get(month)?.trades || 0,
     }));
 
-    const equityCurve = Array.from(curveByDay.values()).sort((a, b) => a.ts - b.ts);
+    const equityCurveRaw = Array.from(curveByDay.values()).sort((a, b) => a.ts - b.ts);
+    const equityCurve = equityCurveRaw.length > 0 ? equityCurveRaw : buildFlatZeroCurve(curveDays, nowMs);
 
     res.json({
       scope: accountIdParam === 'all' ? 'all' : 'single',
@@ -433,18 +455,27 @@ router.get('/:accountId/dashboard', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Account not found' });
     }
 
-    const positionsRaw = await positionQueries.findByAccount(accountId);
-    const recentTradesRaw = await tradeQueries.findRecentByAccount(accountId, 20);
-    const latestSnapshotRaw = await snapshotQueries.findLatestByAccount(accountId);
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const [positionsRaw, recentTradesRaw, latestSnapshotRaw, todayTradesRaw] = await Promise.all([
+      positionQueries.findByAccount(accountId),
+      tradeQueries.findRecentByAccount(accountId, 20),
+      snapshotQueries.findLatestByAccount(accountId),
+      tradeQueries.findByExitRange(accountId, startOfDay.getTime(), Date.now()),
+    ]);
 
     const positions = positionsRaw.map(normalizePosition);
     const recentTrades = recentTradesRaw.map(normalizeTrade);
     const latestSnapshot = latestSnapshotRaw ? normalizeSnapshot(latestSnapshotRaw) : null;
 
+    const todaysTrades = todayTradesRaw.map(normalizeTrade);
+    const todaysPnL = todaysTrades
+      .reduce((sum, t) => sum + (t.profit || 0), 0);
+
     // Calculate aggregates
     const totalEquity = latestSnapshot?.equity || latestSnapshot?.balance || 0;
     const floatingPnL = positions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
-    const todaysPnL = latestSnapshot?.losses ? (latestSnapshot.wins || 0) - Math.abs(latestSnapshot.losses || 0) : 0;
 
     const dashboard: DashboardSummary = {
       summary: {

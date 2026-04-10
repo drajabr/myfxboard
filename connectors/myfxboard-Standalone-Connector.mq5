@@ -14,7 +14,7 @@ input group "myfxboard Dashboard Connection"
 input string InpDashboardUrl         = "http://localhost:3000"; // Server URL
 input string InpDashboardPSK         = "";                      // Shared Secret (PSK)
 input int    InpSyncIntervalSec      = 3;                       // Sync Interval (seconds)
-input int    InpKeepaliveSec         = 30;                      // Keepalive Interval (seconds, 0=disable)
+input int    InpKeepaliveSec         = 60;                      // Keepalive Interval (seconds, 0=disable)
 input bool   InpDebugLog             = false;                   // Debug Logging
 
 //+------------------------------------------------------------------+
@@ -74,7 +74,7 @@ private:
    }
 
 public:
-   static void Init(string url, string psk, int interval_sec, int keepalive_sec = 30, bool debug = false) {
+   static void Init(string url, string psk, int interval_sec, int keepalive_sec = 60, bool debug = false) {
       s_url              = url;
       s_psk              = psk;
       s_sync_interval_ms = interval_sec * 1000;
@@ -122,10 +122,11 @@ public:
       string history_hash = StringFormat("%u", HashPayload(closed_trades_json));
 
       if(!s_startup_health_checked) {
+         // One-shot probe: if unavailable/fails, continue with normal sync and avoid retry spam.
+         s_startup_health_checked = true;
          bool history_sync_required = true;
          string server_history_hash = "";
          if(PostHealthCheck(current_account, timestamp_ms, history_hash, history_sync_required, server_history_hash)) {
-            s_startup_health_checked = true;
             if(server_history_hash != "")
                s_last_ack_history_hash = server_history_hash;
 
@@ -196,10 +197,11 @@ private:
          ulong  open_time_ms = PositionGetInteger(POSITION_TIME_MSC);
          double pnl         = PositionGetDouble(POSITION_PROFIT);
          ENUM_POSITION_TYPE dir = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+         string direction = (dir == POSITION_TYPE_BUY) ? "BUY" : "SELL";
 
          positions_json += StringFormat(
-            "{\"symbol\":\"%s\",\"volume\":%.2f,\"open_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"open_time_ms\":%lld,\"pnl\":%.2f,\"direction\":%d}",
-            symbol, volume, open_price, sl, tp, open_time_ms, pnl, (int)dir
+            "{\"symbol\":\"%s\",\"volume\":%.2f,\"direction\":\"%s\",\"open_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
+            symbol, volume, direction, open_price, sl, tp, open_time_ms, pnl
          );
       }
       positions_json += "]";
@@ -364,8 +366,35 @@ private:
       return payload;
    }
 
+   static string ToHex(const uchar &bytes[]) {
+      string out = "";
+      int n = ArraySize(bytes);
+      for(int i = 0; i < n; i++)
+         out += StringFormat("%02x", bytes[i]);
+      return out;
+   }
+
    static string CreateSignature(string account_number, long timestamp_ms, string psk) {
-      return "dashboard_v2_" + account_number + "_" + StringFormat("%lld", timestamp_ms) + "_" + psk;
+      string message = account_number + ":" + StringFormat("%lld", timestamp_ms);
+      uchar message_bytes[];
+      uchar key_bytes[];
+      uchar digest[];
+
+      int message_len = StringToCharArray(message, message_bytes, 0, WHOLE_ARRAY, CP_UTF8);
+      if(message_len > 0)
+         ArrayResize(message_bytes, message_len - 1, 0);
+
+      int key_len = StringToCharArray(psk, key_bytes, 0, WHOLE_ARRAY, CP_UTF8);
+      if(key_len > 0)
+         ArrayResize(key_bytes, key_len - 1, 0);
+
+      if(!CryptEncode(CRYPT_HASH_SHA256, message_bytes, key_bytes, digest)) {
+         if(s_debug_log)
+            Print("[DashboardConnector] Failed to build signature hash");
+         return "";
+      }
+
+      return ToHex(digest);
    }
 
    static void PostSync(
@@ -475,7 +504,7 @@ private:
 string DashboardConnector::s_url              = "";
 string DashboardConnector::s_psk              = "";
 int    DashboardConnector::s_sync_interval_ms = 3000;
-int    DashboardConnector::s_keepalive_ms     = 30000;
+int    DashboardConnector::s_keepalive_ms     = 60000;
 ulong  DashboardConnector::s_last_sync_ms     = 0;
 bool   DashboardConnector::s_in_flight        = false;
 int    DashboardConnector::s_success_count    = 0;

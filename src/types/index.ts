@@ -86,6 +86,7 @@ export interface IngestPayload {
   positions: Array<{
     symbol: string;
     volume: number;
+    direction: 'BUY' | 'SELL';
     open_price: number;
     avg_sl: number | null;
     avg_tp: number | null;

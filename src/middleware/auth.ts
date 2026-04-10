@@ -19,8 +19,10 @@ declare global {
 export const validateIngestionAuth = async (req: any, _res: Response, next: NextFunction) => {
   try {
     const authHeader = req.headers.authorization || '';
-    const timestamp = req.headers['x-signature-timestamp'];
+    const timestampHeader = req.headers['x-signature-timestamp'];
     const accountNumber = req.body?.account_number;
+
+    const timestamp = Array.isArray(timestampHeader) ? timestampHeader[0] : timestampHeader;
 
     if (!authHeader || !timestamp || accountNumber === undefined || accountNumber === null) {
       return _res.status(401).json({ error: 'Missing authorization, timestamp, or account_number' });
@@ -36,7 +38,11 @@ export const validateIngestionAuth = async (req: any, _res: Response, next: Next
       return _res.status(401).json({ error: 'Invalid credentials format' });
     }
 
-    const timestampMs = parseInt(timestamp, 10);
+    const timestampMs = parseInt(String(timestamp), 10);
+    if (!Number.isFinite(timestampMs)) {
+      return _res.status(401).json({ error: 'Invalid timestamp' });
+    }
+
     const nowMs = Date.now();
     const timeDiff = nowMs - timestampMs;
 
@@ -54,13 +60,11 @@ export const validateIngestionAuth = async (req: any, _res: Response, next: Next
     const normalizedAccountNumber = String(accountNumber).trim();
     const message = `${normalizedAccountNumber}:${timestampMs}`;
     const expectedHmacSignature = crypto.createHmac('sha256', sharedSecret).update(message).digest('hex');
-    const expectedCompatSignature = `dashboard_v2_${normalizedAccountNumber}_${timestampMs}_${sharedSecret}`;
 
     const hmacMatch = signature.length === expectedHmacSignature.length
       && crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedHmacSignature));
-    const compatMatch = signature === expectedCompatSignature;
 
-    if (!hmacMatch && !compatMatch) {
+    if (!hmacMatch) {
       return _res.status(401).json({ error: 'Invalid signature' });
     }
 

@@ -14,7 +14,7 @@ const pool = new Pool({
 
 pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
-  process.exit(-1);
+  // Keep the process alive; transient DB issues should not hard-crash the server.
 });
 
 export const query = async (text: string, params?: any[]) => {
@@ -30,14 +30,15 @@ export const query = async (text: string, params?: any[]) => {
   }
 };
 
-export const transaction = async (
-  callback: (client: pg.PoolClient) => Promise<void>
-) => {
+export const transaction = async <T>(
+  callback: (client: pg.PoolClient) => Promise<T>
+): Promise<T> => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await callback(client);
+    const result = await callback(client);
     await client.query('COMMIT');
+    return result;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

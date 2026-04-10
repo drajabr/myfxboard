@@ -45,6 +45,7 @@ export const ingestPayloadSchema = z.object({
   positions: z.array(z.object({
     symbol: z.string(),
     volume: z.number().positive(),
+    direction: z.enum(['BUY', 'SELL']),
     open_price: z.number(),
     avg_sl: z.number().nullable(),
     avg_tp: z.number().nullable(),

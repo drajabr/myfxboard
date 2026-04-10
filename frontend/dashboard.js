@@ -1,12 +1,21 @@
 const API_URL = '/api';
 const THEME_KEY = 'themePreference';
+const DASHBOARD_REFRESH_MS = 5000;
+const ACCOUNTS_REFRESH_MS = 60000;
 
-let autoRefreshInterval;
-let monthShift = 0;
-let yearShift = 0;
-let tradesLimit = 10;
-let activeTradeFilter = null;
-let exposureSort = { key: 'size', direction: 'desc' };
+const state = {
+    autoRefreshInterval: null,
+    monthShift: 0,
+    yearShift: 0,
+    tradesLimit: 10,
+    activeTradeFilter: null,
+    exposureSort: { key: 'size', direction: 'desc' },
+    accounts: [],
+    accountsFetchedAt: 0,
+    inflight: false,
+    pendingRefresh: false,
+    lastData: null,
+};
 
 const charts = {
     equityCurve: null,
@@ -103,7 +112,9 @@ function toggleTheme() {
     const next = current === 'dark' ? 'light' : 'dark';
     localStorage.setItem(THEME_KEY, next);
     applyTheme(next);
-    loadDashboard();
+    if (state.lastData) {
+        renderDashboard(state.lastData);
+    }
 }
 
 function applyThemeFromSystemIfNeeded() {
@@ -117,37 +128,37 @@ function setupEventListeners() {
 
     document.getElementById('accountSelector').addEventListener('change', (e) => {
         localStorage.setItem('selectedAccount', e.target.value);
-        monthShift = 0;
-        yearShift = 0;
+        state.monthShift = 0;
+        state.yearShift = 0;
         loadDashboard();
     });
 
     document.getElementById('monthPrevBtn').addEventListener('click', () => {
-        monthShift -= 1;
+        state.monthShift -= 1;
         loadDashboard();
     });
     document.getElementById('monthNextBtn').addEventListener('click', () => {
-        monthShift += 1;
+        state.monthShift += 1;
         loadDashboard();
     });
 
     document.getElementById('yearPrevBtn').addEventListener('click', () => {
-        yearShift -= 1;
+        state.yearShift -= 1;
         loadDashboard();
     });
     document.getElementById('yearNextBtn').addEventListener('click', () => {
-        yearShift += 1;
+        state.yearShift += 1;
         loadDashboard();
     });
 
     document.getElementById('resetTradesFilterBtn').addEventListener('click', () => {
-        activeTradeFilter = null;
-        tradesLimit = 10;
+        state.activeTradeFilter = null;
+        state.tradesLimit = 10;
         loadDashboard();
     });
 
     document.getElementById('loadMoreTradesBtn').addEventListener('click', () => {
-        tradesLimit += 10;
+        state.tradesLimit += 10;
         loadDashboard();
     });
 
@@ -157,14 +168,39 @@ function setupEventListeners() {
             if (!key) {
                 return;
             }
-            if (exposureSort.key === key) {
-                exposureSort.direction = exposureSort.direction === 'asc' ? 'desc' : 'asc';
+            if (state.exposureSort.key === key) {
+                state.exposureSort.direction = state.exposureSort.direction === 'asc' ? 'desc' : 'asc';
             } else {
-                exposureSort.key = key;
-                exposureSort.direction = key === 'symbol' ? 'asc' : 'desc';
+                state.exposureSort.key = key;
+                state.exposureSort.direction = key === 'symbol' ? 'asc' : 'desc';
             }
             loadDashboard();
         });
+    });
+
+    document.getElementById('monthCalendar').addEventListener('click', (event) => {
+        const cell = event.target.closest('.calendar-cell.filterable[data-day]');
+        if (!cell) {
+            return;
+        }
+        const day = toNum(cell.getAttribute('data-day'));
+        const year = toNum(cell.getAttribute('data-year'));
+        const month = toNum(cell.getAttribute('data-month'));
+        if (day > 0 && year > 0 && month > 0) {
+            setDayFilter(year, month, day);
+        }
+    });
+
+    document.getElementById('yearCalendar').addEventListener('click', (event) => {
+        const card = event.target.closest('.year-card.filterable[data-month][data-year]');
+        if (!card) {
+            return;
+        }
+        const month = toNum(card.getAttribute('data-month'));
+        const year = toNum(card.getAttribute('data-year'));
+        if (month > 0 && year > 0) {
+            setMonthFilter(year, month);
+        }
     });
 
     themeMedia.addEventListener('change', applyThemeFromSystemIfNeeded);
@@ -176,6 +212,18 @@ async function loadAccounts() {
         throw new Error('Failed to load accounts');
     }
     return accountsRes.json();
+}
+
+async function loadAccountsIfNeeded(force = false) {
+    const now = Date.now();
+    if (!force && state.accounts.length > 0 && (now - state.accountsFetchedAt) < ACCOUNTS_REFRESH_MS) {
+        return state.accounts;
+    }
+    const accounts = await loadAccounts();
+    state.accounts = accounts;
+    state.accountsFetchedAt = now;
+    syncAccountSelector(accounts);
+    return accounts;
 }
 
 function syncAccountSelector(accounts) {
@@ -198,13 +246,13 @@ async function fetchAnalytics(accountId) {
     const params = new URLSearchParams({
         accountId: scope,
         days: '365',
-        monthShift: String(monthShift),
-        yearShift: String(yearShift),
-        recentTradesLimit: String(tradesLimit),
+        monthShift: String(state.monthShift),
+        yearShift: String(state.yearShift),
+        recentTradesLimit: String(state.tradesLimit),
     });
-    if (activeTradeFilter) {
-        params.set('tradeFromMs', String(activeTradeFilter.fromMs));
-        params.set('tradeToMs', String(activeTradeFilter.toMs));
+    if (state.activeTradeFilter) {
+        params.set('tradeFromMs', String(state.activeTradeFilter.fromMs));
+        params.set('tradeToMs', String(state.activeTradeFilter.toMs));
     }
     const url = `${API_URL}/account/analytics?${params.toString()}`;
     const res = await fetch(url);
@@ -261,6 +309,8 @@ function renderTradeMetrics(metrics) {
     const grid = document.getElementById('tradeMetricsGrid');
     const cards = [
         ['Win Rate', formatPct(metrics.win_rate_pct), metrics.win_rate_pct],
+        ['Profit Factor', Number(toNum(metrics.profit_factor)).toFixed(2), 0],
+        ['Expectancy', formatMoney(metrics.expectancy), toNum(metrics.expectancy)],
         ['Average Win', formatMoney(metrics.avg_win), metrics.avg_win],
         ['Average Loss', formatMoney(metrics.avg_loss), metrics.avg_loss],
         ['Max Win', formatMoney(metrics.max_win), metrics.max_win],
@@ -326,12 +376,12 @@ function updateExposureTable(exposureRows) {
     const tbody = document.getElementById('exposureTable');
     const rows = Array.isArray(exposureRows) ? [...exposureRows] : [];
     rows.sort((a, b) => {
-        if (exposureSort.key === 'symbol') {
+        if (state.exposureSort.key === 'symbol') {
             const cmp = String(a.symbol || '').localeCompare(String(b.symbol || ''));
-            return exposureSort.direction === 'asc' ? cmp : -cmp;
+            return state.exposureSort.direction === 'asc' ? cmp : -cmp;
         }
         const diff = toNum(a.size) - toNum(b.size);
-        return exposureSort.direction === 'asc' ? diff : -diff;
+        return state.exposureSort.direction === 'asc' ? diff : -diff;
     });
 
     if (rows.length === 0) {
@@ -353,40 +403,34 @@ function updateTradeControls(data) {
     const resetBtn = document.getElementById('resetTradesFilterBtn');
     const loadMoreBtn = document.getElementById('loadMoreTradesBtn');
 
-    filterLabel.textContent = activeTradeFilter ? `Filter: ${activeTradeFilter.label}` : 'Filter: None';
+    filterLabel.textContent = state.activeTradeFilter ? `Filter: ${state.activeTradeFilter.label}` : 'Filter: None';
     countInfo.textContent = `Showing ${toNum(data.trades_returned)} of ${toNum(data.trades_total_matching)} trades`;
-    resetBtn.disabled = !activeTradeFilter;
+    resetBtn.disabled = !state.activeTradeFilter;
     loadMoreBtn.disabled = toNum(data.trades_returned) >= toNum(data.trades_total_matching);
 }
 
 function setDayFilter(year, month, day) {
     const from = new Date(year, month - 1, day, 0, 0, 0, 0).getTime();
     const to = new Date(year, month - 1, day, 23, 59, 59, 999).getTime();
-    activeTradeFilter = {
+    state.activeTradeFilter = {
         fromMs: from,
         toMs: to,
         label: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
     };
-    tradesLimit = 10;
+    state.tradesLimit = 10;
     loadDashboard();
 }
 
 function setMonthFilter(year, month) {
     const from = new Date(year, month - 1, 1, 0, 0, 0, 0).getTime();
     const to = new Date(year, month, 0, 23, 59, 59, 999).getTime();
-    activeTradeFilter = {
+    state.activeTradeFilter = {
         fromMs: from,
         toMs: to,
         label: `${year}-${String(month).padStart(2, '0')}`,
     };
-    tradesLimit = 10;
+    state.tradesLimit = 10;
     loadDashboard();
-}
-
-function destroyChart(chart) {
-    if (chart) {
-        chart.destroy();
-    }
 }
 
 function getChartColorVar(name) {
@@ -394,51 +438,68 @@ function getChartColorVar(name) {
 }
 
 function updateCharts(data) {
-    destroyChart(charts.equityCurve);
-    destroyChart(charts.winLoss);
-    destroyChart(charts.dailyPnl);
-
     const positive = getChartColorVar('--pnl-positive');
     const negative = getChartColorVar('--pnl-negative');
     const neutral = getChartColorVar('--pnl-neutral');
     const text = getChartColorVar('--text');
 
-    const equityLabels = data.equity_curve.map((d) => formatDateMs(d.ts));
-    const equityValues = data.equity_curve.map((d) => toNum(d.equity));
-
-    charts.equityCurve = new Chart(document.getElementById('equityCurveChart'), {
-        type: 'line',
-        data: {
-            labels: equityLabels,
-            datasets: [{
-                label: 'Equity',
-                data: equityValues,
-                borderColor: positive,
-                backgroundColor: 'rgba(31, 111, 235, 0.12)',
-                tension: 0.25,
-                pointRadius: 0,
-                fill: true,
-            }],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { labels: { color: text } } },
-        },
+    const fallbackCurve = Array.from({ length: 30 }, (_, idx) => {
+        const ts = new Date(Date.now() - ((29 - idx) * 24 * 60 * 60 * 1000)).setHours(0, 0, 0, 0);
+        return { ts, equity: 0 };
     });
+    const equityRows = Array.isArray(data.equity_curve) && data.equity_curve.length > 0
+        ? data.equity_curve
+        : fallbackCurve;
+    const equityLabels = equityRows.map((d) => formatDateMs(d.ts));
+    const equityValues = equityRows.map((d) => toNum(d.equity));
+
+    if (!charts.equityCurve) {
+        charts.equityCurve = new Chart(document.getElementById('equityCurveChart'), {
+            type: 'line',
+            data: {
+                labels: equityLabels,
+                datasets: [{
+                    label: 'Equity',
+                    data: equityValues,
+                    borderColor: positive,
+                    backgroundColor: 'rgba(31, 111, 235, 0.12)',
+                    tension: 0.25,
+                    pointRadius: 0,
+                    fill: true,
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: text } } },
+            },
+        });
+    } else {
+        charts.equityCurve.data.labels = equityLabels;
+        charts.equityCurve.data.datasets[0].data = equityValues;
+        charts.equityCurve.data.datasets[0].borderColor = positive;
+        charts.equityCurve.options.plugins.legend.labels.color = text;
+        charts.equityCurve.update();
+    }
 
     const wins = toNum(data.filtered_distribution?.wins);
     const losses = toNum(data.filtered_distribution?.losses);
     const neutralCount = toNum(data.filtered_distribution?.neutral);
 
-    charts.winLoss = new Chart(document.getElementById('winLossChart'), {
-        type: 'doughnut',
-        data: {
-            labels: ['Wins', 'Losses', 'Neutral'],
-            datasets: [{ data: [wins, losses, neutralCount], backgroundColor: [positive, negative, neutral] }],
-        },
-        options: { responsive: true, maintainAspectRatio: false },
-    });
+    if (!charts.winLoss) {
+        charts.winLoss = new Chart(document.getElementById('winLossChart'), {
+            type: 'doughnut',
+            data: {
+                labels: ['Wins', 'Losses', 'Neutral'],
+                datasets: [{ data: [wins, losses, neutralCount], backgroundColor: [positive, negative, neutral] }],
+            },
+            options: { responsive: true, maintainAspectRatio: false },
+        });
+    } else {
+        charts.winLoss.data.datasets[0].data = [wins, losses, neutralCount];
+        charts.winLoss.data.datasets[0].backgroundColor = [positive, negative, neutral];
+        charts.winLoss.update();
+    }
 
     const dailyRows = Array.isArray(data.filtered_daily_pnl) ? data.filtered_daily_pnl : [];
     const dailyLabels = dailyRows.map((r) => r.date || '');
@@ -446,27 +507,35 @@ function updateCharts(data) {
 
     const dailyTitle = document.getElementById('dailyPnlChartTitle');
     if (dailyTitle) {
-        dailyTitle.textContent = activeTradeFilter
-            ? `Daily PnL (${activeTradeFilter.label})`
+        dailyTitle.textContent = state.activeTradeFilter
+            ? `Daily PnL (${state.activeTradeFilter.label})`
             : 'Daily PnL (Last 30 Days)';
     }
 
-    charts.dailyPnl = new Chart(document.getElementById('dailyPnlChart'), {
-        type: 'bar',
-        data: {
-            labels: dailyLabels,
-            datasets: [{
-                label: 'Daily PnL',
-                data: dailyValues,
-                backgroundColor: dailyValues.map((v) => v > 0 ? positive : v < 0 ? negative : neutral),
-            }],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { labels: { color: text } } },
-        },
-    });
+    if (!charts.dailyPnl) {
+        charts.dailyPnl = new Chart(document.getElementById('dailyPnlChart'), {
+            type: 'bar',
+            data: {
+                labels: dailyLabels,
+                datasets: [{
+                    label: 'Daily PnL',
+                    data: dailyValues,
+                    backgroundColor: dailyValues.map((v) => v > 0 ? positive : v < 0 ? negative : neutral),
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: text } } },
+            },
+        });
+    } else {
+        charts.dailyPnl.data.labels = dailyLabels;
+        charts.dailyPnl.data.datasets[0].data = dailyValues;
+        charts.dailyPnl.data.datasets[0].backgroundColor = dailyValues.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
+        charts.dailyPnl.options.plugins.legend.labels.color = text;
+        charts.dailyPnl.update();
+    }
 }
 
 function renderMonthlyCalendar(monthly) {
@@ -481,7 +550,7 @@ function renderMonthlyCalendar(monthly) {
     monthly.days.forEach((d) => {
         const canFilter = toNum(d.trades) > 0;
         cells.push(`
-            <div class="calendar-cell ${canFilter ? 'filterable' : ''}" ${canFilter ? `data-day="${d.day}"` : ''}>
+            <div class="calendar-cell ${canFilter ? 'filterable' : ''}" ${canFilter ? `data-day="${d.day}" data-month="${monthly.month}" data-year="${monthly.year}"` : ''}>
                 <div class="day">${d.day}</div>
                 <div class="${pnlClass(d.pnl)}">${formatMoney(d.pnl)}</div>
                 <div>${d.trades} trades</div>
@@ -490,15 +559,6 @@ function renderMonthlyCalendar(monthly) {
     });
 
     target.innerHTML = cells.join('');
-
-    target.querySelectorAll('.calendar-cell.filterable[data-day]').forEach((el) => {
-        el.addEventListener('click', () => {
-            const day = toNum(el.getAttribute('data-day'));
-            if (day > 0) {
-                setDayFilter(monthly.year, monthly.month, day);
-            }
-        });
-    });
 }
 
 function renderYearlyCalendar(yearly) {
@@ -507,59 +567,84 @@ function renderYearlyCalendar(yearly) {
 
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     target.innerHTML = yearly.months.map((m) => `
-        <div class="year-card ${toNum(m.trades) > 0 ? 'filterable' : ''}" ${toNum(m.trades) > 0 ? `data-month="${m.month}"` : ''}>
+        <div class="year-card ${toNum(m.trades) > 0 ? 'filterable' : ''}" ${toNum(m.trades) > 0 ? `data-month="${m.month}" data-year="${yearly.year}"` : ''}>
             <div class="month">${monthNames[m.month - 1]}</div>
             <div class="${pnlClass(m.pnl)}">${formatMoney(m.pnl)}</div>
             <div>${m.trades} trades</div>
         </div>
     `).join('');
+}
 
-    target.querySelectorAll('.year-card.filterable[data-month]').forEach((el) => {
-        el.addEventListener('click', () => {
-            const month = toNum(el.getAttribute('data-month'));
-            if (month > 0) {
-                setMonthFilter(yearly.year, month);
-            }
-        });
-    });
+function setLoadState(loading, errorMessage = '') {
+    const loadStatus = document.getElementById('loadStatus');
+    const errorStatus = document.getElementById('errorStatus');
+    if (loadStatus) {
+        loadStatus.textContent = loading ? 'Sync: loading...' : 'Sync: idle';
+    }
+    if (errorStatus) {
+        errorStatus.textContent = errorMessage ? `Error: ${errorMessage}` : 'Error: none';
+        errorStatus.classList.toggle('status-error', Boolean(errorMessage));
+    }
+}
+
+function renderDashboard(data) {
+    updateStatusStrip(data.summary);
+    updateKpis(data.summary, data.periods, data.trade_metrics);
+    renderPeriodStats(data.periods);
+    renderTradeMetrics(data.trade_metrics);
+    updatePositionsTable(data.positions);
+    updateExposureTable(data.symbol_exposure);
+    updateTradesTable(data.recent_trades);
+    updateTradeControls(data);
+    updateCharts(data);
+    renderMonthlyCalendar(data.calendars.monthly);
+    renderYearlyCalendar(data.calendars.yearly);
 }
 
 async function loadDashboard() {
+    if (state.inflight) {
+        state.pendingRefresh = true;
+        return;
+    }
+
+    state.inflight = true;
+    setLoadState(true);
+
     try {
-        const accounts = await loadAccounts();
-        syncAccountSelector(accounts);
+        await loadAccountsIfNeeded(false);
 
-        const selectedAccount = localStorage.getItem('selectedAccount') || '';
+        const selectedAccount = document.getElementById('accountSelector').value || localStorage.getItem('selectedAccount') || '';
         const data = await fetchAnalytics(selectedAccount);
-
-        updateStatusStrip(data.summary);
-        updateKpis(data.summary, data.periods, data.trade_metrics);
-        renderPeriodStats(data.periods);
-        renderTradeMetrics(data.trade_metrics);
-        updatePositionsTable(data.positions);
-        updateExposureTable(data.symbol_exposure);
-        updateTradesTable(data.recent_trades);
-        updateTradeControls(data);
-        updateCharts(data);
-        renderMonthlyCalendar(data.calendars.monthly);
-        renderYearlyCalendar(data.calendars.yearly);
+        state.lastData = data;
+        renderDashboard(data);
+        setLoadState(false);
     } catch (error) {
         console.error('Error loading dashboard:', error);
+        setLoadState(false, error?.message || 'Failed to load dashboard data');
+    } finally {
+        state.inflight = false;
+        if (state.pendingRefresh) {
+            state.pendingRefresh = false;
+            loadDashboard();
+        }
     }
 }
 
 function startAutoRefresh(interval) {
-    if (autoRefreshInterval) {
-        clearInterval(autoRefreshInterval);
+    if (state.autoRefreshInterval) {
+        clearInterval(state.autoRefreshInterval);
     }
-    autoRefreshInterval = setInterval(loadDashboard, interval);
+    state.autoRefreshInterval = setInterval(loadDashboard, interval);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
     applyTheme(getPreferredTheme());
     setupEventListeners();
+    loadAccountsIfNeeded(true).catch((error) => {
+        console.error('Error loading accounts:', error);
+    });
     loadDashboard();
-    startAutoRefresh(5000);
+    startAutoRefresh(DASHBOARD_REFRESH_MS);
 });
 
 

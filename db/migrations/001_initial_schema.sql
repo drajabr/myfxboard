@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS positions (
   unrealized_pnl NUMERIC(20, 2),
   open_time_ms BIGINT NOT NULL,
   updated_at_ms BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
-  UNIQUE(account_id, symbol, direction, entry_price)
+  UNIQUE(account_id, symbol, direction, entry_price, open_time_ms)
 );
 
 CREATE INDEX IF NOT EXISTS idx_positions_account ON positions(account_id, updated_at_ms DESC);
@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS daily_snapshots (
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_account ON daily_snapshots(account_id, snapshot_time_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_snapshots_account_date ON daily_snapshots(account_id, date);
 
 CREATE TABLE IF NOT EXISTS sync_log (
   id SERIAL PRIMARY KEY,

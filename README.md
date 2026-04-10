@@ -10,6 +10,13 @@ Minimal guide for running the MT5 dashboard.
 - Serves dashboard UI and API from the Node server
 - Uses HMAC-signed ingestion requests
 
+## Protocol rules (strict)
+
+- Ingestion auth is strict HMAC validation only; compatibility signatures are not accepted.
+- `X-Signature-Timestamp` must be unix epoch milliseconds and within the auth window.
+- Position payloads must provide explicit `direction` (`BUY` or `SELL`).
+- Ingestion writes run in a single DB transaction to avoid partial state.
+
 ## Supported MT5 path
 
 Use the included full EA:
