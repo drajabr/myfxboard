@@ -17,8 +17,8 @@ services:
       - ./db/migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dashboard -d myfxboard"]
-      interval: 1s
-      timeout: 3s
+      interval: 3s
+      timeout: 2s
       retries: 30
       start_period: 3s
     networks:
