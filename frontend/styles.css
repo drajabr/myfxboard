@@ -59,17 +59,20 @@ body {
 .header {
     background: var(--surface);
     border-bottom: 1px solid var(--border);
-    padding: 1rem 1.5rem;
+    padding: 0.5rem 1rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
     box-shadow: var(--shadow);
+    position: sticky;
+    top: 0;
+    z-index: 18;
 }
 
 .header-left {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0.65rem;
     flex-wrap: wrap;
 }
 
@@ -87,7 +90,7 @@ body {
     text-transform: lowercase;
     font-family: 'Bahnschrift SemiCondensed', 'Arial Narrow', 'Segoe UI', sans-serif;
     font-style: italic;
-    font-size: 1.7rem;
+    font-size: 2.05rem;
     letter-spacing: 0.01em;
     transform: skewX(-7deg);
 }
@@ -112,7 +115,7 @@ body {
 .account-selector,
 .form-group input,
 .form-group select {
-    padding: 0.6rem 0.85rem;
+    padding: 0.42rem 0.72rem;
     border-radius: 8px;
     border: 1px solid var(--border);
     background: var(--surface-alt);
@@ -155,8 +158,8 @@ body {
     border-radius: 999px;
     background: var(--surface-alt);
     color: var(--text-muted);
-    padding: 0.38rem 0.65rem;
-    font-size: 0.78rem;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.74rem;
     line-height: 1;
     white-space: nowrap;
 }
@@ -245,6 +248,17 @@ body {
     font-size: 0.9rem;
 }
 
+.header .icon-btn {
+    min-width: 34px;
+    height: 34px;
+    font-size: 0.85rem;
+}
+
+.header .icon-btn--square {
+    width: 34px;
+    min-width: 34px;
+}
+
 .icon-btn--square {
     width: 38px;
     min-width: 38px;
@@ -268,8 +282,8 @@ body {
 
 .icon-btn--theme-dot::before {
     content: '';
-    width: 84%;
-    height: 84%;
+    width: 68%;
+    height: 68%;
     border-radius: 50%;
     background: var(--dot-color);
     box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.35), 0 0 0 2px rgba(0, 0, 0, 0.08);

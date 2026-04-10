@@ -14,7 +14,7 @@ input group "myfxboard Dashboard Connection"
 input string InpDashboardUrl         = "http://localhost:3000"; // Server URL
 input string InpDashboardPSK         = "";                      // Shared Secret (PSK)
 input int    InpSyncIntervalSec      = 3;                       // Sync Interval (seconds)
-input int    InpKeepaliveSec         = 0;                       // Keepalive Interval (seconds, 0=disable)
+input int    InpKeepaliveSec         = 0;                       // Legacy unused field
 input datetime InpHistoryStartDate   = 0;                       // History Start Date (0=all history)
 input bool   InpDebugLog             = false;                   // Debug Logging
 
@@ -83,8 +83,7 @@ public:
       s_url              = url;
       s_psk              = psk;
       s_sync_interval_ms = interval_sec * 1000;
-      // Force keepalive to 60s regardless of input
-      s_keepalive_ms     = 60000;
+   s_keepalive_ms     = 0;
       s_debug_log        = debug;
       s_last_sync_ms     = 0;
       s_in_flight        = false;
@@ -154,22 +153,9 @@ public:
       }
 
       bool include_history = (history_hash != s_last_ack_history_hash);
-      long keepalive_reference_ms = s_last_live_payload_sent_ms;
-      if(s_last_keepalive_probe_ms > keepalive_reference_ms)
-         keepalive_reference_ms = s_last_keepalive_probe_ms;
-
       if(!include_history
          && live_payload_hash == s_last_live_payload_hash
-         && keepalive_reference_ms > 0) {
-         if(s_keepalive_ms <= 0 || (timestamp_ms - keepalive_reference_ms) < s_keepalive_ms) {
-            s_last_sync_ms = now_ms;
-            if(s_debug_log && now_ms - s_last_log_ms > 30000) {
-               Print("[DashboardConnector] No live payload changes, skipping sync");
-               s_last_log_ms = now_ms;
-            }
-            return false;
-         }
-
+         && s_last_live_payload_sent_ms > 0) {
          bool history_sync_required = false;
          string server_history_hash = "";
          s_last_sync_ms = now_ms;
@@ -182,16 +168,17 @@ public:
             s_last_live_payload_sent_ms = timestamp_ms;
             if(!history_sync_required) {
                if(s_debug_log)
-                  Print("[DashboardConnector] Keepalive health accepted, no payload needed");
+                  Print("[DashboardConnector] Health check accepted, no payload needed");
                return false;
             }
 
             include_history = true;
             if(s_debug_log)
-               Print("[DashboardConnector] Keepalive health requested history sync");
+               Print("[DashboardConnector] Health check requested history sync");
          } else {
             if(s_debug_log)
-                  Print("[DashboardConnector] Keepalive health failed, falling back to standard sync");
+                  Print("[DashboardConnector] Health check failed, skipping payload sync");
+            return false;
          }
       }
 
@@ -528,8 +515,6 @@ private:
       if(res == -1) {
          s_error_count++;
          s_last_sync_ok = false;
-         if(!include_history && live_payload_hash == s_last_live_payload_hash && s_keepalive_ms > 0)
-            s_last_live_payload_sent_ms = timestamp_ms;
          if(s_debug_log) {
             Print("[DashboardConnector] Error: ", GetLastError());
             ResetLastError();
@@ -556,8 +541,6 @@ private:
          } else {
             s_error_count++;
             s_last_sync_ok = false;
-            if(!include_history && live_payload_hash == s_last_live_payload_hash && s_keepalive_ms > 0)
-               s_last_live_payload_sent_ms = timestamp_ms;
             if(s_debug_log)
                Print("[DashboardConnector] Sync rejected for account ", account_number,
                      " (status=", res, ", body=", response_text, ")");

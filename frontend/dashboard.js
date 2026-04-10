@@ -374,6 +374,9 @@ function cycleFontPreset() {
     const next = FONT_PRESETS[nextIndex].key;
     localStorage.setItem(FONT_KEY, next);
     applyFont(next);
+    if (state.lastData) {
+        renderDashboard(state.lastData);
+    }
 }
 
 function cycleFontSizePreset() {
@@ -383,6 +386,9 @@ function cycleFontSizePreset() {
     const next = FONT_SIZE_PRESETS[nextIndex].key;
     localStorage.setItem(FONT_SIZE_KEY, next);
     applyFontSize(next);
+    if (state.lastData) {
+        renderDashboard(state.lastData);
+    }
 }
 
 function toggleQuickControls() {
@@ -834,6 +840,15 @@ function getChartColorVar(name) {
     return getComputedStyle(document.body).getPropertyValue(name).trim();
 }
 
+function getChartFontSpec() {
+    const rootStyles = getComputedStyle(document.documentElement);
+    const bodyStyles = getComputedStyle(document.body);
+    const family = bodyStyles.getPropertyValue('font-family').trim() || 'Segoe UI, sans-serif';
+    const baseSizePx = toNum(parseFloat(rootStyles.getPropertyValue('--app-font-size')) || parseFloat(rootStyles.fontSize), 16);
+    const size = Math.max(11, Math.min(15, Math.round(baseSizePx * 0.78)));
+    return { family, size };
+}
+
 function hasUsableSeries(rows, valueKey) {
     if (!Array.isArray(rows) || rows.length === 0) {
         return false;
@@ -855,6 +870,7 @@ function buildBarDataset(label, values, positive, negative, neutral) {
 }
 
 function buildBarChartOptions(text, labelCount = 0) {
+    const chartFont = getChartFontSpec();
     return {
         responsive: true,
         maintainAspectRatio: false,
@@ -862,12 +878,13 @@ function buildBarChartOptions(text, labelCount = 0) {
             padding: { left: 10, right: 18, top: 8, bottom: 18 },
         },
         plugins: {
-            legend: { labels: { color: text } },
+            legend: { labels: { color: text, font: chartFont } },
         },
         scales: {
             x: {
                 ticks: {
                     color: text,
+                    font: chartFont,
                     autoSkip: true,
                     maxTicksLimit: maxTicksForCount(labelCount),
                     maxRotation: 0,
@@ -881,6 +898,7 @@ function buildBarChartOptions(text, labelCount = 0) {
             y: {
                 ticks: {
                     color: text,
+                    font: chartFont,
                     maxTicksLimit: 6,
                 },
                 grid: {
@@ -978,6 +996,7 @@ function updateCharts(data) {
     const negative = getChartColorVar('--pnl-negative');
     const neutral = getChartColorVar('--pnl-neutral');
     const text = getChartColorVar('--text');
+    const chartFont = getChartFontSpec();
     const accent = getChartColorVar('--accent');
     const accentRgb = getChartColorVar('--accent-rgb') || '47, 143, 98';
     const floatingPointColor = '#ff8a00';
@@ -1041,7 +1060,7 @@ function updateCharts(data) {
                     padding: { left: 10, right: 18, top: 8, bottom: 18 },
                 },
                 plugins: {
-                    legend: { display: false, labels: { color: text } },
+                    legend: { display: false, labels: { color: text, font: chartFont } },
                     tooltip: {
                         callbacks: {
                             title: (items) => {
@@ -1062,12 +1081,13 @@ function updateCharts(data) {
                             maxRotation: 0,
                             minRotation: 0,
                             color: text,
+                            font: chartFont,
                             padding: 6,
                         },
                         grid: { display: false },
                     },
                     y: {
-                        ticks: { color: text },
+                        ticks: { color: text, font: chartFont },
                     },
                 },
             },
@@ -1086,8 +1106,11 @@ function updateCharts(data) {
         charts.pnlCurve.data.datasets[0].fill = mainCurveFill;
         charts.pnlCurve.data.datasets[0].showLine = mainCurveType !== 'scatter';
         charts.pnlCurve.options.plugins.legend.labels.color = text;
+        charts.pnlCurve.options.plugins.legend.labels.font = chartFont;
         charts.pnlCurve.options.scales.x.ticks.color = text;
+        charts.pnlCurve.options.scales.x.ticks.font = chartFont;
         charts.pnlCurve.options.scales.y.ticks.color = text;
+        charts.pnlCurve.options.scales.y.ticks.font = chartFont;
         charts.pnlCurve.update();
     }
 
@@ -1141,8 +1164,11 @@ function updateCharts(data) {
         charts.dailyPnl.data.datasets[0].data = dailyValues;
         charts.dailyPnl.data.datasets[0].backgroundColor = dailyValues.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
         charts.dailyPnl.options.plugins.legend.labels.color = text;
+        charts.dailyPnl.options.plugins.legend.labels.font = chartFont;
         charts.dailyPnl.options.scales.x.ticks.color = text;
+        charts.dailyPnl.options.scales.x.ticks.font = chartFont;
         charts.dailyPnl.options.scales.y.ticks.color = text;
+        charts.dailyPnl.options.scales.y.ticks.font = chartFont;
         charts.dailyPnl.options.scales.x.ticks.maxTicksLimit = maxTicksForCount(dailyLabels.length);
         charts.dailyPnl.options.plugins.tooltip = {
             callbacks: {
@@ -1177,8 +1203,11 @@ function updateCharts(data) {
         charts.pnlByDayOfWeek.data.datasets[0].data = dayOfWeekPnL;
         charts.pnlByDayOfWeek.data.datasets[0].backgroundColor = dayOfWeekPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
         charts.pnlByDayOfWeek.options.plugins.legend.labels.color = text;
+        charts.pnlByDayOfWeek.options.plugins.legend.labels.font = chartFont;
         charts.pnlByDayOfWeek.options.scales.x.ticks.color = text;
+        charts.pnlByDayOfWeek.options.scales.x.ticks.font = chartFont;
         charts.pnlByDayOfWeek.options.scales.y.ticks.color = text;
+        charts.pnlByDayOfWeek.options.scales.y.ticks.font = chartFont;
         charts.pnlByDayOfWeek.update();
     }
 
@@ -1202,8 +1231,11 @@ function updateCharts(data) {
         charts.pnlByHourOfDay.data.datasets[0].data = hourOfDayPnL;
         charts.pnlByHourOfDay.data.datasets[0].backgroundColor = hourOfDayPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
         charts.pnlByHourOfDay.options.plugins.legend.labels.color = text;
+        charts.pnlByHourOfDay.options.plugins.legend.labels.font = chartFont;
         charts.pnlByHourOfDay.options.scales.x.ticks.color = text;
+        charts.pnlByHourOfDay.options.scales.x.ticks.font = chartFont;
         charts.pnlByHourOfDay.options.scales.y.ticks.color = text;
+        charts.pnlByHourOfDay.options.scales.y.ticks.font = chartFont;
         charts.pnlByHourOfDay.update();
     }
 }
