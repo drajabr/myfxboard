@@ -78,12 +78,6 @@ const getRangeStart = (label: 'today' | 'last7d' | 'last30d' | 'ytd' | 'all_time
   return 0;
 };
 
-
-const dayKey = (ts: number) => {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
-
 const buildFlatZeroCurve = (days: number, nowMs: number) => {
   const totalDays = Math.min(Math.max(days, 2), 3650);
   const points: Array<{ ts: number; equity: number }> = [];
@@ -241,8 +235,6 @@ router.get('/analytics', async (req: Request, res: Response) => {
     let balance = 0;
     const tradeCurveEvents: Array<{ ts: number; pnl: number }> = [];
 
-    const toMs = nowMs;
-    const fromMs = toMs - (curveDays * 24 * 60 * 60 * 1000);
     const filteredDailyMap = new Map<string, number>();
     const allTimeDailyMap = new Map<string, number>();
     const dayOfWeekMap = new Map<number, number>();
