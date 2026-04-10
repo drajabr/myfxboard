@@ -36,10 +36,10 @@ services:
       DATABASE_URL: postgresql://dashboard:dashboard_pass@postgres:5432/myfxboard
       PORT: 3000
       LOG_LEVEL: info
+      CONNECTOR_SHARED_SECRET: change-this-secret
       SYNC_REQUEST_TIMEOUT_MS: 5000
       SYNC_HISTORY_CHUNK_SIZE: 100
       SYNC_HISTORY_RATE_LIMIT_MS: 1500
-      UNLOCK_TOKEN_TTL_MINUTES: 30
       BACKFILL_WINDOW_DAYS: 90
     ports:
       - "3000:3000"

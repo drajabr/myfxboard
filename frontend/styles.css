@@ -87,7 +87,6 @@ body {
 }
 
 .icon-btn,
-.unlock-btn,
 .form-group button,
 .settings-form > button {
     border: 1px solid var(--border);
@@ -105,13 +104,11 @@ body {
     font-size: 0.9rem;
 }
 
-.unlock-btn,
 .form-group button,
 .settings-form > button {
     padding: 0.6rem 0.9rem;
 }
 
-.unlock-btn:hover,
 .icon-btn:hover,
 .form-group button:hover,
 .settings-form > button:hover {
@@ -315,48 +312,6 @@ body {
 .year-card .month {
     font-weight: 700;
     margin-bottom: 0.25rem;
-}
-
-.modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.55);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-}
-
-.modal.hidden {
-    display: none;
-}
-
-.modal-content {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    max-width: 460px;
-    width: 92%;
-    padding: 1rem;
-}
-
-.form-group {
-    margin-bottom: 0.8rem;
-}
-
-.form-group label {
-    display: block;
-    margin-bottom: 0.4rem;
-    color: var(--text-muted);
-}
-
-.close {
-    float: right;
-    cursor: pointer;
-    font-size: 1.4rem;
 }
 
 @media (max-width: 900px) {

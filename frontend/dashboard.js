@@ -86,14 +86,6 @@ function applyThemeFromSystemIfNeeded() {
 function setupEventListeners() {
     document.getElementById('themeToggleBtn').addEventListener('click', toggleTheme);
 
-    document.getElementById('unlockBtn').addEventListener('click', () => {
-        document.getElementById('settingsModal').classList.remove('hidden');
-    });
-
-    document.querySelector('.close').addEventListener('click', () => {
-        document.getElementById('settingsModal').classList.add('hidden');
-    });
-
     document.getElementById('accountSelector').addEventListener('change', (e) => {
         localStorage.setItem('selectedAccount', e.target.value);
         monthShift = 0;
@@ -439,30 +431,4 @@ document.addEventListener('DOMContentLoaded', () => {
     startAutoRefresh(5000);
 });
 
-async function unlockSettings() {
-    const token = document.getElementById('masterToken').value;
-    if (!token) {
-        return;
-    }
 
-    try {
-        document.getElementById('settingsForm').classList.remove('hidden');
-    } catch (_error) {
-        alert('Invalid token');
-    }
-}
-
-async function saveSettings() {
-    const theme = document.getElementById('theme').value;
-    const refreshInterval = Number(document.getElementById('refreshInterval').value || 5000);
-
-    localStorage.setItem(THEME_KEY, theme);
-    applyTheme(theme);
-    startAutoRefresh(refreshInterval);
-
-    alert('Settings saved!');
-    document.getElementById('settingsModal').classList.add('hidden');
-}
-
-window.unlockSettings = unlockSettings;
-window.saveSettings = saveSettings;
