@@ -107,7 +107,7 @@ public:
 
       // Backend auth expects unix epoch milliseconds, not terminal uptime milliseconds.
       long timestamp_ms = (long)TimeGMT() * 1000;
-      string current_account = LongToString((long)AccountInfoInteger(ACCOUNT_LOGIN));
+      string current_account = StringFormat("%lld", (long)AccountInfoInteger(ACCOUNT_LOGIN));
 
       long latest_closed_time_ms = 0;
       string latest_closed_deal_id = "";

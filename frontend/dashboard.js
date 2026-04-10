@@ -1,6 +1,7 @@
 const API_URL = '/api';
 const THEME_KEY = 'themePreference';
 const ACCENT_KEY = 'accentPreference';
+const BACKGROUND_KEY = 'backgroundPreference';
 const FONT_KEY = 'fontPreference';
 const FONT_SIZE_KEY = 'fontSizePreference';
 const QUICK_CONTROLS_COLLAPSED_KEY = 'quickControlsCollapsed';
@@ -62,6 +63,39 @@ const FONT_SIZE_PRESETS = [
     { key: '3', label: '3', size: '16px' },
     { key: '4', label: '4', size: '17px' },
     { key: '5', label: '5', size: '18px' },
+];
+
+const BACKGROUND_PRESETS = [
+    {
+        key: 'mint',
+        label: '🟩',
+        light: { bg: '#f2f9f4', surfaceAlt: '#f4fbf7', tintRgb: '59, 146, 99' },
+        dark: { bg: '#0f1714', surfaceAlt: '#13201a', tintRgb: '76, 156, 117' },
+    },
+    {
+        key: 'sky',
+        label: '🟦',
+        light: { bg: '#f2f7ff', surfaceAlt: '#f5f9ff', tintRgb: '67, 129, 214' },
+        dark: { bg: '#101722', surfaceAlt: '#131d2c', tintRgb: '101, 155, 229' },
+    },
+    {
+        key: 'sand',
+        label: '🟨',
+        light: { bg: '#fbf7ef', surfaceAlt: '#fcf9f2', tintRgb: '184, 138, 57' },
+        dark: { bg: '#1c1710', surfaceAlt: '#272015', tintRgb: '198, 156, 84' },
+    },
+    {
+        key: 'rose',
+        label: '🟥',
+        light: { bg: '#fbf3f6', surfaceAlt: '#fdf5f8', tintRgb: '191, 94, 120' },
+        dark: { bg: '#1b1116', surfaceAlt: '#261720', tintRgb: '196, 112, 136' },
+    },
+    {
+        key: 'slate',
+        label: '⬜',
+        light: { bg: '#f2f5f7', surfaceAlt: '#f5f8fa', tintRgb: '96, 124, 145' },
+        dark: { bg: '#101417', surfaceAlt: '#151c21', tintRgb: '113, 140, 159' },
+    },
 ];
 
 const state = {
@@ -211,6 +245,11 @@ function getPreferredAccent() {
     return ACCENT_PRESETS.some((preset) => preset.key === saved) ? saved : ACCENT_PRESETS[0].key;
 }
 
+function getPreferredBackground() {
+    const saved = localStorage.getItem(BACKGROUND_KEY);
+    return BACKGROUND_PRESETS.some((preset) => preset.key === saved) ? saved : BACKGROUND_PRESETS[0].key;
+}
+
 function getPreferredFont() {
     const saved = localStorage.getItem(FONT_KEY);
     return FONT_PRESETS.some((preset) => preset.key === saved) ? saved : FONT_PRESETS[0].key;
@@ -233,6 +272,10 @@ function getFontSizePreset(key) {
     return FONT_SIZE_PRESETS.find((preset) => preset.key === key) || FONT_SIZE_PRESETS[2];
 }
 
+function getBackgroundPreset(key) {
+    return BACKGROUND_PRESETS.find((preset) => preset.key === key) || BACKGROUND_PRESETS[0];
+}
+
 function getThemeMode() {
     return document.body.getAttribute('data-theme') || 'light';
 }
@@ -249,6 +292,22 @@ function applyAccentTheme(accentKey) {
     if (accentBtn) {
         accentBtn.style.color = modePalette.accent;
         accentBtn.title = `Accent: ${preset.key}`;
+    }
+}
+
+function applyBackgroundTheme(backgroundKey) {
+    const preset = getBackgroundPreset(backgroundKey);
+    const modePalette = getThemeMode() === 'dark' ? preset.dark : preset.light;
+    document.body.style.setProperty('--bg', modePalette.bg);
+    document.body.style.setProperty('--surface-alt', modePalette.surfaceAlt);
+    document.body.style.setProperty('--bg-tint-rgb', modePalette.tintRgb);
+
+    const backgroundBtn = document.getElementById('backgroundCycleBtn');
+    if (backgroundBtn) {
+        backgroundBtn.textContent = preset.label;
+        backgroundBtn.title = `Background: ${preset.key}`;
+        backgroundBtn.style.background = `radial-gradient(circle at 50% 50%, rgba(${modePalette.tintRgb}, 0.34), rgba(${modePalette.tintRgb}, 0.18))`;
+        backgroundBtn.style.borderColor = `rgba(${modePalette.tintRgb}, 0.52)`;
     }
 }
 
@@ -296,6 +355,18 @@ function cycleAccentTheme() {
     }
 }
 
+function cycleBackgroundTheme() {
+    const current = getPreferredBackground();
+    const currentIndex = BACKGROUND_PRESETS.findIndex((preset) => preset.key === current);
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % BACKGROUND_PRESETS.length : 0;
+    const next = BACKGROUND_PRESETS[nextIndex].key;
+    localStorage.setItem(BACKGROUND_KEY, next);
+    applyBackgroundTheme(next);
+    if (state.lastData) {
+        renderDashboard(state.lastData);
+    }
+}
+
 function cycleFontPreset() {
     const current = getPreferredFont();
     const currentIndex = FONT_PRESETS.findIndex((preset) => preset.key === current);
@@ -335,6 +406,7 @@ function applyTheme(theme) {
     if (themeSelect) {
         themeSelect.value = theme;
     }
+    applyBackgroundTheme(getPreferredBackground());
     applyAccentTheme(getPreferredAccent());
 }
 
@@ -355,6 +427,7 @@ function applyThemeFromSystemIfNeeded() {
 }
 
 function setupEventListeners() {
+    document.getElementById('backgroundCycleBtn').addEventListener('click', cycleBackgroundTheme);
     document.getElementById('themeToggleBtn').addEventListener('click', toggleTheme);
     document.getElementById('accentCycleBtn').addEventListener('click', cycleAccentTheme);
     document.getElementById('fontCycleBtn').addEventListener('click', cycleFontPreset);
@@ -1271,6 +1344,7 @@ function startAutoRefresh(interval) {
 
 document.addEventListener('DOMContentLoaded', () => {
     applyTheme(getPreferredTheme());
+    applyBackgroundTheme(getPreferredBackground());
     applyAccentTheme(getPreferredAccent());
     applyFont(getPreferredFont());
     applyFontSize(getPreferredFontSize());

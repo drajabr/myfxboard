@@ -9,6 +9,7 @@
     --accent: #2f8f62;
     --accent-strong: #25754f;
     --accent-rgb: 47, 143, 98;
+    --bg-tint-rgb: 47, 143, 98;
     --app-font: 'Bahnschrift', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     --app-font-size: 16px;
     --pnl-positive: #2f8f62;
@@ -31,6 +32,7 @@ body[data-theme='dark'] {
     --accent: #59bd87;
     --accent-strong: #86d5a9;
     --accent-rgb: 89, 189, 135;
+    --bg-tint-rgb: 89, 189, 135;
     --pnl-positive: #59bd87;
     --pnl-negative: #ff6b6b;
     --pnl-neutral: #90a0ba;
@@ -44,7 +46,7 @@ body[data-theme='dark'] {
 
 body {
     font-family: var(--app-font);
-    background: radial-gradient(circle at top right, rgba(var(--accent-rgb), 0.1), transparent 40%), var(--bg);
+    background: radial-gradient(circle at top right, rgba(var(--bg-tint-rgb), 0.12), transparent 40%), var(--bg);
     color: var(--text);
 }
 
@@ -238,14 +240,14 @@ body {
     right: 0;
     top: calc(100% + 0.45rem);
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 0.5rem;
     padding: 0.55rem;
     border-radius: 12px;
     border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
     background: color-mix(in srgb, var(--surface) 86%, var(--accent) 14%);
     box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
-    min-width: 228px;
+    min-width: 282px;
     opacity: 1;
     transform: translateY(0);
     transform-origin: top right;
@@ -282,6 +284,10 @@ body {
 
 .quick-control-item .icon-btn {
     background: color-mix(in srgb, var(--accent) 10%, var(--surface-alt));
+}
+
+#backgroundCycleBtn {
+    font-size: 1.05rem;
 }
 
 .quick-control-label {
@@ -818,7 +824,7 @@ body {
     }
 
     .ui-quick-controls {
-        min-width: 214px;
+        min-width: 272px;
         right: 0;
     }
 }
