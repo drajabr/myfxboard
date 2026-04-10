@@ -12,7 +12,7 @@
     "test:ci": "vitest run --passWithNoTests",
     "db:migrate": "node --loader tsx db/runMigrations.ts",
     "db:seed": "node --loader tsx db/seed.ts",
-    "lint": "eslint src --ext .ts",
+      "lint": "eslint -c .eslintrc.json src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\" \"db/**/*.ts\""
   },
   "dependencies": {

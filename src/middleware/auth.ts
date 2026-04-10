@@ -84,7 +84,6 @@ export const validateUnlockToken = async (req: any, _res: Response, next: NextFu
       return next();
     }
 
-    const token = match[1];
     // TODO: Validate token against database unlock_sessions table
     req.unlocked = true;
     next();

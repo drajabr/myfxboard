@@ -10,7 +10,6 @@ import ingestionRoutes from './api/ingestion.js';
 import { validateUnlockToken, requireUnlocked } from './middleware/auth.js';
 import { validateRequestBody, createAccountSchema, settingsUpdateSchema } from './middleware/validation.js';
 import { accountQueries } from './db/queries.js';
-import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 
 config();
@@ -98,7 +97,7 @@ app.post('/api/account/:accountId/unlock', async (req, res) => {
       return res.status(401).json({ error: 'Invalid master token' });
     }
 
-    const ttlMinutes = parseInt(process.env.UNLOCK_TOKEN_TTL_MINUTES || '30');
+    const ttlMinutes = parseInt(process.env.UNLOCK_TOKEN_TTL_MINUTES || '30', 10);
     const expiresAt = Date.now() + (ttlMinutes * 60 * 1000);
     const token = uuidv4();
 
