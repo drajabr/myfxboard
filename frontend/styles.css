@@ -93,7 +93,7 @@ body {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-end;
     margin-left: auto;
     min-width: 0;
@@ -108,8 +108,8 @@ body {
 }
 
 .account-selector {
-    min-width: 280px;
-    flex: 1 1 320px;
+    min-width: 220px;
+    flex: 1 1 260px;
 }
 
 .ui-controls-wrap {
@@ -745,7 +745,7 @@ body {
     margin-bottom: 0.25rem;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 760px) {
     .header {
         flex-direction: column;
         gap: 0.7rem;
@@ -801,6 +801,7 @@ body {
     }
 
     .header-right {
+        flex-wrap: wrap;
         width: 100%;
         row-gap: 0.5rem;
     }
