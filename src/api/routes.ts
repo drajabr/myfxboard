@@ -163,6 +163,7 @@ const buildEmptyAnalyticsResponse = (
     alltime_daily_pnl: [],
     pnl_by_day_of_week: [],
     pnl_by_hour_of_day: [],
+    trade_pnl_curve: [],
     equity_curve: buildFlatZeroCurve(curveDays, nowMs),
     balance_curve: buildFlatZeroBalanceCurve(curveDays, nowMs),
     symbol_exposure: [],
@@ -215,11 +216,10 @@ router.get('/analytics', async (req: Request, res: Response) => {
     let recentTradesPool: any[] = [];
     let equity = 0;
     let balance = 0;
+    const tradeCurveEvents: Array<{ ts: number; pnl: number }> = [];
 
     const toMs = nowMs;
     const fromMs = toMs - (curveDays * 24 * 60 * 60 * 1000);
-    const curveByDay = new Map<string, { ts: number; equity: number }>();
-    const balanceByDay = new Map<string, { ts: number; balance: number }>();
     const filteredDailyMap = new Map<string, number>();
     const allTimeDailyMap = new Map<string, number>();
     const dayOfWeekMap = new Map<number, number>();
@@ -280,8 +280,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
       const [
         accPositionsRaw,
         latestSnapshotRaw,
-        snapshotsRaw,
         recentTradesRaw,
+        curveTradesRaw,
         filteredCount,
         filteredSummary,
         filteredDailyRows,
@@ -299,8 +299,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
       ] = await Promise.all([
         positionQueries.findByAccount(accountId),
         snapshotQueries.findLatestByAccount(accountId),
-        snapshotQueries.findByAccountAndRange(accountId, fromMs, toMs),
         tradeQueries.findWindowedByEventTime(accountId, filterStartMs, filterEndMs, recentTradesLimit),
+        tradeQueries.findByEventTimeRange(accountId, filterStartMs, filterEndMs),
         tradeQueries.countByEventTimeRange(accountId, filterStartMs, filterEndMs),
         tradeQueries.summarizeByEventTimeRange(accountId, filterStartMs, filterEndMs),
         tradeQueries.summarizeDailyPnlByEventTimeRange(accountId, dailyPnlStartMs, dailyPnlEndMs),
@@ -319,8 +319,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
 
       const accPositions = accPositionsRaw.map(normalizePosition);
       const accRecentTrades = recentTradesRaw.map(normalizeTrade);
+  const curveTrades = curveTradesRaw.map(normalizeTrade);
       const latestSnapshot = latestSnapshotRaw ? normalizeSnapshot(latestSnapshotRaw) : null;
-      const snapshots = snapshotsRaw.map(normalizeSnapshot);
 
       positions = positions.concat(accPositions);
       recentTradesPool = recentTradesPool.concat(accRecentTrades);
@@ -405,32 +405,15 @@ router.get('/analytics', async (req: Request, res: Response) => {
         yearMonthMap.set(row.month, existing);
       });
 
-      snapshots.forEach((s) => {
-        if (!s.snapshot_time_ms) {
+      curveTrades.forEach((trade) => {
+        const ts = toNum(trade.exit_time_ms || trade.entry_time_ms, 0);
+        if (!ts) {
           return;
         }
-        const equityValue = toNum(s.equity, 0);
-        const balanceValue = toNum(s.balance, 0);
-        const key = dayKey(s.snapshot_time_ms);
-        const existing = curveByDay.get(key);
-        if (!existing) {
-          curveByDay.set(key, { ts: s.snapshot_time_ms, equity: equityValue });
-        } else {
-          existing.equity += equityValue;
-          if (s.snapshot_time_ms > existing.ts) {
-            existing.ts = s.snapshot_time_ms;
-          }
-        }
-
-        const existingBalance = balanceByDay.get(key);
-        if (!existingBalance) {
-          balanceByDay.set(key, { ts: s.snapshot_time_ms, balance: balanceValue });
-        } else {
-          existingBalance.balance += balanceValue;
-          if (s.snapshot_time_ms > existingBalance.ts) {
-            existingBalance.ts = s.snapshot_time_ms;
-          }
-        }
+        tradeCurveEvents.push({
+          ts,
+          pnl: toNum(trade.profit),
+        });
       });
     }
 
@@ -515,15 +498,18 @@ router.get('/analytics', async (req: Request, res: Response) => {
       trades: yearMonthMap.get(month)?.trades || 0,
     }));
 
-    const equityCurveRaw = Array.from(curveByDay.values()).sort((a, b) => a.ts - b.ts);
-    const equityCurve = equityCurveRaw.length > 0 ? equityCurveRaw : buildFlatZeroCurve(curveDays, nowMs);
-    const balanceCurveRaw = Array.from(balanceByDay.values()).sort((a, b) => a.ts - b.ts);
-    const balanceCurve = balanceCurveRaw.length > 0 ? balanceCurveRaw : buildFlatZeroBalanceCurve(curveDays, nowMs);
-
-    // Build closed trade PnL time series for charting
-    const tradePnlSeries = recentTradesPool
-      .filter(t => t.exit_time_ms)
-      .map(t => ({ ts: t.exit_time_ms, pnl: t.profit }));
+    const tradePnlCurve = tradeCurveEvents
+      .slice()
+      .sort((a, b) => a.ts - b.ts)
+      .reduce<Array<{ ts: number; pnl: number; cumulative_pnl: number }>>((acc, point) => {
+        const previous = acc.length > 0 ? acc[acc.length - 1].cumulative_pnl : 0;
+        acc.push({
+          ts: point.ts,
+          pnl: point.pnl,
+          cumulative_pnl: previous + point.pnl,
+        });
+        return acc;
+      }, []);
 
     res.json({
       scope: accountIdParam === 'all' ? 'all' : 'single',
@@ -546,9 +532,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
       alltime_daily_pnl: allTimeDailyPnl,
       pnl_by_day_of_week: pnlByDayOfWeek,
       pnl_by_hour_of_day: pnlByHourOfDay,
-      trade_pnl_series: tradePnlSeries,
-      equity_curve: equityCurve,
-      balance_curve: balanceCurve,
+      trade_pnl_curve: tradePnlCurve,
       symbol_exposure: symbolExposure,
       calendars: {
         monthly: {

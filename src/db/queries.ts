@@ -195,6 +195,22 @@ export const tradeQueries = {
     return result.rows;
   },
 
+  async findByEventTimeRange(
+    account_id: string,
+    from_time_ms: number,
+    to_time_ms: number
+  ): Promise<Trade[]> {
+    const result = await query(
+      `SELECT *
+         FROM trades
+        WHERE account_id = $1
+          AND COALESCE(exit_time_ms, entry_time_ms) BETWEEN $2 AND $3
+        ORDER BY COALESCE(exit_time_ms, entry_time_ms) ASC, id ASC`,
+      [account_id, from_time_ms, to_time_ms]
+    );
+    return result.rows;
+  },
+
   async countByEventTimeRange(account_id: string, from_time_ms: number, to_time_ms: number): Promise<number> {
     const result = await query(
       `SELECT COUNT(*)::int AS total
