@@ -619,9 +619,14 @@ async function fetchAnalytics(accountId) {
 }
 
 function updateStatusStrip(summary) {
-    document.getElementById('lastRefresh').textContent = `Last refresh: ${new Date().toLocaleTimeString()}`;
-    document.getElementById('accountsCount').textContent = `Accounts: ${summary.accounts_count}`;
-    document.getElementById('positionsCount').textContent = `Open positions: ${summary.open_positions}`;
+    const systemStatusText = document.getElementById('systemStatusText');
+    if (!systemStatusText) {
+        return;
+    }
+    if (String(systemStatusText.textContent || '').startsWith('Error:')) {
+        return;
+    }
+    systemStatusText.textContent = 'Healthy';
 }
 
 function updateKpis(summary, periods, tradeMetrics, filteredSummary) {

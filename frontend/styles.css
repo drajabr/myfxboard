@@ -64,9 +64,6 @@ body {
     justify-content: space-between;
     align-items: center;
     box-shadow: var(--shadow);
-    position: sticky;
-    top: 0;
-    z-index: 10;
 }
 
 .header-left {
@@ -79,6 +76,37 @@ body {
 .header-left h1 {
     font-size: 1.35rem;
     font-weight: 700;
+}
+
+.brand-title {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0;
+    margin: 0;
+    line-height: 1;
+    text-transform: lowercase;
+    font-family: 'Bahnschrift SemiCondensed', 'Arial Narrow', 'Segoe UI', sans-serif;
+    font-style: italic;
+    font-size: 1.7rem;
+    letter-spacing: 0.01em;
+    transform: skewX(-7deg);
+}
+
+.brand-my {
+    color: var(--text-muted);
+    font-weight: 650;
+}
+
+.brand-fx {
+    color: var(--accent-strong);
+    font-weight: 900;
+    letter-spacing: 0.03em;
+    text-shadow: 0 0 0.01em color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.brand-board {
+    color: var(--text);
+    font-weight: 800;
 }
 
 .account-selector,
