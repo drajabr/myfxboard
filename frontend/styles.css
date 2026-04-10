@@ -192,61 +192,19 @@ body {
     gap: 0.9rem;
 }
 
-.performance-layout {
-    display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
-    gap: 0.9rem;
-    align-items: start;
-}
-
 .summary-spotlight {
-    display: block;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 220px));
+    gap: 0.75rem;
 }
 
-.spotlight-card {
-    padding: 1rem;
-}
-
-.spotlight-card .value {
+.metric-card--spotlight .value {
     font-size: 1.45rem;
     font-weight: 800;
 }
 
-.spotlight-card--floating {
-    min-height: 118px;
-}
-
-.spotlight-card--floating .value {
-    font-size: 2.25rem;
-}
-
-.spotlight-card--equity {
-    width: 220px;
-    min-height: 220px;
-    aspect-ratio: 1 / 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-}
-
-.spotlight-card--equity .equity-main {
-    font-size: 2.5rem;
-    font-weight: 900;
-    margin-bottom: 0.2rem;
-    line-height: 1;
-}
-
-.spotlight-card--equity .floating-pnl-label {
-    font-size: 0.9rem;
-    color: var(--text-muted);
-    margin: 0.6rem 0 0.15rem;
-}
-
-.spotlight-card--equity .floating-pnl {
-    font-size: 1.25rem;
-    font-weight: 700;
+.metric-card__meta {
+    margin-top: 0.45rem;
 }
 
 .kpi-cards {
@@ -550,13 +508,8 @@ body {
 }
 
 @media (max-width: 600px) {
-    .performance-layout {
-        grid-template-columns: 1fr;
-    }
-
     .summary-spotlight {
-        display: flex;
-        justify-content: center;
+        grid-template-columns: 1fr;
     }
 
     .spotlight-card--equity {

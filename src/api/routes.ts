@@ -158,6 +158,7 @@ const buildEmptyAnalyticsResponse = (
     recent_trades: [],
     trades_total_matching: 0,
     trades_returned: 0,
+    filtered_summary: { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0 },
     filtered_distribution: { wins: 0, losses: 0, neutral: 0 },
     filtered_daily_pnl: [],
     alltime_daily_pnl: [],
@@ -262,6 +263,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
       hold_count: 0,
     };
     let filteredTradesTotal = 0;
+    const filteredSummaryTotals = { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0 };
     const distribution = { wins: 0, losses: 0, neutral: 0 };
 
     const monthBase = new Date();
@@ -327,6 +329,11 @@ router.get('/analytics', async (req: Request, res: Response) => {
       equity += latestSnapshot?.equity || latestSnapshot?.balance || 0;
       balance += latestSnapshot?.balance || 0;
       filteredTradesTotal += filteredCount;
+      filteredSummaryTotals.pnl += toNum(filteredSummary.pnl);
+      filteredSummaryTotals.trades_count += toNum(filteredSummary.trades_count);
+      filteredSummaryTotals.wins += toNum(filteredSummary.wins);
+      filteredSummaryTotals.losses += toNum(filteredSummary.losses);
+      filteredSummaryTotals.neutral += toNum(filteredSummary.neutral);
       distribution.wins += filteredSummary.wins || 0;
       distribution.losses += filteredSummary.losses || 0;
       distribution.neutral += filteredSummary.neutral || 0;
@@ -527,6 +534,13 @@ router.get('/analytics', async (req: Request, res: Response) => {
       recent_trades: recentTrades,
       trades_total_matching: filteredTradesTotal,
       trades_returned: recentTrades.length,
+      filtered_summary: {
+        pnl: toNum(filteredSummaryTotals.pnl),
+        trades_count: toNum(filteredSummaryTotals.trades_count),
+        wins: toNum(filteredSummaryTotals.wins),
+        losses: toNum(filteredSummaryTotals.losses),
+        neutral: toNum(filteredSummaryTotals.neutral),
+      },
       filtered_distribution: distribution,
       filtered_daily_pnl: filteredDailyPnl,
       alltime_daily_pnl: allTimeDailyPnl,

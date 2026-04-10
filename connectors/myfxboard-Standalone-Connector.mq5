@@ -141,6 +141,8 @@ public:
                s_last_live_payload_hash = live_payload_hash;
                s_last_live_payload_sent_ms = timestamp_ms;
                s_last_sync_ms = now_ms;
+               s_last_sync_ok = true;
+               s_success_count++;
                if(s_debug_log)
                   Print("[DashboardConnector] Startup health check matched server state, skipping initial full sync");
                return false;
@@ -298,6 +300,8 @@ private:
                      s_last_live_payload_hash = live_payload_hash;
                      s_last_live_payload_sent_ms = timestamp_ms;
                      s_last_sync_ms = now_ms;
+                     s_last_sync_ok = true;
+                     s_success_count++;
                      if(s_debug_log)
                         Print("[DashboardConnector] Startup health check matched server state, skipping initial full sync");
                      return false;

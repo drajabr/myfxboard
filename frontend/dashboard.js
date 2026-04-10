@@ -62,6 +62,13 @@ function formatPct(value) {
     return `${Number(value || 0).toFixed(1)}%`;
 }
 
+function formatDeltaPct(value) {
+    const numeric = toNum(value, 0);
+    const arrow = numeric > 0 ? '↑' : numeric < 0 ? '↓' : '→';
+    const sign = numeric > 0 ? '+' : '';
+    return `${arrow} ${sign}${numeric.toFixed(1)}%`;
+}
+
 function pnlClass(value) {
     if (value > 0) {
         return 'pnl-positive';
@@ -277,14 +284,38 @@ function updateStatusStrip(summary) {
     document.getElementById('positionsCount').textContent = `Open positions: ${summary.open_positions}`;
 }
 
-function updateKpis(summary, periods, tradeMetrics) {
+function updateKpis(summary, periods, tradeMetrics, filteredSummary) {
     const equityEl = document.getElementById('equity');
     const floatingEl = document.getElementById('floatingPnl');
+    const equityMetaEl = document.getElementById('equityMeta');
+    const floatingMetaEl = document.getElementById('floatingPnlMeta');
+
+    const balanceBase = Math.max(Math.abs(toNum(summary.balance, 0)), 1);
+    const floatingPct = (toNum(summary.floating_pnl, 0) / balanceBase) * 100;
+
+    const rangePnl = state.activeTradeFilter
+        ? toNum(filteredSummary?.pnl, 0)
+        : toNum(periods?.all_time?.pnl, 0);
+    const equityBase = Math.max(Math.abs(toNum(summary.balance, 0) - rangePnl), 1);
+    const equityPct = (rangePnl / equityBase) * 100;
 
     equityEl.textContent = formatMoney(summary.equity);
     floatingEl.textContent = formatMoney(summary.floating_pnl);
 
+    if (floatingMetaEl) {
+        floatingMetaEl.textContent = formatDeltaPct(floatingPct);
+        floatingMetaEl.className = `label metric-card__meta ${pnlClass(summary.floating_pnl)}`;
+    }
+
+    if (equityMetaEl) {
+        equityMetaEl.textContent = state.activeTradeFilter
+            ? `${formatDeltaPct(equityPct)} selected range`
+            : `${formatDeltaPct(equityPct)} all history`;
+        equityMetaEl.className = `label metric-card__meta ${pnlClass(rangePnl)}`;
+    }
+
     applyPnlClass(floatingEl, summary.floating_pnl);
+    applyPnlClass(equityEl, rangePnl);
 }
 
 function renderPeriodStats(periods) {
@@ -699,7 +730,7 @@ function setLoadState(loading, errorMessage = '') {
 
 function renderDashboard(data) {
     updateStatusStrip(data.summary);
-    updateKpis(data.summary, data.periods, data.trade_metrics);
+    updateKpis(data.summary, data.periods, data.trade_metrics, data.filtered_summary);
     renderPeriodStats(data.periods);
     renderTradeMetrics(data.trade_metrics);
     updatePositionsTable(data.positions);

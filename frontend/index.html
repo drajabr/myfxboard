@@ -34,17 +34,19 @@
         <main class="main-content">
             <section class="table-section section-performance-windows">
                 <h3>Performance Windows</h3>
-                <div class="performance-layout">
-                    <div class="summary-spotlight">
-                        <div class="card spotlight-card spotlight-card--equity">
-                            <label>Equity</label>
-                            <div class="value equity-main" id="equity">$ 0.00</div>
-                            <div class="floating-pnl-label">Floating PnL</div>
-                            <div class="value floating-pnl" id="floatingPnl">$ 0.00</div>
-                        </div>
+                <div class="summary-spotlight">
+                    <div class="metric-card metric-card--spotlight">
+                        <div class="label">Floating PnL</div>
+                        <div class="value" id="floatingPnl">$ 0.00</div>
+                        <div class="label metric-card__meta" id="floatingPnlMeta">→ 0.0%</div>
                     </div>
-                    <div class="metric-grid" id="periodStatsGrid"></div>
+                    <div class="metric-card metric-card--spotlight">
+                        <div class="label">Equity</div>
+                        <div class="value" id="equity">$ 0.00</div>
+                        <div class="label metric-card__meta" id="equityMeta">→ 0.0% all history</div>
+                    </div>
                 </div>
+                <div class="metric-grid" id="periodStatsGrid"></div>
             </section>
 
             <section class="charts-row">
