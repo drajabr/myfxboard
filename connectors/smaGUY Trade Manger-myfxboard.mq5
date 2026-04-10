@@ -69,7 +69,7 @@ private:
    }
 
 public:
-   static void Init(string url, string psk, int interval_sec, int keepalive_sec = 60, bool debug = false) {
+   static void Init(string url, string psk, int interval_sec, int keepalive_sec = 0, bool debug = false) {
       s_url              = url;
       s_psk              = psk;
       s_sync_interval_ms = interval_sec * 1000;
@@ -147,6 +147,32 @@ public:
                Print("[DashboardConnector] No live payload changes, skipping sync");
                s_last_log_ms = now_ms;
             }
+            return false;
+         }
+
+         bool history_sync_required = false;
+         string server_history_hash = "";
+         s_last_sync_ms = now_ms;
+         if(PostHealthCheck(current_account, timestamp_ms, history_hash, history_sync_required, server_history_hash)) {
+            if(server_history_hash != "")
+               s_last_ack_history_hash = server_history_hash;
+            s_success_count++;
+            s_last_sync_ok = true;
+            s_last_live_payload_sent_ms = timestamp_ms;
+            if(!history_sync_required) {
+               if(s_debug_log)
+                  Print("[DashboardConnector] Keepalive health accepted, no payload needed");
+               return false;
+            }
+
+            include_history = true;
+            if(s_debug_log)
+               Print("[DashboardConnector] Keepalive health requested history sync");
+         } else {
+            s_error_count++;
+            s_last_sync_ok = false;
+            if(s_debug_log)
+               Print("[DashboardConnector] Keepalive health failed, skipping full sync");
             return false;
          }
       }
@@ -571,7 +597,7 @@ private:
 string DashboardConnector::s_url              = "";
 string DashboardConnector::s_psk              = "";
 int    DashboardConnector::s_sync_interval_ms = 3000;
-int    DashboardConnector::s_keepalive_ms     = 60000;
+int    DashboardConnector::s_keepalive_ms     = 0;
 ulong  DashboardConnector::s_last_sync_ms     = 0;
 bool   DashboardConnector::s_in_flight        = false;
 int    DashboardConnector::s_success_count    = 0;
@@ -762,7 +788,7 @@ input bool   InpEnableDashboardSync = false;         // Enable Dashboard Sync
 input string InpDashboardUrl = "http://localhost:3000";  // Server URL
 input string InpDashboardPSK = "";                   // Shared connector secret
 input int    InpDashboardSyncIntervalSec = 3;        // Sync Interval (seconds)
-input int    InpDashboardKeepaliveSec = 60;          // Keepalive Interval (seconds, 0=disable)
+input int    InpDashboardKeepaliveSec = 0;           // Keepalive Interval (seconds, 0=disable)
 input bool   InpDashboardDebugLog = false;           // Debug Logging
 
 // === GLOBALS ==="
