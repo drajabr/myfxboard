@@ -287,6 +287,75 @@ body {
     font-size: 0.95rem;
 }
 
+.distribution-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 0.25rem;
+}
+
+.distribution-track {
+    display: flex;
+    width: 100%;
+    height: 16px;
+    border-radius: 999px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--surface-alt);
+    box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.distribution-segment {
+    height: 100%;
+    transition: width 220ms ease;
+}
+
+.distribution-segment--wins {
+    background: linear-gradient(90deg, color-mix(in srgb, var(--pnl-positive) 82%, #ffffff), var(--pnl-positive));
+}
+
+.distribution-segment--losses {
+    background: linear-gradient(90deg, color-mix(in srgb, var(--pnl-negative) 82%, #ffffff), var(--pnl-negative));
+}
+
+.distribution-segment--neutral {
+    background: linear-gradient(90deg, color-mix(in srgb, var(--pnl-neutral) 82%, #ffffff), var(--pnl-neutral));
+}
+
+.distribution-legend {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+
+.distribution-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.distribution-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: inline-block;
+    flex: 0 0 auto;
+}
+
+.distribution-dot--wins {
+    background: var(--pnl-positive);
+}
+
+.distribution-dot--losses {
+    background: var(--pnl-negative);
+}
+
+.distribution-dot--neutral {
+    background: var(--pnl-neutral);
+}
+
 .table-section {
     padding: 1rem;
     margin-bottom: 1rem;
@@ -504,6 +573,10 @@ body {
 
     .year-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .distribution-legend {
+        grid-template-columns: 1fr;
     }
 }
 

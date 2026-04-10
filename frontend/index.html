@@ -125,7 +125,27 @@
             <section class="charts-row">
                 <div class="chart-container">
                     <h3>Win/Loss Distribution</h3>
-                    <canvas id="winLossChart"></canvas>
+                    <div id="winLossProgress" class="distribution-progress" aria-live="polite">
+                        <div class="distribution-track" role="img" aria-label="Wins, losses, and neutral distribution">
+                            <div id="distWinsSegment" class="distribution-segment distribution-segment--wins" style="width:0%"></div>
+                            <div id="distLossesSegment" class="distribution-segment distribution-segment--losses" style="width:0%"></div>
+                            <div id="distNeutralSegment" class="distribution-segment distribution-segment--neutral" style="width:100%"></div>
+                        </div>
+                        <div class="distribution-legend">
+                            <div class="distribution-item">
+                                <span class="distribution-dot distribution-dot--wins"></span>
+                                <span id="distWinsText">Wins: 0 (0.0%)</span>
+                            </div>
+                            <div class="distribution-item">
+                                <span class="distribution-dot distribution-dot--losses"></span>
+                                <span id="distLossesText">Losses: 0 (0.0%)</span>
+                            </div>
+                            <div class="distribution-item">
+                                <span class="distribution-dot distribution-dot--neutral"></span>
+                                <span id="distNeutralText">Neutral: 0 (0.0%)</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="chart-container">
                     <h3 id="dailyPnlChartTitle">Daily PnL (All Time)</h3>

@@ -19,7 +19,6 @@ const state = {
 
 const charts = {
     pnlCurve: null,
-    winLoss: null,
     dailyPnl: null,
     pnlByDayOfWeek: null,
     pnlByHourOfDay: null,
@@ -56,6 +55,18 @@ function formatDateMs(value) {
     }
     const d = new Date(ms);
     return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString();
+}
+
+function formatDateShortMs(value) {
+    const ms = toNum(value, 0);
+    if (!ms) {
+        return '';
+    }
+    const d = new Date(ms);
+    if (Number.isNaN(d.getTime())) {
+        return '';
+    }
+    return d.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' });
 }
 
 function formatPct(value) {
@@ -479,30 +490,119 @@ function hasUsableSeries(rows, valueKey) {
     return rows.some((row) => toNum(row?.[valueKey], 0) !== 0);
 }
 
+function buildBarDataset(label, values, positive, negative, neutral) {
+    return {
+        label,
+        data: values,
+        backgroundColor: values.map((v) => (v > 0 ? positive : v < 0 ? negative : neutral)),
+        borderRadius: 8,
+        borderSkipped: false,
+        categoryPercentage: 0.72,
+        barPercentage: 0.9,
+        maxBarThickness: 22,
+    };
+}
+
+function buildBarChartOptions(text) {
+    return {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { labels: { color: text } },
+        },
+        scales: {
+            x: {
+                ticks: {
+                    color: text,
+                    autoSkip: true,
+                    maxTicksLimit: 10,
+                    maxRotation: 0,
+                    minRotation: 0,
+                },
+                grid: {
+                    display: false,
+                },
+            },
+            y: {
+                ticks: {
+                    color: text,
+                    maxTicksLimit: 6,
+                },
+                grid: {
+                    color: 'rgba(125, 138, 159, 0.2)',
+                    drawBorder: false,
+                },
+            },
+        },
+    };
+}
+
+function updateDistributionProgress(wins, losses, neutralCount) {
+    const winsSegment = document.getElementById('distWinsSegment');
+    const lossesSegment = document.getElementById('distLossesSegment');
+    const neutralSegment = document.getElementById('distNeutralSegment');
+    const winsText = document.getElementById('distWinsText');
+    const lossesText = document.getElementById('distLossesText');
+    const neutralText = document.getElementById('distNeutralText');
+
+    if (!winsSegment || !lossesSegment || !neutralSegment || !winsText || !lossesText || !neutralText) {
+        return;
+    }
+
+    const total = Math.max(0, wins + losses + neutralCount);
+    const winsPct = total > 0 ? (wins / total) * 100 : 0;
+    const lossesPct = total > 0 ? (losses / total) * 100 : 0;
+    const neutralPct = total > 0 ? (neutralCount / total) * 100 : 100;
+
+    winsSegment.style.width = `${winsPct}%`;
+    lossesSegment.style.width = `${lossesPct}%`;
+    neutralSegment.style.width = `${neutralPct}%`;
+
+    winsText.textContent = `Wins: ${wins} (${winsPct.toFixed(1)}%)`;
+    lossesText.textContent = `Losses: ${losses} (${lossesPct.toFixed(1)}%)`;
+    neutralText.textContent = `Neutral: ${neutralCount} (${neutralPct.toFixed(1)}%)`;
+}
+
 function updateCharts(data) {
     const positive = getChartColorVar('--pnl-positive');
     const negative = getChartColorVar('--pnl-negative');
     const neutral = getChartColorVar('--pnl-neutral');
     const text = getChartColorVar('--text');
     const accent = getChartColorVar('--accent');
+    const floatingPointColor = '#ff8a00';
 
     const tradePnlCurveRows = Array.isArray(data.trade_pnl_curve) ? data.trade_pnl_curve : [];
+    const floatingPnl = toNum(data.summary?.floating_pnl);
     const fallbackCurve = Array.from({ length: 30 }, (_, idx) => {
         const ts = new Date(Date.now() - ((29 - idx) * 24 * 60 * 60 * 1000)).setHours(0, 0, 0, 0);
         return { ts, cumulative_pnl: 0 };
     });
 
-    const mainCurveRows = tradePnlCurveRows.length > 0 ? tradePnlCurveRows : fallbackCurve;
+    const baseCurveRows = tradePnlCurveRows.length > 0 ? tradePnlCurveRows : fallbackCurve;
+    const mainCurveRows = baseCurveRows.slice();
+    const lastBaseValue = mainCurveRows.length > 0 ? toNum(mainCurveRows[mainCurveRows.length - 1].cumulative_pnl) : 0;
+    mainCurveRows.push({
+        ts: Date.now(),
+        cumulative_pnl: lastBaseValue + floatingPnl,
+    });
+
     const mainCurveValues = mainCurveRows.map((d) => toNum(d.cumulative_pnl));
     const mainCurveLabel = 'PnL Curve';
     const mainCurveType = 'line';
-    const mainCurveLabels = mainCurveRows.map((d) => formatDateTimeMs(d.ts));
+    const mainCurveLabels = mainCurveRows.map((d) => formatDateShortMs(d.ts));
     const mainCurvePointRadius = tradePnlCurveRows.length > 0 ? 2.5 : 1.5;
     const mainCurveFill = false;
+    const mainCurvePointBackgroundColor = mainCurveRows.map((_, idx) =>
+        idx === mainCurveRows.length - 1 ? floatingPointColor : accent
+    );
+    const mainCurvePointBorderColor = mainCurvePointBackgroundColor;
+    const mainCurvePointRadiusByIndex = mainCurveRows.map((_, idx) =>
+        idx === mainCurveRows.length - 1 ? 5 : mainCurvePointRadius
+    );
 
     const pnlCurveTitle = document.getElementById('pnlCurveTitle');
     if (pnlCurveTitle) {
-        pnlCurveTitle.textContent = 'PnL Curve (Closed Trades)';
+        pnlCurveTitle.textContent = 'PnL Curve (Last Point Includes Floating PnL)';
     }
 
     if (!charts.pnlCurve) {
@@ -516,7 +616,10 @@ function updateCharts(data) {
                     borderColor: accent,
                     backgroundColor: 'rgba(31, 111, 235, 0.12)',
                     tension: 0.25,
-                    pointRadius: mainCurvePointRadius,
+                    pointRadius: mainCurvePointRadiusByIndex,
+                    pointHoverRadius: mainCurvePointRadiusByIndex.map((r) => r + 1),
+                    pointBackgroundColor: mainCurvePointBackgroundColor,
+                    pointBorderColor: mainCurvePointBorderColor,
                     fill: mainCurveFill,
                     showLine: mainCurveType !== 'scatter',
                 }],
@@ -524,7 +627,35 @@ function updateCharts(data) {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { labels: { color: text } } },
+                plugins: {
+                    legend: { labels: { color: text } },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => {
+                                if (!items.length) {
+                                    return '';
+                                }
+                                const idx = items[0].dataIndex;
+                                return formatDateTimeMs(mainCurveRows[idx]?.ts);
+                            },
+                        },
+                    },
+                },
+                scales: {
+                    x: {
+                        ticks: {
+                            autoSkip: true,
+                            maxTicksLimit: 8,
+                            maxRotation: 0,
+                            minRotation: 0,
+                            color: text,
+                        },
+                        grid: { display: false },
+                    },
+                    y: {
+                        ticks: { color: text },
+                    },
+                },
             },
         });
     } else {
@@ -533,31 +664,22 @@ function updateCharts(data) {
         charts.pnlCurve.data.datasets[0].label = mainCurveLabel;
         charts.pnlCurve.data.datasets[0].data = mainCurveValues;
         charts.pnlCurve.data.datasets[0].borderColor = accent;
-        charts.pnlCurve.data.datasets[0].pointRadius = mainCurvePointRadius;
+        charts.pnlCurve.data.datasets[0].pointRadius = mainCurvePointRadiusByIndex;
+        charts.pnlCurve.data.datasets[0].pointHoverRadius = mainCurvePointRadiusByIndex.map((r) => r + 1);
+        charts.pnlCurve.data.datasets[0].pointBackgroundColor = mainCurvePointBackgroundColor;
+        charts.pnlCurve.data.datasets[0].pointBorderColor = mainCurvePointBorderColor;
         charts.pnlCurve.data.datasets[0].fill = mainCurveFill;
         charts.pnlCurve.data.datasets[0].showLine = mainCurveType !== 'scatter';
         charts.pnlCurve.options.plugins.legend.labels.color = text;
+        charts.pnlCurve.options.scales.x.ticks.color = text;
+        charts.pnlCurve.options.scales.y.ticks.color = text;
         charts.pnlCurve.update();
     }
 
     const wins = toNum(data.filtered_distribution?.wins);
     const losses = toNum(data.filtered_distribution?.losses);
     const neutralCount = toNum(data.filtered_distribution?.neutral);
-
-    if (!charts.winLoss) {
-        charts.winLoss = new Chart(document.getElementById('winLossChart'), {
-            type: 'doughnut',
-            data: {
-                labels: ['Wins', 'Losses', 'Neutral'],
-                datasets: [{ data: [wins, losses, neutralCount], backgroundColor: [positive, negative, neutral] }],
-            },
-            options: { responsive: true, maintainAspectRatio: false },
-        });
-    } else {
-        charts.winLoss.data.datasets[0].data = [wins, losses, neutralCount];
-        charts.winLoss.data.datasets[0].backgroundColor = [positive, negative, neutral];
-        charts.winLoss.update();
-    }
+    updateDistributionProgress(wins, losses, neutralCount);
 
     // Show all-time daily PnL by default; use filtered range when a trade filter is active
     const dailyRows = state.activeTradeFilter
@@ -580,23 +702,17 @@ function updateCharts(data) {
             type: 'bar',
             data: {
                 labels: dailyLabels,
-                datasets: [{
-                    label: 'Daily PnL',
-                    data: dailyValues,
-                    backgroundColor: dailyValues.map((v) => v > 0 ? positive : v < 0 ? negative : neutral),
-                }],
+                datasets: [buildBarDataset('Daily PnL', dailyValues, positive, negative, neutral)],
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { labels: { color: text } } },
-            },
+            options: buildBarChartOptions(text),
         });
     } else {
         charts.dailyPnl.data.labels = dailyLabels;
         charts.dailyPnl.data.datasets[0].data = dailyValues;
         charts.dailyPnl.data.datasets[0].backgroundColor = dailyValues.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
         charts.dailyPnl.options.plugins.legend.labels.color = text;
+        charts.dailyPnl.options.scales.x.ticks.color = text;
+        charts.dailyPnl.options.scales.y.ticks.color = text;
         charts.dailyPnl.update();
     }
 
@@ -612,22 +728,16 @@ function updateCharts(data) {
             type: 'bar',
             data: {
                 labels: dayOfWeekLabels,
-                datasets: [{
-                    label: 'PnL',
-                    data: dayOfWeekPnL,
-                    backgroundColor: dayOfWeekPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral),
-                }],
+                datasets: [buildBarDataset('PnL', dayOfWeekPnL, positive, negative, neutral)],
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { labels: { color: text } } },
-            },
+            options: buildBarChartOptions(text),
         });
     } else {
         charts.pnlByDayOfWeek.data.datasets[0].data = dayOfWeekPnL;
         charts.pnlByDayOfWeek.data.datasets[0].backgroundColor = dayOfWeekPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
         charts.pnlByDayOfWeek.options.plugins.legend.labels.color = text;
+        charts.pnlByDayOfWeek.options.scales.x.ticks.color = text;
+        charts.pnlByDayOfWeek.options.scales.y.ticks.color = text;
         charts.pnlByDayOfWeek.update();
     }
 
@@ -643,22 +753,16 @@ function updateCharts(data) {
             type: 'bar',
             data: {
                 labels: hourOfDayLabels,
-                datasets: [{
-                    label: 'PnL',
-                    data: hourOfDayPnL,
-                    backgroundColor: hourOfDayPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral),
-                }],
+                datasets: [buildBarDataset('PnL', hourOfDayPnL, positive, negative, neutral)],
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { labels: { color: text } } },
-            },
+            options: buildBarChartOptions(text),
         });
     } else {
         charts.pnlByHourOfDay.data.datasets[0].data = hourOfDayPnL;
         charts.pnlByHourOfDay.data.datasets[0].backgroundColor = hourOfDayPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
         charts.pnlByHourOfDay.options.plugins.legend.labels.color = text;
+        charts.pnlByHourOfDay.options.scales.x.ticks.color = text;
+        charts.pnlByHourOfDay.options.scales.y.ticks.color = text;
         charts.pnlByHourOfDay.update();
     }
 }
