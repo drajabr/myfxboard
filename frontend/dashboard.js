@@ -22,6 +22,29 @@ function formatPrice(value, decimals = 5) {
     return Number(value || 0).toFixed(decimals).replace(/\.?0+$/, '');
 }
 
+function toNum(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function formatDateTimeMs(value) {
+    const ms = toNum(value, 0);
+    if (!ms) {
+        return '-';
+    }
+    const d = new Date(ms);
+    return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString();
+}
+
+function formatDateMs(value) {
+    const ms = toNum(value, 0);
+    if (!ms) {
+        return '';
+    }
+    const d = new Date(ms);
+    return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString();
+}
+
 function formatPct(value) {
     return `${Number(value || 0).toFixed(1)}%`;
 }
@@ -243,8 +266,8 @@ function updateTradesTable(trades) {
     }
 
     tbody.innerHTML = trades.map((trade) => {
-        const entryTime = trade.entry_time_ms ? new Date(trade.entry_time_ms).toLocaleString() : '-';
-        const direction = trade.profit > 0 ? 'SELL' : trade.profit < 0 ? 'BUY' : '-';
+        const entryTime = formatDateTimeMs(trade.entry_time_ms);
+        const direction = toNum(trade.profit) > 0 ? 'SELL' : toNum(trade.profit) < 0 ? 'BUY' : '-';
         return `
         <tr>
             <td>${trade.symbol}</td>
@@ -280,8 +303,8 @@ function updateCharts(data) {
     const neutral = getChartColorVar('--pnl-neutral');
     const text = getChartColorVar('--text');
 
-    const equityLabels = data.equity_curve.map((d) => new Date(d.ts).toLocaleDateString());
-    const equityValues = data.equity_curve.map((d) => d.equity);
+    const equityLabels = data.equity_curve.map((d) => formatDateMs(d.ts));
+    const equityValues = data.equity_curve.map((d) => toNum(d.equity));
 
     charts.equityCurve = new Chart(document.getElementById('equityCurveChart'), {
         type: 'line',
@@ -304,8 +327,8 @@ function updateCharts(data) {
         },
     });
 
-    const wins = data.recent_trades.filter((t) => (t.profit || 0) > 0).length;
-    const losses = data.recent_trades.filter((t) => (t.profit || 0) < 0).length;
+    const wins = data.recent_trades.filter((t) => toNum(t.profit) > 0).length;
+    const losses = data.recent_trades.filter((t) => toNum(t.profit) < 0).length;
     const neutralCount = data.recent_trades.length - wins - losses;
 
     charts.winLoss = new Chart(document.getElementById('winLossChart'), {
@@ -320,12 +343,15 @@ function updateCharts(data) {
     const pnlByDay = new Map();
     const from = Date.now() - (30 * 24 * 60 * 60 * 1000);
     data.recent_trades.forEach((t) => {
-        const ts = t.exit_time_ms || t.entry_time_ms;
+        const ts = toNum(t.exit_time_ms || t.entry_time_ms);
         if (!ts || ts < from) {
             return;
         }
-        const key = new Date(ts).toLocaleDateString();
-        pnlByDay.set(key, (pnlByDay.get(key) || 0) + (t.profit || 0));
+        const key = formatDateMs(ts);
+        if (!key) {
+            return;
+        }
+        pnlByDay.set(key, (pnlByDay.get(key) || 0) + toNum(t.profit));
     });
 
     const dailyLabels = Array.from(pnlByDay.keys());

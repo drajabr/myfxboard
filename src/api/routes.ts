@@ -4,6 +4,50 @@ import { DashboardSummary } from '../types/index.js';
 
 const router = Router();
 
+const toNum = (value: unknown, fallback = 0): number => {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+const normalizePosition = (p: any) => ({
+  ...p,
+  size: toNum(p.size),
+  direction: toNum(p.direction),
+  entry_price: toNum(p.entry_price),
+  current_price: p.current_price === null ? null : toNum(p.current_price),
+  avg_sl: p.avg_sl === null ? null : toNum(p.avg_sl),
+  avg_tp: p.avg_tp === null ? null : toNum(p.avg_tp),
+  unrealized_pnl: toNum(p.unrealized_pnl),
+  open_time_ms: toNum(p.open_time_ms),
+  updated_at_ms: toNum(p.updated_at_ms),
+});
+
+const normalizeTrade = (t: any) => ({
+  ...t,
+  size: toNum(t.size),
+  entry_price: toNum(t.entry_price),
+  exit_price: t.exit_price === null ? null : toNum(t.exit_price),
+  profit: toNum(t.profit),
+  profit_pct: toNum(t.profit_pct),
+  entry_time_ms: toNum(t.entry_time_ms),
+  exit_time_ms: t.exit_time_ms === null ? null : toNum(t.exit_time_ms),
+  duration_sec: toNum(t.duration_sec),
+});
+
+const normalizeSnapshot = (s: any) => ({
+  ...s,
+  snapshot_time_ms: toNum(s.snapshot_time_ms),
+  equity: toNum(s.equity),
+  balance: toNum(s.balance),
+  return_pct: toNum(s.return_pct),
+  trades_count: toNum(s.trades_count),
+  wins: toNum(s.wins),
+  losses: toNum(s.losses),
+});
+
 const getRangeStart = (label: 'today' | 'last7d' | 'last30d' | 'ytd' | 'all_time', nowMs: number) => {
   const now = new Date(nowMs);
   if (label === 'today') {
@@ -182,12 +226,17 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const curveByDay = new Map<string, { ts: number; equity: number }>();
 
     for (const accountId of accountIds) {
-      const [accPositions, accTrades, latestSnapshot, snapshots] = await Promise.all([
+      const [accPositionsRaw, accTradesRaw, latestSnapshotRaw, snapshotsRaw] = await Promise.all([
         positionQueries.findByAccount(accountId),
         tradeQueries.findAllByAccount(accountId),
         snapshotQueries.findLatestByAccount(accountId),
         snapshotQueries.findByAccountAndRange(accountId, fromMs, toMs),
       ]);
+
+      const accPositions = accPositionsRaw.map(normalizePosition);
+      const accTrades = accTradesRaw.map(normalizeTrade);
+      const latestSnapshot = latestSnapshotRaw ? normalizeSnapshot(latestSnapshotRaw) : null;
+      const snapshots = snapshotsRaw.map(normalizeSnapshot);
 
       positions = positions.concat(accPositions);
       trades = trades.concat(accTrades);
@@ -340,9 +389,13 @@ router.get('/:accountId/dashboard', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Account not found' });
     }
 
-    const positions = await positionQueries.findByAccount(accountId);
-    const recentTrades = await tradeQueries.findRecentByAccount(accountId, 20);
-    const latestSnapshot = await snapshotQueries.findLatestByAccount(accountId);
+    const positionsRaw = await positionQueries.findByAccount(accountId);
+    const recentTradesRaw = await tradeQueries.findRecentByAccount(accountId, 20);
+    const latestSnapshotRaw = await snapshotQueries.findLatestByAccount(accountId);
+
+    const positions = positionsRaw.map(normalizePosition);
+    const recentTrades = recentTradesRaw.map(normalizeTrade);
+    const latestSnapshot = latestSnapshotRaw ? normalizeSnapshot(latestSnapshotRaw) : null;
 
     // Calculate aggregates
     const totalEquity = latestSnapshot?.equity || latestSnapshot?.balance || 0;
@@ -390,7 +443,7 @@ router.get('/:accountId/positions', async (req: Request, res: Response) => {
   try {
     const { accountId } = req.params;
     const positions = await positionQueries.findByAccount(accountId);
-    res.json(positions);
+    res.json(positions.map(normalizePosition));
   } catch (error) {
     console.error('Positions endpoint error:', error);
     res.status(500).json({ error: 'Failed to fetch positions' });
@@ -406,7 +459,7 @@ router.get('/:accountId/trades', async (req: Request, res: Response) => {
     const { accountId } = req.params;
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 500);
     const trades = await tradeQueries.findRecentByAccount(accountId, limit);
-    res.json(trades);
+    res.json(trades.map(normalizeTrade));
   } catch (error) {
     console.error('Trades endpoint error:', error);
     res.status(500).json({ error: 'Failed to fetch trades' });
@@ -424,7 +477,7 @@ router.get('/:accountId/equity-curve', async (req: Request, res: Response) => {
     const toMs = Date.now();
     const fromMs = toMs - (fromDays * 24 * 60 * 60 * 1000);
 
-    const snapshots = await snapshotQueries.findByAccountAndRange(accountId, fromMs, toMs);
+    const snapshots = (await snapshotQueries.findByAccountAndRange(accountId, fromMs, toMs)).map(normalizeSnapshot);
     const curveData = snapshots.map(s => ({ ts: s.snapshot_time_ms, equity: s.equity }));
 
     res.json({ data: curveData, period_days: fromDays });
