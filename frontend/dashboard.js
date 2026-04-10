@@ -635,7 +635,7 @@ function updateDistributionProgress(wins, losses, neutralCount, directionalOutco
     }
 
     const total = Math.max(0, wins + losses + neutralCount);
-    const winsPct = total > 0 ? (wins / total) * 100 : 0;
+                legend: { display: false, labels: { color: text } },
     const lossesPct = total > 0 ? (losses / total) * 100 : 0;
     const neutralPct = total > 0 ? (neutralCount / total) * 100 : 100;
 
@@ -721,6 +721,10 @@ function updateCharts(data) {
     const mainCurvePointRadiusByIndex = mainCurveRows.map((_, idx) =>
         idx === mainCurveRows.length - 1 ? 5 : mainCurvePointRadius
     );
+    const pnlCurveTitle = document.getElementById('pnlCurveTitle');
+    if (pnlCurveTitle) {
+        pnlCurveTitle.textContent = 'PnL Curve (Last Point Includes Floating PnL)';
+    }
 
     if (!charts.pnlCurve) {
         charts.pnlCurve = new Chart(document.getElementById('pnlCurveChart'), {
@@ -748,7 +752,7 @@ function updateCharts(data) {
                     padding: { left: 10, right: 18, top: 8, bottom: 18 },
                 },
                 plugins: {
-                    legend: { labels: { color: text } },
+                    legend: { display: false, labels: { color: text } },
                     tooltip: {
                         callbacks: {
                             title: (items) => {
@@ -811,6 +815,12 @@ function updateCharts(data) {
     const dailyRawLabels = dailyRows.map((r) => r.date || '');
     const dailyLabels = dailyRawLabels.map((d) => formatIsoDateShort(d));
     const dailyValues = dailyRows.map((r) => toNum(r.pnl));
+    const dailyTitle = document.getElementById('dailyPnlChartTitle');
+    if (dailyTitle) {
+        dailyTitle.textContent = state.activeTradeFilter
+            ? `Daily PnL (${state.activeTradeFilter.label})`
+            : 'Daily PnL (All Time)';
+    }
 
     if (!charts.dailyPnl) {
         charts.dailyPnl = new Chart(document.getElementById('dailyPnlChart'), {
