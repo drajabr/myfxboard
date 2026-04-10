@@ -290,7 +290,7 @@ function applyAccentTheme(accentKey) {
 
     const accentBtn = document.getElementById('accentCycleBtn');
     if (accentBtn) {
-        accentBtn.style.color = modePalette.accent;
+        accentBtn.style.setProperty('--dot-color', modePalette.accent);
         accentBtn.title = `Accent: ${preset.key}`;
     }
 }

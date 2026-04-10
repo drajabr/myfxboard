@@ -256,11 +256,23 @@ body {
 }
 
 .icon-btn--theme-dot {
-    color: var(--accent);
-    font-size: 1.75rem;
-    line-height: 1;
-    background: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--accent) 75%, #ffffff) 0 46%, transparent 54%), color-mix(in srgb, var(--accent) 22%, var(--surface-alt));
-    border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+    --dot-color: var(--accent);
+    position: relative;
+    font-size: 0;
+    line-height: 0;
+    color: transparent;
+    background: color-mix(in srgb, var(--dot-color) 20%, var(--surface-alt));
+    border-color: color-mix(in srgb, var(--dot-color) 48%, var(--border));
+    overflow: hidden;
+}
+
+.icon-btn--theme-dot::before {
+    content: '';
+    width: 84%;
+    height: 84%;
+    border-radius: 50%;
+    background: var(--dot-color);
+    box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.35), 0 0 0 2px rgba(0, 0, 0, 0.08);
 }
 
 .ui-quick-controls {

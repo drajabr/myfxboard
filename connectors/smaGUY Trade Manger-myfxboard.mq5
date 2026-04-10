@@ -180,8 +180,7 @@ public:
                Print("[DashboardConnector] Keepalive health requested history sync");
          } else {
             if(s_debug_log)
-               Print("[DashboardConnector] Keepalive health failed, sync decision unchanged");
-            return false;
+                  Print("[DashboardConnector] Keepalive health failed, falling back to standard sync");
          }
       }
 
@@ -595,8 +594,21 @@ private:
          ArrayResize(request_data, payload_size - 1, 0);
 
       int res = WebRequest("POST", url, headers, 5000, request_data, response_data, response_headers);
-      if(res < 200 || res >= 300)
+      if(res == -1) {
+         if(s_debug_log) {
+            Print("[DashboardConnector] Health check transport error: ", GetLastError());
+            ResetLastError();
+         }
          return false;
+      }
+
+      if(res < 200 || res >= 300) {
+         if(s_debug_log) {
+            string response_text = CharArrayToString(response_data, 0, WHOLE_ARRAY, CP_UTF8);
+            Print("[DashboardConnector] Health check rejected (status=", res, ", body=", response_text, ")");
+         }
+         return false;
+      }
 
       string response_text = CharArrayToString(response_data, 0, WHOLE_ARRAY, CP_UTF8);
       server_history_hash = ExtractJsonString(response_text, "server_history_hash");
