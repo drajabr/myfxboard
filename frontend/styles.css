@@ -250,13 +250,27 @@ body {
     transform: translateY(0);
     transform-origin: top right;
     z-index: 25;
-    transition: opacity 170ms ease, transform 170ms ease;
+    will-change: opacity, transform;
+    transition: opacity 240ms cubic-bezier(0.22, 1.2, 0.36, 1), transform 240ms cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
+.ui-quick-controls::before {
+    content: '';
+    position: absolute;
+    top: -6px;
+    right: 12px;
+    width: 12px;
+    height: 12px;
+    background: color-mix(in srgb, var(--surface) 86%, var(--accent) 14%);
+    border-left: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+    border-top: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+    transform: rotate(45deg);
 }
 
 .ui-quick-controls.is-collapsed {
     opacity: 0;
     pointer-events: none;
-    transform: translateY(-6px) scale(0.98);
+    transform: translateY(-9px) scale(0.95);
 }
 
 .quick-control-item {
