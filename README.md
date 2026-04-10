@@ -1,305 +1,110 @@
-# 🚀 myfxboard - MT5 Trading Dashboard
+# myfxboard
 
-A production-ready, real-time trading dashboard that syncs with your MetaTrader 5 Expert Advisor.
+Minimal guide for running the MT5 dashboard.
 
-## ⚡ Quick Facts
+## What this repo does
 
-- **Real-Time Sync**: 3-second heartbeat from MT5 to dashboard
-- **Multi-Account**: Track multiple MT5 accounts on one dashboard
-- **Docker-Ready**: Run anywhere with Docker Compose (`docker compose up -d`)
-- **Secure**: HMAC-SHA256 authentication + token-gated settings
-- **TypeScript**: Full type safety with strict mode
-- **Responsive**: Mobile-friendly web dashboard
-- **Standalone Full EA**: Pre-integrated MT5 EA ready to run
+- Receives MT5 position/account sync data every 3 seconds
+- Stores data in PostgreSQL
+- Serves dashboard UI and API from the Node server
+- Uses HMAC-signed ingestion requests
 
-## 🔌 MT5 EA Package
+## Supported MT5 path
 
-Use the full EA included in this repository:
+Use the included full EA:
 
 - `connectors/smaGUY Trade Manger-myfxboard.mq5`
 
-This is the supported integration path. Generic "plug into any EA" documentation has been retired.
+## Quick start (Docker)
 
-## 🎯 What It Does
+1. Copy env file:
 
-1. Your MT5 EA sends position data every 3 seconds via HTTP POST
-2. Dashboard server validates and stores in PostgreSQL
-3. Browser displays real-time equity, positions, and P&L
-4. All updates happen automatically with zero manual intervention
-
-## Quick Start
-
-### Prerequisites
-- Docker and Docker Compose
-- Node.js 18+ (for local development)
-- PostgreSQL 16+ (if not using Docker)
-
-### Using Docker Compose (Recommended)
-
-1. Clone the repository:
-```bash
-git clone https://github.com/drajabr/myfxboard.git
-cd myfxboard
-```
-
-2. Copy environment file:
 ```bash
 cp .env.example .env
 ```
 
-3. Update `.env` with your configuration (especially `JWT_SECRET` and `MASTER_TOKEN`)
+2. Start stack:
 
-4. Start the stack:
 ```bash
-docker compose pull
 docker compose up -d
 ```
 
-5. Access the dashboard:
-- **Server**: http://localhost:3000
-- **Dashboard UI**: http://localhost:3000
-- **API**: http://localhost:3000/api
+3. Run migrations (first run):
 
-6. Run migrations (first time only):
 ```bash
 docker compose exec server npm run db:migrate
 ```
 
-### Local Development
+4. Open dashboard:
 
-1. Install dependencies:
+```text
+http://localhost:3000
+```
+
+## EA setup
+
+Use the included full EA:
+
+- `connectors/smaGUY Trade Manger-myfxboard.mq5`
+
+### 1. Create account in dashboard
+
+1. Open Settings.
+2. Unlock with `MASTER_TOKEN` from `.env`.
+3. Create an account ID (example: `EURUSD_001`).
+4. Copy generated secret key.
+
+### 2. Configure EA inputs
+
+Set these values in MT5 inputs:
+
+```mql5
+InpEnableDashboardSync = true
+InpDashboardUrl = "http://localhost:3000"
+InpDashboardAccountId = "EURUSD_001"
+InpDashboardPSK = "<secret key from dashboard>"
+InpDashboardSyncIntervalSec = 3
+InpDashboardDebugLog = true
+```
+
+### 3. Verify
+
+1. Attach EA to chart.
+2. Check MT5 Journal for successful sync messages.
+3. Open dashboard and confirm positions appear.
+
+### Troubleshooting
+
+- Confirm account ID in EA matches dashboard account ID exactly.
+- Confirm PSK in EA matches generated dashboard key.
+- Check backend logs: `docker compose logs server`.
+
+## Core commands
+
 ```bash
+# local dev
 npm install
-```
-
-2. Setup PostgreSQL:
-```bash
-psql -U postgres -c "CREATE USER dashboard WITH PASSWORD 'dashboard_pass';"
-psql -U postgres -c "CREATE DATABASE myfxboard OWNER dashboard;"
-```
-
-3. Run migrations:
-```bash
-npm run db:migrate
-```
-
-4. Start dev server:
-```bash
 npm run dev
-```
 
-5. Start dev frontend:
-```bash
-# In another terminal
-cd frontend && python -m http.server 3001
-```
-
-## API Documentation
-
-### Authentication
-
-Ingestion endpoints use HMAC-SHA256 signed requests:
-
-```
-Authorization: HMAC-SHA256 {account_id}:{signature}
-X-Signature-Timestamp: {unix_ms}
-
-Signature = HMAC-SHA256(secret_hash, "{account_id}:{timestamp}")
-```
-
-### Endpoints
-
-#### Readonly (No authentication required)
-
-- `GET /api/account/{accountId}/dashboard` - Dashboard summary with positions and stats
-- `GET /api/account/{accountId}/positions` - Open positions
-- `GET /api/account/{accountId}/trades` - Recent closed trades
-- `GET /api/account/{accountId}/equity-curve?days=90` - Equity curve data
-- `GET /api/accounts` - List all linked accounts
-
-#### Write (Requires unlock token)
-
-- `POST /api/account/create` - Create new account link
-- `POST /api/account/{accountId}/unlock` - Get unlock token (requires master token)
-- `PATCH /api/account/{accountId}/settings` - Update settings
-
-#### Ingestion (EA only)
-
-- `POST /api/ingestion/{accountId}` - Realtime heartbeat sync
-- `POST /api/ingestion/{accountId}/backfill` - History chunk backfill
-
-## EA Setup
-
-### MQL5 Inputs
-
-Configure these inputs in the provided full EA:
-
-```
-input string InpServerUrl = "http://localhost:3000";     // Server URL
-input string InpAccountId = "";                          // Account ID
-input string InpPSK = "";                                // Pre-Shared Key
-input int InpSyncInterval = 3;                           // Sync interval (seconds)
-input bool InpSyncEnabled = true;                        // Enable sync
-```
-
-### Sync Protocol
-
-1. EA sends heartbeat every N seconds with open positions and account summary
-2. Server responds with:
-   - `history_status: "up_to_date"` or `"backfill_required"`
-   - If backfill required: `from_time_ms` and `chunk_size`
-3. EA sends closed trades in chunks until caught up
-4. Resume normal heartbeat
-
-### Full EA Guide
-
-See `docs/ea-integration.md` for standalone EA setup details.
-
-## Configuration
-
-### Environment Variables
-
-- `DATABASE_URL` - PostgreSQL connection string
-- `NODE_ENV` - `development` or `production`
-- `PORT` - API port (default: 3000)
-- `JWT_SECRET` - Secret for token signing
-- `MASTER_TOKEN` - Token to unlock settings
-- `SYNC_REQUEST_TIMEOUT_MS` - HTTP timeout for ingestion (default: 5000)
-- `SYNC_HISTORY_CHUNK_SIZE` - Chunk size for history backfill (default: 100)
-- `SYNC_HISTORY_RATE_LIMIT_MS` - Rate limit between backfill chunks (default: 1500)
-- `UNLOCK_TOKEN_TTL_MINUTES` - Settings unlock TTL (default: 30)
-- `BACKFILL_WINDOW_DAYS` - Default backfill window on first link (default: 90)
-
-## Deployment
-
-### Docker Hub (with GitHub Actions)
-
-1. Set GitHub secrets:
-   - `DOCKER_USERNAME`
-   - `DOCKER_PASSWORD`
-
-2. Push to main or tag a release:
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-3. GitHub Actions automatically builds and publishes image to GHCR
-
-4. Pull production image:
-```bash
-docker pull ghcr.io/drajabr/myfxboard:latest
-```
-
-## Project Structure
-
-```
-.
-├── .github/workflows/          # GitHub Actions
-│   └── docker-build.yml        # Build & push Docker image
-│                                # Publishes ghcr.io/drajabr/myfxboard
-├── src/
-│   ├── api/                    # Express routes
-│   │   ├── routes.ts           # Dashboard endpoints
-│   │   └── ingestion.ts        # EA sync endpoints
-│   ├── db/                     # Database layer
-│   │   ├── connection.ts       # PG pool & query helper
-│   │   └── queries.ts          # Data access layer
-│   ├── middleware/             # Auth & validation
-│   │   ├── auth.ts             # HMAC-SHA256 auth
-│   │   └── validation.ts       # Zod schemas
-│   ├── types/                  # TypeScript interfaces
-│   └── index.ts                # Main server
-├── db/
-│   └── migrations/             # SQL migrations
-│       └── 001_initial_schema.sql
-├── frontend/
-│   ├── index.html              # Dashboard UI
-│   ├── styles.css              # Styling
-│   └── dashboard.js            # Client logic
-├── docker/
-│   └── nginx.conf              # Reverse proxy config
-├── Dockerfile                  # Multi-stage build
-├── docker-compose.yml          # Local development stack
-├── package.json
-├── tsconfig.json
-└── README.md
-```
-
-## Testing
-
-Run tests:
-```bash
+# tests and lint
 npm run test
-```
-
-Run tests in CI:
-```bash
-npm run test:ci
-```
-
-Lint code:
-```bash
 npm run lint
 ```
 
-## Monitoring & Logs
+## Main API routes
 
-### Health Check
+- `GET /api/accounts`
+- `GET /api/account/{accountId}/dashboard`
+- `POST /api/account/create`
+- `POST /api/ingestion/{accountId}`
+- `POST /api/ingestion/{accountId}/backfill`
 
-```bash
-curl http://localhost:3000/health
-# {"status": "ok", "timestamp": 1712800000000}
+## Project layout
+
+```text
+src/        backend API
+db/         sql migrations
+frontend/   dashboard html/css/js
+connectors/ mt5 full EA files
+docker/     nginx config
 ```
-
-### View Logs
-
-```bash
-docker-compose logs -f api
-docker-compose logs -f postgres
-docker-compose logs -f nginx
-```
-
-## Security Considerations
-
-- All settings are gated behind an unlock token
-- Dashboard data is always readonly
-- Ingestion uses HMAC-SHA256 with timestamp window protection
-- Pre-shared secrets are hashed with SHA256 before storage
-- HTTPS recommended for production
-- Sensitive environment variables should not be committed
-
-## Troubleshooting
-
-### Database Connection Errors
-```bash
-docker compose exec postgres psql -U dashboard -d myfxboard -c "SELECT 1"
-```
-
-### Migrations Failed
-```bash
-docker compose exec server npm run db:migrate
-```
-
-### API Not Responding
-```bash
-docker compose logs server
-```
-
-## Roadmap
-
-- [ ] Advanced charts (TradingView integration)
-- [ ] Economic calendar
-- [ ] Notification webhooks (Discord/Telegram)
-- [ ] Multi-user support with role-based access
-- [ ] Cloudflare Workers deployment option
-- [ ] Mobile-optimized UI
-- [ ] Performance metrics analysis
-
-## License
-
-MIT
-
-## Support
-
-For issues or questions, open an issue on GitHub or contact the maintainer.
