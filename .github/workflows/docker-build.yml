@@ -69,7 +69,7 @@ jobs:
           POSTGRES_PASSWORD: dashboard_pass
           POSTGRES_DB: myfxboard
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U dashboard -d myfxboard"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -100,6 +100,7 @@ jobs:
         run: npm run test:ci
 
       - name: Upload coverage
+        if: ${{ hashFiles('coverage/coverage-final.json') != '' }}
         uses: codecov/codecov-action@v3
         with:
           files: ./coverage/coverage-final.json
