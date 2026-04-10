@@ -74,3 +74,11 @@ export const ingestPayloadSchema = z.object({
   include_history: z.boolean().optional(),
   history_hash: z.string().optional(),
 });
+
+export const ingestHealthPayloadSchema = z.object({
+  account_number: z.union([z.string(), z.number()]).transform((v) => String(v).trim()).refine((v) => v.length > 0, {
+    message: 'account_number is required',
+  }),
+  sync_id: z.string().min(1),
+  history_hash: z.string().min(1),
+});

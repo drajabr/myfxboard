@@ -14,6 +14,7 @@ input group "myfxboard Dashboard Connection"
 input string InpDashboardUrl         = "http://localhost:3000"; // Server URL
 input string InpDashboardPSK         = "";                      // Shared Secret (PSK)
 input int    InpSyncIntervalSec      = 3;                       // Sync Interval (seconds)
+input int    InpKeepaliveSec         = 30;                      // Keepalive Interval (seconds, 0=disable)
 input bool   InpDebugLog             = false;                   // Debug Logging
 
 //+------------------------------------------------------------------+
@@ -24,6 +25,7 @@ private:
    static string   s_url;
    static string   s_psk;
    static int      s_sync_interval_ms;
+   static int      s_keepalive_ms;
    static ulong    s_last_sync_ms;
    static bool     s_in_flight;
    static int      s_success_count;
@@ -33,6 +35,7 @@ private:
    static uint     s_last_live_payload_hash;
    static long     s_last_live_payload_sent_ms;
    static string   s_last_ack_history_hash;
+   static bool     s_startup_health_checked;
 
    static uint HashPayload(const string payload) {
       uchar bytes[];
@@ -71,10 +74,11 @@ private:
    }
 
 public:
-   static void Init(string url, string psk, int interval_sec, bool debug = false) {
+   static void Init(string url, string psk, int interval_sec, int keepalive_sec = 30, bool debug = false) {
       s_url              = url;
       s_psk              = psk;
       s_sync_interval_ms = interval_sec * 1000;
+      s_keepalive_ms     = MathMax(0, keepalive_sec) * 1000;
       s_debug_log        = debug;
       s_last_sync_ms     = 0;
       s_in_flight        = false;
@@ -83,6 +87,7 @@ public:
       s_last_live_payload_hash = 0;
       s_last_live_payload_sent_ms = 0;
       s_last_ack_history_hash = "";
+      s_startup_health_checked = false;
       if(s_debug_log)
          Print("[DashboardConnector] Initialized: url=", s_url, " interval=", interval_sec, "s");
    }
@@ -115,19 +120,39 @@ public:
 
       uint live_payload_hash = HashPayload(positions_json + "|" + account_json + "|" + StringFormat("%lld", latest_closed_time_ms));
       string history_hash = StringFormat("%u", HashPayload(closed_trades_json));
+
+      if(!s_startup_health_checked) {
+         bool history_sync_required = true;
+         string server_history_hash = "";
+         if(PostHealthCheck(current_account, timestamp_ms, history_hash, history_sync_required, server_history_hash)) {
+            s_startup_health_checked = true;
+            if(server_history_hash != "")
+               s_last_ack_history_hash = server_history_hash;
+
+            if(!history_sync_required) {
+               s_last_live_payload_hash = live_payload_hash;
+               s_last_live_payload_sent_ms = timestamp_ms;
+               s_last_sync_ms = now_ms;
+               if(s_debug_log)
+                  Print("[DashboardConnector] Startup health check matched server state, skipping initial full sync");
+               return false;
+            }
+         }
+      }
+
       bool include_history = (history_hash != s_last_ack_history_hash);
 
-      const long unchanged_keepalive_ms = 30000;
       if(!include_history
          && live_payload_hash == s_last_live_payload_hash
-         && s_last_live_payload_sent_ms > 0
-         && (timestamp_ms - s_last_live_payload_sent_ms) < unchanged_keepalive_ms) {
-         s_last_sync_ms = now_ms;
-         if(s_debug_log && now_ms - s_last_log_ms > 30000) {
-            Print("[DashboardConnector] No live payload changes, skipping sync");
-            s_last_log_ms = now_ms;
+         && s_last_live_payload_sent_ms > 0) {
+         if(s_keepalive_ms <= 0 || (timestamp_ms - s_last_live_payload_sent_ms) < s_keepalive_ms) {
+            s_last_sync_ms = now_ms;
+            if(s_debug_log && now_ms - s_last_log_ms > 30000) {
+               Print("[DashboardConnector] No live payload changes, skipping sync");
+               s_last_log_ms = now_ms;
+            }
+            return false;
          }
-         return false;
       }
 
       string payload = BuildPayload(
@@ -370,6 +395,8 @@ private:
 
       if(res == -1) {
          s_error_count++;
+         if(!include_history && live_payload_hash == s_last_live_payload_hash && s_keepalive_ms > 0)
+            s_last_live_payload_sent_ms = timestamp_ms;
          if(s_debug_log) {
             Print("[DashboardConnector] Error: ", GetLastError());
             ResetLastError();
@@ -394,6 +421,8 @@ private:
                Print("[DashboardConnector] Server requested history resend (hash mismatch)");
          } else {
             s_error_count++;
+            if(!include_history && live_payload_hash == s_last_live_payload_hash && s_keepalive_ms > 0)
+               s_last_live_payload_sent_ms = timestamp_ms;
             if(s_debug_log)
                Print("[DashboardConnector] Sync rejected for account ", account_number,
                      " (status=", res, ", body=", response_text, ")");
@@ -401,12 +430,52 @@ private:
       }
       s_in_flight = false;
    }
+
+   static bool PostHealthCheck(
+      string account_number,
+      long timestamp_ms,
+      string history_hash,
+      bool &history_sync_required,
+      string &server_history_hash
+   ) {
+      string url = s_url + "/api/ingestion/health";
+      string signature = CreateSignature(account_number, timestamp_ms, s_psk);
+
+      string payload = StringFormat(
+         "{\"account_number\":\"%s\",\"sync_id\":\"%lld\",\"history_hash\":\"%s\"}",
+         account_number,
+         timestamp_ms,
+         history_hash
+      );
+
+      uchar request_data[];
+      uchar response_data[];
+      string response_headers = "";
+
+      string headers  = "Content-Type: application/json\r\n";
+      headers        += "Authorization: HMAC-SHA256 " + signature + "\r\n";
+      headers        += "X-Signature-Timestamp: " + (string)timestamp_ms + "\r\n";
+
+      int payload_size = StringToCharArray(payload, request_data, 0, WHOLE_ARRAY, CP_UTF8);
+      if(payload_size > 0)
+         ArrayResize(request_data, payload_size - 1, 0);
+
+      int res = WebRequest("POST", url, headers, 5000, request_data, response_data, response_headers);
+      if(res < 200 || res >= 300)
+         return false;
+
+      string response_text = CharArrayToString(response_data, 0, WHOLE_ARRAY, CP_UTF8);
+      server_history_hash = ExtractJsonString(response_text, "server_history_hash");
+      history_sync_required = ExtractJsonBool(response_text, "history_sync_required", true);
+      return true;
+   }
 };
 
 // Static member initialization
 string DashboardConnector::s_url              = "";
 string DashboardConnector::s_psk              = "";
 int    DashboardConnector::s_sync_interval_ms = 3000;
+int    DashboardConnector::s_keepalive_ms     = 30000;
 ulong  DashboardConnector::s_last_sync_ms     = 0;
 bool   DashboardConnector::s_in_flight        = false;
 int    DashboardConnector::s_success_count    = 0;
@@ -416,6 +485,7 @@ ulong  DashboardConnector::s_last_log_ms      = 0;
 uint   DashboardConnector::s_last_live_payload_hash = 0;
 long   DashboardConnector::s_last_live_payload_sent_ms = 0;
 string DashboardConnector::s_last_ack_history_hash = "";
+bool   DashboardConnector::s_startup_health_checked = false;
 
 //+------------------------------------------------------------------+
 //| EA lifecycle                                                     |
@@ -425,7 +495,7 @@ int OnInit() {
       Print("[myfxboard] ERROR: Server URL and PSK must be set.");
       return INIT_PARAMETERS_INCORRECT;
    }
-   DashboardConnector::Init(InpDashboardUrl, InpDashboardPSK, InpSyncIntervalSec, InpDebugLog);
+   DashboardConnector::Init(InpDashboardUrl, InpDashboardPSK, InpSyncIntervalSec, InpKeepaliveSec, InpDebugLog);
    EventSetMillisecondTimer(500);
    Print("[myfxboard] Connector started. Syncing every ", InpSyncIntervalSec, "s to ", InpDashboardUrl);
    return INIT_SUCCEEDED;

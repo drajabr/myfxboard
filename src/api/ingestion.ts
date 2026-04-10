@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { validateRequestBody, ingestPayloadSchema } from '../middleware/validation.js';
+import { validateRequestBody, ingestPayloadSchema, ingestHealthPayloadSchema } from '../middleware/validation.js';
 import { validateIngestionAuth } from '../middleware/auth.js';
 import { accountQueries, positionQueries, tradeQueries, snapshotQueries } from '../db/queries.js';
 import { Trade } from '../types/index.js';
@@ -17,6 +17,37 @@ const assertSharedSecret = (res: Response) => {
   }
   return sharedSecret;
 };
+
+router.post(
+  '/health',
+  validateIngestionAuth,
+  validateRequestBody(ingestHealthPayloadSchema),
+  async (req: Request, res: Response) => {
+    try {
+      const accountId = resolveAccountId(req);
+      const sharedSecret = assertSharedSecret(res);
+      if (!sharedSecret) {
+        return;
+      }
+
+      const account = await accountQueries.ensureByAccountNumber(accountId, sharedSecret);
+      const serverHistoryHash = String(account.last_history_hash || '');
+      const clientHistoryHash = String(req.body.history_hash || '').trim();
+      const historySyncRequired = serverHistoryHash.length === 0 || serverHistoryHash !== clientHistoryHash;
+
+      res.status(200).json({
+        status: 'ok',
+        sync_id: req.body.sync_id,
+        account_id: accountId,
+        server_history_hash: serverHistoryHash,
+        history_sync_required: historySyncRequired,
+      });
+    } catch (error) {
+      console.error('Ingestion health endpoint error:', error);
+      res.status(500).json({ status: 'error', error: 'Ingestion health check failed' });
+    }
+  }
+);
 
 /**
  * POST /api/ingestion
