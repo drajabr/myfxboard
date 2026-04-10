@@ -113,9 +113,9 @@ body {
 }
 
 .ui-controls-wrap {
+    position: relative;
     display: inline-flex;
     align-items: center;
-    gap: 0.2rem;
     margin-left: auto;
     flex: 0 0 auto;
 }
@@ -227,26 +227,54 @@ body {
 
 .icon-btn--theme-dot {
     color: var(--accent);
-    font-size: 1.2rem;
-    background: color-mix(in srgb, var(--accent) 16%, var(--surface-alt));
-    border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+    font-size: 1.75rem;
+    line-height: 1;
+    background: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--accent) 75%, #ffffff) 0 46%, transparent 54%), color-mix(in srgb, var(--accent) 22%, var(--surface-alt));
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
 }
 
 .ui-quick-controls {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
-    max-width: 240px;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.45rem);
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.5rem;
+    padding: 0.55rem;
+    border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+    background: color-mix(in srgb, var(--surface) 86%, var(--accent) 14%);
+    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
+    min-width: 228px;
     opacity: 1;
-    overflow: hidden;
-    transition: max-width 180ms ease, opacity 180ms ease, transform 180ms ease;
+    transform: translateY(0);
+    transform-origin: top right;
+    z-index: 25;
+    transition: opacity 170ms ease, transform 170ms ease;
 }
 
 .ui-quick-controls.is-collapsed {
-    max-width: 0;
     opacity: 0;
     pointer-events: none;
-    transform: translateX(6px);
+    transform: translateY(-6px) scale(0.98);
+}
+
+.quick-control-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+}
+
+.quick-control-item .icon-btn {
+    background: color-mix(in srgb, var(--accent) 10%, var(--surface-alt));
+}
+
+.quick-control-label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    line-height: 1;
 }
 
 .form-group button,
@@ -728,6 +756,10 @@ body {
         margin-left: auto;
     }
 
+    .ui-quick-controls {
+        right: 0;
+    }
+
     .charts-row {
         grid-template-columns: 1fr;
     }
@@ -766,8 +798,12 @@ body {
     }
 
     .ui-controls-wrap {
-        flex: 0 0 100%;
-        justify-content: flex-end;
-        margin-left: 0;
+        margin-left: auto;
+        flex: 0 0 auto;
+    }
+
+    .ui-quick-controls {
+        min-width: 214px;
+        right: 0;
     }
 }

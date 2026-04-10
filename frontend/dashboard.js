@@ -279,8 +279,9 @@ function setQuickControlsCollapsed(collapsed) {
         return;
     }
     controls.classList.toggle('is-collapsed', collapsed);
-    toggleBtn.textContent = collapsed ? '⚙' : '→';
-    toggleBtn.title = collapsed ? 'Show quick controls' : 'Collapse quick controls';
+    toggleBtn.textContent = collapsed ? '⚙' : '✕';
+    toggleBtn.title = collapsed ? 'Show style controls' : 'Hide style controls';
+    toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 }
 
 function cycleAccentTheme() {
@@ -359,6 +360,29 @@ function setupEventListeners() {
     document.getElementById('fontCycleBtn').addEventListener('click', cycleFontPreset);
     document.getElementById('fontSizeCycleBtn').addEventListener('click', cycleFontSizePreset);
     document.getElementById('uiControlsToggleBtn').addEventListener('click', toggleQuickControls);
+
+    document.addEventListener('click', (event) => {
+        const wrap = document.querySelector('.ui-controls-wrap');
+        const controls = document.getElementById('uiQuickControls');
+        if (!wrap || !controls || wrap.contains(event.target)) {
+            return;
+        }
+        if (!controls.classList.contains('is-collapsed')) {
+            localStorage.setItem(QUICK_CONTROLS_COLLAPSED_KEY, '1');
+            setQuickControlsCollapsed(true);
+        }
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') {
+            return;
+        }
+        const controls = document.getElementById('uiQuickControls');
+        if (controls && !controls.classList.contains('is-collapsed')) {
+            localStorage.setItem(QUICK_CONTROLS_COLLAPSED_KEY, '1');
+            setQuickControlsCollapsed(true);
+        }
+    });
 
     document.getElementById('accountSelector').addEventListener('change', (e) => {
         localStorage.setItem('selectedAccount', e.target.value);
@@ -1250,7 +1274,7 @@ document.addEventListener('DOMContentLoaded', () => {
     applyAccentTheme(getPreferredAccent());
     applyFont(getPreferredFont());
     applyFontSize(getPreferredFontSize());
-    setQuickControlsCollapsed(localStorage.getItem(QUICK_CONTROLS_COLLAPSED_KEY) === '1');
+    setQuickControlsCollapsed(localStorage.getItem(QUICK_CONTROLS_COLLAPSED_KEY) !== '0');
     setupEventListeners();
     loadAccountsIfNeeded(true).catch((error) => {
         console.error('Error loading accounts:', error);
