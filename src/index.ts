@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dashboardRoutes from './api/routes.js';
 import ingestionRoutes from './api/ingestion.js';
+import { ensureDatabaseSchema } from './db/bootstrap.js';
 
 config();
 
@@ -61,9 +62,17 @@ app.use((err: any, _req: any, res: any, _next: any) => {
   res.status(500).json({ error: NODE_ENV === 'production' ? 'Internal server error' : err.message });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`myfxboard server running on port ${PORT} (${NODE_ENV})`);
+async function start() {
+  await ensureDatabaseSchema();
+
+  app.listen(PORT, () => {
+    console.log(`myfxboard server running on port ${PORT} (${NODE_ENV})`);
+  });
+}
+
+start().catch((error) => {
+  console.error('Server startup failed:', error);
+  process.exit(1);
 });
 
 export default app;

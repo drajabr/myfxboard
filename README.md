@@ -26,20 +26,16 @@ cp .env.example .env
 2. Start stack:
 
 ```bash
-docker compose up -d
+docker compose up --build -d
 ```
 
-3. Run migrations (first run):
-
-```bash
-docker compose exec server npm run db:migrate
-```
-
-4. Open dashboard:
+3. Open dashboard:
 
 ```text
 http://localhost:3000
 ```
+
+The server now applies the SQL migrations automatically on startup, including when you reuse an existing Postgres volume.
 
 ## EA setup
 
@@ -66,6 +62,17 @@ InpDashboardSyncIntervalSec = 3
 InpDashboardDebugLog = true
 ```
 
+### 2.1 MT5 WebRequest whitelist (required)
+
+In MetaTrader 5, open `Tools -> Options -> Expert Advisors` and enable `Allow WebRequest for listed URL`.
+Add your dashboard URL (same host as `InpDashboardUrl`), for example:
+
+```text
+http://localhost:3000
+```
+
+If this URL is not whitelisted, connector requests will be blocked by MT5.
+
 ### 3. Verify
 
 1. Attach EA to chart.
@@ -77,6 +84,7 @@ InpDashboardDebugLog = true
 - Confirm `InpDashboardPSK` exactly matches `CONNECTOR_SHARED_SECRET`.
 - Confirm connector can POST to `/api/ingestion`.
 - Check backend logs: `docker compose logs server`.
+- If you previously started the stack with a schema-less Postgres volume, run `docker compose up --build -d` again so the server can apply the startup migrations to that existing database.
 
 ## Core commands
 
