@@ -18,7 +18,7 @@ const state = {
 };
 
 const charts = {
-    equityCurve: null,
+    pnlCurve: null,
     winLoss: null,
     dailyPnl: null,
     pnlByDayOfWeek: null,
@@ -455,64 +455,27 @@ function updateCharts(data) {
     const text = getChartColorVar('--text');
     const accent = getChartColorVar('--accent');
 
+    const tradePnlCurveRows = Array.isArray(data.trade_pnl_curve) ? data.trade_pnl_curve : [];
+    const fallbackCurve = Array.from({ length: 30 }, (_, idx) => {
+        const ts = new Date(Date.now() - ((29 - idx) * 24 * 60 * 60 * 1000)).setHours(0, 0, 0, 0);
+        return { ts, cumulative_pnl: 0 };
+    });
 
-    // Use trade_pnl_series for main chart if available, else fallback
-    const tradePnlRows = Array.isArray(data.trade_pnl_series) ? data.trade_pnl_series : [];
-    const tradePnlUsable = tradePnlRows.length > 0;
+    const mainCurveRows = tradePnlCurveRows.length > 0 ? tradePnlCurveRows : fallbackCurve;
+    const mainCurveValues = mainCurveRows.map((d) => toNum(d.cumulative_pnl));
+    const mainCurveLabel = 'PnL Curve';
+    const mainCurveType = 'line';
+    const mainCurveLabels = mainCurveRows.map((d) => formatDateTimeMs(d.ts));
+    const mainCurvePointRadius = tradePnlCurveRows.length > 0 ? 2.5 : 1.5;
+    const mainCurveFill = false;
 
-    let mainCurveRows = tradePnlRows;
-    let mainCurveValues = tradePnlRows.map((d) => toNum(d.pnl));
-    let mainCurveLabel = 'Trade PnL';
-    let mainCurveType = 'scatter';
-    let mainCurveLabels = tradePnlRows.map((d) => formatDateTimeMs(d.ts));
-    let mainCurvePointRadius = 4;
-    let mainCurveFill = false;
-
-    if (!tradePnlUsable) {
-        // fallback to equity or balance
-        const fallbackCurve = Array.from({ length: 30 }, (_, idx) => {
-            const ts = new Date(Date.now() - ((29 - idx) * 24 * 60 * 60 * 1000)).setHours(0, 0, 0, 0);
-            return { ts, value: 0 };
-        });
-        const equityRows = Array.isArray(data.equity_curve) ? data.equity_curve : [];
-        const balanceRows = Array.isArray(data.balance_curve) ? data.balance_curve : [];
-        const equityUsable = hasUsableSeries(equityRows, 'equity');
-        const balanceUsable = hasUsableSeries(balanceRows, 'balance');
-
-        if (equityUsable) {
-            mainCurveRows = equityRows;
-            mainCurveValues = equityRows.map((d) => toNum(d.equity));
-            mainCurveLabel = 'Equity';
-            mainCurveType = 'line';
-            mainCurveLabels = equityRows.map((d) => formatDateMs(d.ts));
-            mainCurvePointRadius = mainCurveValues.every((value) => value === 0) ? 1.5 : 0;
-            mainCurveFill = true;
-        } else if (balanceUsable) {
-            mainCurveRows = balanceRows;
-            mainCurveValues = balanceRows.map((d) => toNum(d.balance));
-            mainCurveLabel = 'Balance';
-            mainCurveType = 'line';
-            mainCurveLabels = balanceRows.map((d) => formatDateMs(d.ts));
-            mainCurvePointRadius = mainCurveValues.every((value) => value === 0) ? 1.5 : 0;
-            mainCurveFill = true;
-        } else {
-            mainCurveRows = fallbackCurve;
-            mainCurveValues = fallbackCurve.map((d) => d.value);
-            mainCurveLabel = 'Balance';
-            mainCurveType = 'line';
-            mainCurveLabels = fallbackCurve.map((d) => formatDateMs(d.ts));
-            mainCurvePointRadius = 1.5;
-            mainCurveFill = true;
-        }
+    const pnlCurveTitle = document.getElementById('pnlCurveTitle');
+    if (pnlCurveTitle) {
+        pnlCurveTitle.textContent = 'PnL Curve (Closed Trades)';
     }
 
-    const equityTitle = document.getElementById('accountCurveTitle');
-    if (equityTitle) {
-        equityTitle.textContent = tradePnlUsable ? 'Trade PnL (Closed Trades)' : (mainCurveLabel === 'Equity' ? 'Equity Curve' : 'Balance Curve');
-    }
-
-    if (!charts.equityCurve) {
-        charts.equityCurve = new Chart(document.getElementById('equityCurveChart'), {
+    if (!charts.pnlCurve) {
+        charts.pnlCurve = new Chart(document.getElementById('pnlCurveChart'), {
             type: mainCurveType,
             data: {
                 labels: mainCurveLabels,
@@ -534,16 +497,16 @@ function updateCharts(data) {
             },
         });
     } else {
-        charts.equityCurve.config.type = mainCurveType;
-        charts.equityCurve.data.labels = mainCurveLabels;
-        charts.equityCurve.data.datasets[0].label = mainCurveLabel;
-        charts.equityCurve.data.datasets[0].data = mainCurveValues;
-        charts.equityCurve.data.datasets[0].borderColor = accent;
-        charts.equityCurve.data.datasets[0].pointRadius = mainCurvePointRadius;
-        charts.equityCurve.data.datasets[0].fill = mainCurveFill;
-        charts.equityCurve.data.datasets[0].showLine = mainCurveType !== 'scatter';
-        charts.equityCurve.options.plugins.legend.labels.color = text;
-        charts.equityCurve.update();
+        charts.pnlCurve.config.type = mainCurveType;
+        charts.pnlCurve.data.labels = mainCurveLabels;
+        charts.pnlCurve.data.datasets[0].label = mainCurveLabel;
+        charts.pnlCurve.data.datasets[0].data = mainCurveValues;
+        charts.pnlCurve.data.datasets[0].borderColor = accent;
+        charts.pnlCurve.data.datasets[0].pointRadius = mainCurvePointRadius;
+        charts.pnlCurve.data.datasets[0].fill = mainCurveFill;
+        charts.pnlCurve.data.datasets[0].showLine = mainCurveType !== 'scatter';
+        charts.pnlCurve.options.plugins.legend.labels.color = text;
+        charts.pnlCurve.update();
     }
 
     const wins = toNum(data.filtered_distribution?.wins);

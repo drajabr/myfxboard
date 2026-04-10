@@ -192,10 +192,15 @@ body {
     gap: 0.9rem;
 }
 
-.summary-spotlight {
+.performance-layout {
     display: grid;
-    grid-template-columns: 1fr;
-    gap: 0.75rem;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 0.9rem;
+    align-items: start;
+}
+
+.summary-spotlight {
+    display: block;
 }
 
 .spotlight-card {
@@ -216,22 +221,29 @@ body {
 }
 
 .spotlight-card--equity {
-    min-height: 140px;
+    width: 220px;
+    min-height: 220px;
+    aspect-ratio: 1 / 1;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    text-align: center;
 }
+
 .spotlight-card--equity .equity-main {
     font-size: 2.5rem;
     font-weight: 900;
     margin-bottom: 0.2rem;
+    line-height: 1;
 }
+
 .spotlight-card--equity .floating-pnl-label {
     font-size: 0.9rem;
     color: var(--text-muted);
-    margin-bottom: 0.1rem;
+    margin: 0.6rem 0 0.15rem;
 }
+
 .spotlight-card--equity .floating-pnl {
     font-size: 1.25rem;
     font-weight: 700;
@@ -274,6 +286,10 @@ body {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 0.75rem;
+}
+
+.section-performance-windows .metric-grid {
+    align-content: start;
 }
 
 .metric-card {
@@ -534,6 +550,19 @@ body {
 }
 
 @media (max-width: 600px) {
+    .performance-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .summary-spotlight {
+        display: flex;
+        justify-content: center;
+    }
+
+    .spotlight-card--equity {
+        width: min(100%, 280px);
+    }
+
     .year-grid {
         grid-template-columns: 1fr;
     }
