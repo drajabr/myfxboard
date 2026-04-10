@@ -1,0 +1,140 @@
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import { config } from 'dotenv';
+import dashboardRoutes from './api/routes.js';
+import ingestionRoutes from './api/ingestion.js';
+import { validateUnlockToken, requireUnlocked } from './middleware/auth.js';
+import { validateRequestBody, createAccountSchema, settingsUpdateSchema } from './middleware/validation.js';
+import { accountQueries } from './db/queries.js';
+import crypto from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
+
+config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+const NODE_ENV = process.env.NODE_ENV || 'development';
+
+// Middleware
+app.use(helmet());
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
+  credentials: true,
+}));
+app.use(express.json({ limit: '10mb' }));
+app.use((req, _res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
+});
+
+// Health check
+app.get('/health', (_req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: Date.now() });
+});
+
+// Dashboard read-only routes
+app.use('/api/account', dashboardRoutes);
+
+// Ingestion routes
+app.use('/api/ingestion', ingestionRoutes);
+
+/**
+ * POST /api/account/create
+ * Create a new account link with generated PSK
+ * Requires unlock token
+ */
+app.post('/api/account/create', validateUnlockToken, requireUnlocked, validateRequestBody(createAccountSchema), async (req, res) => {
+  try {
+    const { account_id, secret_key, account_name } = req.body;
+
+    // Check if account already exists
+    const existing = await accountQueries.findById(account_id);
+    if (existing) {
+      return res.status(409).json({ error: 'Account already exists' });
+    }
+
+    const account = await accountQueries.create(account_id, account_name, secret_key);
+
+    res.status(201).json({
+      account_id: account.account_id,
+      account_name: account.account_name,
+      created_at: account.created_at,
+      psk_generated: true,
+    });
+  } catch (error) {
+    console.error('Create account error:', error);
+    res.status(500).json({ error: 'Failed to create account' });
+  }
+});
+
+/**
+ * POST /api/account/:accountId/unlock
+ * Get an unlock token for settings access
+ * Requires master token
+ */
+app.post('/api/account/:accountId/unlock', async (req, res) => {
+  try {
+    const { master_token } = req.body;
+
+    // TODO: Validate master_token against stored hash
+    if (!master_token || master_token !== process.env.MASTER_TOKEN) {
+      return res.status(401).json({ error: 'Invalid master token' });
+    }
+
+    const ttlMinutes = parseInt(process.env.UNLOCK_TOKEN_TTL_MINUTES || '30');
+    const expiresAt = Date.now() + (ttlMinutes * 60 * 1000);
+    const token = uuidv4();
+
+    // TODO: Store token in unlock_sessions table
+    res.json({
+      token,
+      expires_at: expiresAt,
+      locked: false,
+    });
+  } catch (error) {
+    console.error('Unlock error:', error);
+    res.status(500).json({ error: 'Failed to unlock settings' });
+  }
+});
+
+/**
+ * PATCH /api/account/:accountId/settings
+ * Update account settings
+ * Requires unlock token
+ */
+app.patch('/api/account/:accountId/settings', validateUnlockToken, requireUnlocked, validateRequestBody(settingsUpdateSchema), async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const updates = req.body;
+
+    const account = await accountQueries.findById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+
+    // TODO: Update account_settings table with updates
+    res.json({ status: 'ok', updated: updates });
+  } catch (error) {
+    console.error('Settings update error:', error);
+    res.status(500).json({ error: 'Failed to update settings' });
+  }
+});
+
+// 404 handler
+app.use((_req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Error handler
+app.use((err: any, _req: any, res: any, _next: any) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: NODE_ENV === 'production' ? 'Internal server error' : err.message });
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`MT5 Dashboard API running on port ${PORT} (${NODE_ENV})`);
+});
+
+export default app;

@@ -1,0 +1,3883 @@
+//+------------------------------------------------------------------+
+//|                       smaGUY Trade Manger myfxboard edition     |
+//|                    Rebuilt with Unified State Architecture      |
+//+------------------------------------------------------------------+
+#property copyright "smaGUY Trade Manger myfxboard edition v17"
+#property version   "17.00"
+#property strict
+
+#include <Trade\Trade.mqh>
+#include <Trade\PositionInfo.mqh>
+#include <Trade\OrderInfo.mqh>
+#include <Trade\DealInfo.mqh>
+#include "DashboardConnector.mqh"
+
+#define PARTIAL_MAGIC 999999
+#define DEFAULT_TIMER_BASE_INTERVAL_MS 50
+#define DEFAULT_TIMER_MAINTENANCE_INTERVAL_MS 100
+#define DEFAULT_TIMER_UI_INTERVAL_MS 50
+#define IGNORE_TTL_MS 500
+
+// === INPUTS ===
+
+input group "Stop Loss & Take Profit - Automatically sets SL/TP on new positions"
+input double InpStopLoss = 3000;                    // Stop Loss (points)
+input double InpTakeProfit = 5000;                  // Take Profit (points)
+input bool InpSyncSL = true;                        // Sync all entries SL
+input bool InpSyncTP = false;                        // Sync all entries TP
+
+input group "Auto Partials - Takes partial profits at multiple levels"
+input bool InpEnablePartials = false;               // Enable
+enum ENUM_MAX_PARTIALS {
+   PARTIALS_1 = 1,    // 1 Level
+   PARTIALS_2 = 2,    // 2 Levels
+   PARTIALS_3 = 3,    // 3 Levels
+   PARTIALS_4 = 4,    // 4 Levels
+   PARTIALS_5 = 5,    // 5 Levels
+   PARTIALS_6 = 6,    // 6 Levels
+   PARTIALS_7 = 7,    // 7 Levels
+   PARTIALS_8 = 8,    // 8 Levels
+   PARTIALS_9 = 9,    // 9 Levels
+   PARTIALS_10 = 10   // 10 Levels
+};
+input ENUM_MAX_PARTIALS InpMaxPartials = PARTIALS_10;  // Levels
+enum ENUM_PERCENTAGE {
+   PERCENT_5 = 0,    // 5%
+   PERCENT_10 = 1,   // 10%
+   PERCENT_15 = 2,   // 15%
+   PERCENT_20 = 3,   // 20%
+   PERCENT_25 = 4,   // 25%
+   PERCENT_33 = 5,   // 33%
+   PERCENT_40 = 6,   // 40%
+   PERCENT_50 = 7    // 50%
+};
+enum ENUM_FIRST_PARTIAL_MODE {
+   FIRST_PARTIAL_AUTO = 0,       // Auto (runner size if enabled, else equal split)
+   FIRST_PARTIAL_PERCENT_5 = 1,  // 5%
+   FIRST_PARTIAL_PERCENT_10 = 2, // 10%
+   FIRST_PARTIAL_PERCENT_15 = 3, // 15%
+   FIRST_PARTIAL_PERCENT_20 = 4, // 20%
+   FIRST_PARTIAL_PERCENT_25 = 5, // 25%
+   FIRST_PARTIAL_PERCENT_33 = 6, // 33%
+   FIRST_PARTIAL_PERCENT_40 = 7, // 40%
+   FIRST_PARTIAL_PERCENT_50 = 8  // 50%
+};
+input ENUM_FIRST_PARTIAL_MODE InpFirstPartialMode = FIRST_PARTIAL_AUTO;  // First Partial Mode
+input double InpFirstPartialPoint = 0;                          // Offset (points, 0=from entry)
+enum ENUM_PARTIAL_METHOD {
+   PARTIAL_CLOSE = 0,       // Close Method
+   PARTIAL_LIMIT = 1,       // Limit Orders
+   PARTIAL_STOP = 2         // Stop Orders
+};
+input ENUM_PARTIAL_METHOD InpPartialMethod = PARTIAL_CLOSE;  // Method
+
+input group "Auto Break-Even - Moves SL to entry when profit conditions met"
+input bool InpEnableAutoBE = false;                 // Enable
+enum ENUM_BE_MODE {
+   BE_AFTER_PARTIAL = 0,  // After First Partial
+   BE_1_TO_1_RR = 1,      // 1:1 Risk/Reward
+   BE_MANUAL = 2          // Manual (points)
+};
+input ENUM_BE_MODE InpBEMode = BE_AFTER_PARTIAL;    // Mode
+input double InpBETriggerPoints = 500;              // Trigger (points, Manual only)
+
+enum ENUM_RUNNER_SIZE_MODE {
+   RUNNER_SIZE_AUTO = 0,       // Auto (match first partial mode)
+   RUNNER_SIZE_PERCENT_5 = 1,  // 5%
+   RUNNER_SIZE_PERCENT_10 = 2, // 10%
+   RUNNER_SIZE_PERCENT_15 = 3, // 15%
+   RUNNER_SIZE_PERCENT_20 = 4, // 20%
+   RUNNER_SIZE_PERCENT_25 = 5, // 25%
+   RUNNER_SIZE_PERCENT_33 = 6, // 33%
+   RUNNER_SIZE_PERCENT_40 = 7, // 40%
+   RUNNER_SIZE_PERCENT_50 = 8  // 50%
+};
+
+input group "Trailing Runner - Trails stop loss for small positions"
+input bool InpEnableTrailingRunner = false;         // Enable
+input ENUM_RUNNER_SIZE_MODE InpRunnerSizeMode = RUNNER_SIZE_AUTO;  // Size Mode
+input double InpTrailingDistance = 500;            // Distance (points)
+
+input group "Display Settings - Dashboard and chart lines"
+input bool InpEnableDashboard = true;              // Dashboard
+input bool InpDashboardSingleLine = false;          // Single Line Mode
+enum ENUM_DASHBOARD_CORNER {
+   DASHBOARD_LEFT_UPPER = 0,    // Left Upper
+   DASHBOARD_RIGHT_UPPER = 1,   // Right Upper
+   DASHBOARD_LEFT_LOWER = 2,    // Left Lower
+   DASHBOARD_RIGHT_LOWER = 3    // Right Lower
+};
+input ENUM_DASHBOARD_CORNER InpDashboardCorner = DASHBOARD_LEFT_LOWER;  // Corner (Multi-line)
+enum ENUM_FONT_NAME {
+   FONT_COURIER = 0,        // Courier New
+   FONT_ARIAL = 1,          // Arial
+   FONT_TIMES = 2,          // Times New Roman
+   FONT_CALIBRI = 3,        // Calibri
+   FONT_TAHOMA = 4,         // Tahoma
+   FONT_VERDANA = 5,        // Verdana
+   FONT_GEORGIA = 6,        // Georgia
+   FONT_TREBUCHET = 7,      // Trebuchet MS
+   FONT_LUCIDA = 8,         // Lucida Console
+   FONT_CONSOLAS = 9        // Consolas
+};
+input ENUM_FONT_NAME InpDashboardFont = FONT_COURIER;  // Font Name
+input int InpDashboardFontSize = 16;               // Font Size
+input int InpDashboardXOffset = 5;                // X Offset (pixels)
+input int InpDashboardYOffset = 5;                // Y Offset (pixels)
+input bool InpShowLevels = true;                   // Level Lines
+input double InpLevelLabelShiftPercent = 3.0;     // Level Label Shift (% from right edge)
+input int InpLevelLabelFontSize = 11;               // Level Label Font Size
+input int  InpPriceDecimals = 2;                    // Decimals
+
+input group "Dashboard Sync - Real-time position sync to web dashboard"
+input bool   InpEnableDashboardSync = false;         // Enable Dashboard Sync
+input string InpDashboardUrl = "http://localhost:3000";  // Server URL
+input string InpDashboardAccountId = "";             // Account ID (from dashboard)
+input string InpDashboardPSK = "";                   // Pre-Shared Key (from dashboard)
+input int    InpDashboardSyncIntervalSec = 3;        // Sync Interval (seconds)
+input bool   InpDashboardDebugLog = false;           // Debug Logging
+
+// === GLOBALS ==="
+CTrade trade;
+string currencySymbol;
+color colorText, colorProfit, colorLoss, colorSL, colorTP;
+
+struct SymbolInfo {
+   double point, minLot, lotStep, tickValue;
+   int digits, displayDecimals;
+   double cachedPointValuePerLot;  // Cache for GetPointValuePerLot()
+   bool pointValueCached;
+};
+SymbolInfo sym;
+
+struct ModificationBuffer {
+   ulong tickets[100];
+   ulong timestamps[100];  // millisecond timestamp when added
+   int writeIndex, count, size;
+};
+ModificationBuffer ignoreModifications;
+
+ulong g_lastMaintenanceRunMs = 0;
+ulong g_lastUiRunMs = 0;
+int g_timerBaseIntervalMs = DEFAULT_TIMER_BASE_INTERVAL_MS;
+int g_timerMaintenanceIntervalMs = DEFAULT_TIMER_MAINTENANCE_INTERVAL_MS;
+int g_timerUiIntervalMs = DEFAULT_TIMER_UI_INTERVAL_MS;
+
+// Store previous SL/TP values for each position to detect user changes
+struct TradeState {
+   bool exists, isBuy, partialsValid, beSet, trailingActive;
+   int count, partialCount, partialMethod;
+   double totalVolume, netVolume, avgEntry, avgSL, avgTP, currentPnL;
+   double partialPrices[10], partialVolumes[10], partialFinalVolume;
+   bool partialExecuted[10], partialCombined[10], partialPassed[10];  // passed = price crossed, executed = closed/filled
+   ulong partialOrderTickets[10], partialPositionTickets[10];
+   double lastOrderPrice[10], lastOrderSL[10], lastOrderTP[10];  // Track last values to detect user drags
+   double trailingBestPrice, calculatedMinLot, calculatedMinFirstPartial;
+   double lastPlannedPositionSize, lastPlannedTP;
+   double originalPlannedPositionSize;
+   double originalPartialVolumes[10];
+   double originalPartialFinalVolume;
+   int originalPartialCount;
+   // Transient user overrides (reset when position closes)
+   double transientBETriggerOffset;  // Additional points needed before BE triggers (distance from current price when user overrode)
+   double transientTrailingDistance;  // User's manual trailing distance override (in points, from current price)
+   double transientBEOverridePrice;  // Price when user overrode BE (to calculate additional distance needed)
+   // User manual SL/TP override - when user manually changes, use this value instead of calculating average
+   double userOverrideSL;  // User's manually set SL (0 = not set, use average)
+   double userOverrideTP;  // User's manually set TP (0 = not set, use average)
+   // Executed partial prices tracking (immutable - once executed, never un-executed)
+   double executedPartialPrices[10];  // Prices of executed partials
+   int executedPartialCount;           // Number of executed partials
+};
+TradeState state;
+
+// === EXECUTED PARTIALS TRACKING (IMMUTABLE STATE) ===
+bool IsPartialPriceExecuted(double price) {
+   double price_tolerance = sym.point * 10.0;
+   for(int i = 0; i < state.executedPartialCount && i < 10; i++) {
+      if(MathAbs(state.executedPartialPrices[i] - price) < price_tolerance) {
+         return true;
+      }
+   }
+   return false;
+}
+
+void MarkPartialPriceExecuted(double price) {
+   if(IsPartialPriceExecuted(price)) return;
+   if(state.executedPartialCount < 10) {
+      state.executedPartialPrices[state.executedPartialCount] = price;
+      state.executedPartialCount++;
+   }
+}
+
+void ClearSavedPartialState();
+
+void ClearExecutedPartials() {
+   state.executedPartialCount = 0;
+   for(int i = 0; i < 10; i++) {
+      state.executedPartialPrices[i] = 0;
+   }
+   ClearSavedPartialState();
+}
+
+double SnapToExecutedPrice(double price) {
+   double tolerance = sym.point * 10.0;
+   for(int i = 0; i < state.executedPartialCount && i < 10; i++) {
+      if(MathAbs(price - state.executedPartialPrices[i]) < tolerance) {
+         return state.executedPartialPrices[i];
+      }
+   }
+   return price;
+}
+
+// === PARTIAL STATE PERSISTENCE ===
+string GetGVPrefix() {
+   return "STM17_" + _Symbol + "_";
+}
+
+void SavePartialState() {
+   if(!state.exists || !state.partialsValid) return;
+   string pfx = GetGVPrefix();
+
+   GlobalVariableSet(pfx + "EPC", (double)state.executedPartialCount);
+   for(int i = 0; i < 10; i++)
+      GlobalVariableSet(pfx + "EP" + IntegerToString(i), state.executedPartialPrices[i]);
+
+   GlobalVariableSet(pfx + "PV", 1.0);
+   GlobalVariableSet(pfx + "PC", (double)state.partialCount);
+   GlobalVariableSet(pfx + "PM", (double)state.partialMethod);
+   GlobalVariableSet(pfx + "PFV", state.partialFinalVolume);
+   GlobalVariableSet(pfx + "LPS", state.lastPlannedPositionSize);
+   GlobalVariableSet(pfx + "LPT", state.lastPlannedTP);
+
+   for(int i = 0; i < 10; i++) {
+      GlobalVariableSet(pfx + "PP" + IntegerToString(i), state.partialPrices[i]);
+      GlobalVariableSet(pfx + "PVol" + IntegerToString(i), state.partialVolumes[i]);
+      GlobalVariableSet(pfx + "PE" + IntegerToString(i), state.partialExecuted[i] ? 1.0 : 0.0);
+      GlobalVariableSet(pfx + "POT" + IntegerToString(i), (double)state.partialOrderTickets[i]);
+      GlobalVariableSet(pfx + "PPT" + IntegerToString(i), (double)state.partialPositionTickets[i]);
+   }
+
+   GlobalVariableSet(pfx + "OPC", (double)state.originalPartialCount);
+   GlobalVariableSet(pfx + "OPS", state.originalPlannedPositionSize);
+   GlobalVariableSet(pfx + "OPFV", state.originalPartialFinalVolume);
+   for(int i = 0; i < 10; i++)
+      GlobalVariableSet(pfx + "OPV" + IntegerToString(i), state.originalPartialVolumes[i]);
+
+   GlobalVariableSet(pfx + "BE", state.beSet ? 1.0 : 0.0);
+   GlobalVariableSet(pfx + "TBP", state.trailingBestPrice);
+   GlobalVariableSet(pfx + "TA", state.trailingActive ? 1.0 : 0.0);
+   GlobalVariableSet(pfx + "UOSL", state.userOverrideSL);
+   GlobalVariableSet(pfx + "UOTP", state.userOverrideTP);
+
+   GlobalVariableSet(pfx + "SAVED", 1.0);
+}
+
+bool IsPartialPosition(ulong ticket);
+void MarkPartialExecuted(int index);
+
+bool LoadPartialState() {
+   string pfx = GetGVPrefix();
+   if(!GlobalVariableCheck(pfx + "SAVED")) return false;
+
+   state.executedPartialCount = (int)GlobalVariableGet(pfx + "EPC");
+   for(int i = 0; i < 10; i++)
+      state.executedPartialPrices[i] = GlobalVariableGet(pfx + "EP" + IntegerToString(i));
+
+   state.partialsValid = (GlobalVariableGet(pfx + "PV") > 0.5);
+   state.partialCount = (int)GlobalVariableGet(pfx + "PC");
+   state.partialMethod = (int)GlobalVariableGet(pfx + "PM");
+   state.partialFinalVolume = GlobalVariableGet(pfx + "PFV");
+   state.lastPlannedPositionSize = GlobalVariableGet(pfx + "LPS");
+   state.lastPlannedTP = GlobalVariableGet(pfx + "LPT");
+
+   for(int i = 0; i < 10; i++) {
+      state.partialPrices[i] = GlobalVariableGet(pfx + "PP" + IntegerToString(i));
+      state.partialVolumes[i] = GlobalVariableGet(pfx + "PVol" + IntegerToString(i));
+      state.partialExecuted[i] = (GlobalVariableGet(pfx + "PE" + IntegerToString(i)) > 0.5);
+      state.partialOrderTickets[i] = (ulong)GlobalVariableGet(pfx + "POT" + IntegerToString(i));
+      state.partialPositionTickets[i] = (ulong)GlobalVariableGet(pfx + "PPT" + IntegerToString(i));
+      state.partialPassed[i] = false;
+      state.partialCombined[i] = false;
+   }
+
+   state.originalPartialCount = (int)GlobalVariableGet(pfx + "OPC");
+   state.originalPlannedPositionSize = GlobalVariableGet(pfx + "OPS");
+   state.originalPartialFinalVolume = GlobalVariableGet(pfx + "OPFV");
+   for(int i = 0; i < 10; i++)
+      state.originalPartialVolumes[i] = GlobalVariableGet(pfx + "OPV" + IntegerToString(i));
+
+   state.beSet = (GlobalVariableGet(pfx + "BE") > 0.5);
+   state.trailingBestPrice = GlobalVariableGet(pfx + "TBP");
+   state.trailingActive = (GlobalVariableGet(pfx + "TA") > 0.5);
+   state.userOverrideSL = GlobalVariableGet(pfx + "UOSL");
+   state.userOverrideTP = GlobalVariableGet(pfx + "UOTP");
+
+   for(int i = 0; i < state.partialCount && i < 10; i++) {
+      if(state.partialOrderTickets[i] > 0 && !OrderSelect(state.partialOrderTickets[i])) {
+         bool found_pos = false;
+         for(int j = PositionsTotal() - 1; j >= 0; j--) {
+            ulong pos_ticket = PositionGetTicket(j);
+            if(IsPartialPosition(pos_ticket) && PositionSelectByTicket(pos_ticket)) {
+               double pos_price = PositionGetDouble(POSITION_PRICE_OPEN);
+               if(MathAbs(state.partialPrices[i] - pos_price) < sym.point * 10.0) {
+                  state.partialPositionTickets[i] = pos_ticket;
+                  state.partialOrderTickets[i] = 0;
+                  if(!state.partialExecuted[i]) MarkPartialExecuted(i);
+                  found_pos = true;
+                  break;
+               }
+            }
+         }
+         if(!found_pos) state.partialOrderTickets[i] = 0;
+      }
+   }
+
+   Print("Partial state loaded: ", state.partialCount, " levels, ", state.executedPartialCount, " executed");
+   return true;
+}
+
+void ClearSavedPartialState() {
+   string pfx = GetGVPrefix();
+   GlobalVariableDel(pfx + "SAVED");
+   GlobalVariableDel(pfx + "EPC");
+   GlobalVariableDel(pfx + "PV");
+   GlobalVariableDel(pfx + "PC");
+   GlobalVariableDel(pfx + "PM");
+   GlobalVariableDel(pfx + "PFV");
+   GlobalVariableDel(pfx + "LPS");
+   GlobalVariableDel(pfx + "LPT");
+   GlobalVariableDel(pfx + "OPC");
+   GlobalVariableDel(pfx + "OPS");
+   GlobalVariableDel(pfx + "OPFV");
+   GlobalVariableDel(pfx + "BE");
+   GlobalVariableDel(pfx + "TBP");
+   GlobalVariableDel(pfx + "TA");
+   GlobalVariableDel(pfx + "UOSL");
+   GlobalVariableDel(pfx + "UOTP");
+   for(int i = 0; i < 10; i++) {
+      GlobalVariableDel(pfx + "EP" + IntegerToString(i));
+      GlobalVariableDel(pfx + "PP" + IntegerToString(i));
+      GlobalVariableDel(pfx + "PVol" + IntegerToString(i));
+      GlobalVariableDel(pfx + "PE" + IntegerToString(i));
+      GlobalVariableDel(pfx + "POT" + IntegerToString(i));
+      GlobalVariableDel(pfx + "PPT" + IntegerToString(i));
+      GlobalVariableDel(pfx + "OPV" + IntegerToString(i));
+   }
+}
+
+// Forward declarations for UI functions
+void UpdateDashboard();
+void UpdateLines();
+
+void UpdateUI() {
+   if(InpEnableDashboard) {
+      UpdateDashboard();
+      UpdateLines();
+   }
+}
+
+void UpdateStateAndUI() {
+   CalculatePositionGroup();
+   SetSLTPForAll();
+   UpdateUI();
+}
+
+void SyncSLTPToAll(double new_sl, double new_tp, bool sl_changed, bool tp_changed, ulong exclude_ticket = 0, bool include_positions = true, bool include_orders = true) {
+   trade.SetAsyncMode(true);
+
+   if(include_positions) {
+      for(int i = 0; i < PositionsTotal(); i++) {
+         ulong ticket = PositionGetTicket(i);
+         if(!IsValidPosition(ticket) || ticket == exclude_ticket) continue;
+         double cur_sl = PositionGetDouble(POSITION_SL);
+         double cur_tp = PositionGetDouble(POSITION_TP);
+         double sync_sl = cur_sl;
+         double sync_tp = cur_tp;
+         bool need_update = false;
+         if(InpSyncSL && sl_changed && new_sl > 0 && MathAbs(cur_sl - new_sl) > sym.point) {
+            sync_sl = new_sl;
+            need_update = true;
+         }
+         if(InpSyncTP && tp_changed && new_tp > 0 && MathAbs(cur_tp - new_tp) > sym.point) {
+            sync_tp = new_tp;
+            need_update = true;
+         }
+         if(need_update) {
+            AddToIgnoreBuffer(ticket);
+            trade.PositionModify(ticket, sync_sl, sync_tp);
+         }
+      }
+   }
+
+   if(include_orders) {
+      for(int i = 0; i < OrdersTotal(); i++) {
+         ulong ticket = OrderGetTicket(i);
+         if(!IsValidOrder(ticket) || ticket == exclude_ticket) continue;
+         ENUM_ORDER_TYPE ot = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+         bool isBuy = IsBuyOrderType(ot);
+         bool sameDir = !state.exists || (isBuy == state.isBuy);
+         double cur_sl = OrderGetDouble(ORDER_SL);
+         double cur_tp = OrderGetDouble(ORDER_TP);
+         double price = OrderGetDouble(ORDER_PRICE_OPEN);
+         if(price <= 0) continue;
+
+         double order_sl = cur_sl;
+         double order_tp = cur_tp;
+         bool need_update = false;
+         if(InpSyncSL && sl_changed && new_sl > 0 && MathAbs(cur_sl - new_sl) > sym.point) {
+            order_sl = sameDir ? new_sl : cur_tp;
+            need_update = true;
+         }
+         if(InpSyncTP && tp_changed && new_tp > 0 && MathAbs(cur_tp - new_tp) > sym.point) {
+            order_tp = sameDir ? new_tp : cur_sl;
+            need_update = true;
+         }
+         if(need_update) {
+            AddToIgnoreBuffer(ticket);
+            trade.OrderModify(ticket, price, order_sl, order_tp, ORDER_TIME_GTC, 0);
+         }
+      }
+   }
+
+   trade.SetAsyncMode(false);
+}
+
+bool IsValidPosition(ulong ticket) {
+   if(ticket == 0 || !PositionSelectByTicket(ticket)) return false;
+   return PositionGetString(POSITION_SYMBOL) == _Symbol &&
+          PositionGetInteger(POSITION_MAGIC) != PARTIAL_MAGIC;
+}
+
+bool IsValidOrder(ulong ticket) {
+   if(ticket == 0 || !OrderSelect(ticket)) return false;
+   return OrderGetString(ORDER_SYMBOL) == _Symbol &&
+          OrderGetInteger(ORDER_MAGIC) != PARTIAL_MAGIC;
+}
+
+bool CancelPendingPartialOrderGroup() {
+   bool cancelled_any = false;
+   trade.SetAsyncMode(true);
+
+   for(int i = OrdersTotal() - 1; i >= 0; i--) {
+      ulong ticket = OrderGetTicket(i);
+      if(ticket == 0 || !OrderSelect(ticket)) continue;
+      if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
+      if(OrderGetInteger(ORDER_MAGIC) != PARTIAL_MAGIC) continue;
+
+      AddToIgnoreBuffer(ticket);
+      if(trade.OrderDelete(ticket)) cancelled_any = true;
+   }
+
+   trade.SetAsyncMode(false);
+
+   for(int i = 0; i < 10; i++) {
+      state.partialOrderTickets[i] = 0;
+      state.partialPositionTickets[i] = 0;
+      state.partialPassed[i] = false;
+   }
+
+   state.partialsValid = false;
+   state.partialCount = 0;
+   state.partialFinalVolume = 0;
+   state.lastPlannedPositionSize = 0;
+   state.lastPlannedTP = 0;
+   return cancelled_any;
+}
+
+// === HELPER FUNCTIONS ===
+double GetPercentageValue(ENUM_PERCENTAGE percent) {
+   static double values[] = {0.05, 0.10, 0.15, 0.20, 0.25, 0.33, 0.40, 0.50};
+   return (percent >= 0 && percent < ArraySize(values)) ? values[percent] : 0.10;
+}
+
+double GetFirstPartialPercent(ENUM_FIRST_PARTIAL_MODE mode) {
+   switch(mode) {
+      case FIRST_PARTIAL_PERCENT_5:  return 0.05;
+      case FIRST_PARTIAL_PERCENT_10: return 0.10;
+      case FIRST_PARTIAL_PERCENT_15: return 0.15;
+      case FIRST_PARTIAL_PERCENT_20: return 0.20;
+      case FIRST_PARTIAL_PERCENT_25: return 0.25;
+      case FIRST_PARTIAL_PERCENT_33: return 0.33;
+      case FIRST_PARTIAL_PERCENT_40: return 0.40;
+      case FIRST_PARTIAL_PERCENT_50: return 0.50;
+      case FIRST_PARTIAL_AUTO:       return -1.0; // Special: auto mode marker
+      default:                       return -1.0;
+   }
+}
+
+double GetRunnerSizePercent(ENUM_RUNNER_SIZE_MODE mode) {
+   switch(mode) {
+      case RUNNER_SIZE_PERCENT_5:  return 0.05;
+      case RUNNER_SIZE_PERCENT_10: return 0.10;
+      case RUNNER_SIZE_PERCENT_15: return 0.15;
+      case RUNNER_SIZE_PERCENT_20: return 0.20;
+      case RUNNER_SIZE_PERCENT_25: return 0.25;
+      case RUNNER_SIZE_PERCENT_33: return 0.33;
+      case RUNNER_SIZE_PERCENT_40: return 0.40;
+      case RUNNER_SIZE_PERCENT_50: return 0.50;
+      case RUNNER_SIZE_AUTO:       return -1.0; // Special: auto mode marker
+      default:                     return -1.0;
+   }
+}
+
+double GetEffectiveRunnerSizePercent() {
+   ENUM_RUNNER_SIZE_MODE mode = (ENUM_RUNNER_SIZE_MODE)InpRunnerSizeMode;
+   double modePercent = GetRunnerSizePercent(mode);
+   
+   if(modePercent < 0) {
+      // RUNNER_SIZE_AUTO: match first partial mode
+      ENUM_FIRST_PARTIAL_MODE firstMode = (ENUM_FIRST_PARTIAL_MODE)InpFirstPartialMode;
+      double firstPercent = GetFirstPartialPercent(firstMode);
+      if(firstPercent < 0) {
+         // Both AUTO: use 10% as default
+         return 0.10;
+      }
+      return firstPercent;
+   }
+   
+   return modePercent;
+}
+
+string GetFontName(ENUM_FONT_NAME font) {
+   static string fonts[] = {"Courier New", "Arial", "Times New Roman", "Calibri", "Tahoma", "Verdana", "Georgia", "Trebuchet MS", "Lucida Console", "Consolas"};
+   return (font >= 0 && font < ArraySize(fonts)) ? fonts[font] : "Courier New";
+}
+
+double GetPriceDiff(bool isBuy, double p1, double p2) {
+   return isBuy ? (p1 - p2) : (p2 - p1);
+}
+
+double GetCurrentSpread() {
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   return (ask > 0 && bid > 0) ? (ask - bid) : 0;
+}
+
+double GetCurrentPrice(bool isBuy) {
+   return isBuy ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+}
+
+bool IsBuyOrderType(ENUM_ORDER_TYPE ot) {
+   return (ot == ORDER_TYPE_BUY || ot == ORDER_TYPE_BUY_LIMIT || ot == ORDER_TYPE_BUY_STOP || ot == ORDER_TYPE_BUY_STOP_LIMIT);
+}
+
+bool IsPendingEntryOrderType(ENUM_ORDER_TYPE ot) {
+   return (ot == ORDER_TYPE_BUY_LIMIT || ot == ORDER_TYPE_SELL_LIMIT ||
+           ot == ORDER_TYPE_BUY_STOP  || ot == ORDER_TYPE_SELL_STOP  ||
+           ot == ORDER_TYPE_BUY_STOP_LIMIT || ot == ORDER_TYPE_SELL_STOP_LIMIT);
+}
+
+bool IsPriceWithinSLBoundary(bool isBuy, double price, double sl) {
+   if(price <= 0 || sl <= 0) return false;
+   return isBuy ? (price > sl + sym.point * 0.5)
+                : (price < sl - sym.point * 0.5);
+}
+
+void AddUniqueSLReference(double &refs[], int &ref_count, int max_count, double sl) {
+   if(sl <= 0 || ref_count >= max_count) return;
+   for(int i = 0; i < ref_count; i++) {
+      if(MathAbs(refs[i] - sl) <= sym.point) return;
+   }
+   refs[ref_count++] = sl;
+}
+
+double SelectBestGroupSLForPrice(bool isBuy, double price, double &refs[], int ref_count) {
+   if(price <= 0 || ref_count <= 0) return 0;
+
+   double best_sl = 0;
+   for(int i = 0; i < ref_count; i++) {
+      double candidate = refs[i];
+      if(!IsPriceWithinSLBoundary(isBuy, price, candidate)) continue;
+
+      if(best_sl <= 0) {
+         best_sl = candidate;
+         continue;
+      }
+
+      // Choose the nearest valid boundary for this price.
+      if(isBuy) {
+         if(candidate > best_sl) best_sl = candidate;
+      } else {
+         if(candidate < best_sl) best_sl = candidate;
+      }
+   }
+
+   return best_sl;
+}
+
+bool IsValidSLForOrderPrice(bool isBuy, double order_price, double sl_price) {
+   if(sl_price <= 0 || order_price <= 0) return true;
+   return isBuy ? (sl_price < order_price - sym.point) : (sl_price > order_price + sym.point);
+}
+
+bool IsValidTPForOrderPrice(bool isBuy, double order_price, double tp_price) {
+   if(tp_price <= 0 || order_price <= 0) return true;
+   return isBuy ? (tp_price > order_price + sym.point) : (tp_price < order_price - sym.point);
+}
+
+void SanitizeOrderSLTPForPrice(bool isBuy, double order_price, double cur_sl, double cur_tp, double &new_sl, double &new_tp) {
+   if(order_price <= 0) return;
+
+   if(new_sl > 0 && !IsValidSLForOrderPrice(isBuy, order_price, new_sl)) {
+      double fallback_sl = (InpStopLoss > 0)
+                           ? NormalizeDouble(order_price + (isBuy ? -1.0 : 1.0) * InpStopLoss * sym.point, sym.digits)
+                           : 0;
+      if(fallback_sl > 0 && IsValidSLForOrderPrice(isBuy, order_price, fallback_sl)) {
+         new_sl = fallback_sl;
+      } else if(cur_sl > 0 && IsValidSLForOrderPrice(isBuy, order_price, cur_sl)) {
+         new_sl = cur_sl;
+      } else {
+         new_sl = 0;
+      }
+   }
+
+   if(new_tp > 0 && !IsValidTPForOrderPrice(isBuy, order_price, new_tp)) {
+      double fallback_tp = (InpTakeProfit > 0)
+                           ? NormalizeDouble(order_price + (isBuy ? 1.0 : -1.0) * InpTakeProfit * sym.point, sym.digits)
+                           : 0;
+      if(fallback_tp > 0 && IsValidTPForOrderPrice(isBuy, order_price, fallback_tp)) {
+         new_tp = fallback_tp;
+      } else if(cur_tp > 0 && IsValidTPForOrderPrice(isBuy, order_price, cur_tp)) {
+         new_tp = cur_tp;
+      } else {
+         new_tp = 0;
+      }
+   }
+}
+
+// Calculate distance from current price in points
+double GetDistanceFromCurrentPrice(double price) {
+   if(!state.exists) return 0;
+   double current_price = GetCurrentPrice(state.isBuy);
+   return MathAbs(price - current_price) / sym.point;
+}
+
+
+
+// Get actual TP from positions (all positions should have same TP - synced)
+double GetActualTP() {
+   if(!state.exists) return 0;
+   
+   // Get TP from first valid position (all should have same TP)
+   for(int i = 0; i < PositionsTotal(); i++) {
+      ulong ticket = PositionGetTicket(i);
+      if(!IsValidPosition(ticket)) continue;
+      double tp = PositionGetDouble(POSITION_TP);
+      if(tp > 0) return tp;
+   }
+   return 0;
+}
+
+// Check if first partial should be ignored (TP below first partial when InpFirstPartialPoint > 0)
+bool ShouldIgnoreFirstPartial() {
+   if(InpFirstPartialPoint <= 0 || state.partialCount == 0) return false;
+   double actual_tp = GetActualTP();
+   if(actual_tp <= 0) actual_tp = state.avgTP;  // Fallback to override value before sync completes
+   if(actual_tp <= 0) return false;
+   return IsTPBelowFirstPartialDistance(actual_tp);
+}
+
+bool IsTPBelowFirstPartialDistance(double tp_price) {
+   if(!state.exists || InpFirstPartialPoint <= 0 || tp_price <= 0) return false;
+   double first_partial_price = NormalizeDouble(state.avgEntry + (state.isBuy ? 1 : -1) * InpFirstPartialPoint * sym.point, sym.digits);
+   return state.isBuy ? (tp_price < first_partial_price) : (tp_price > first_partial_price);
+}
+
+bool BuildPartialPriceLevels(double actual_tp, int level_count) {
+   if(!state.exists || actual_tp <= 0 || level_count <= 0 || level_count > 10) return false;
+
+   bool tp_below_first_partial = IsTPBelowFirstPartialDistance(actual_tp);
+   double first_partial_price = NormalizeDouble(state.avgEntry + (state.isBuy ? 1 : -1) * InpFirstPartialPoint * sym.point, sym.digits);
+   double start_price = tp_below_first_partial ? state.avgEntry : ((InpFirstPartialPoint > 0) ? first_partial_price : state.avgEntry);
+   double distance = MathAbs(actual_tp - start_price);
+   if(distance <= sym.point) return false;
+
+   for(int i = 0; i < 10; i++) {
+      state.partialPrices[i] = 0;
+   }
+
+   // If first-partial mode is active and TP is beyond it, pin level 1 to that configured price.
+   if(!tp_below_first_partial && InpFirstPartialPoint > 0) {
+      state.partialPrices[0] = first_partial_price;
+      if(level_count == 1) return true;
+
+      double remaining_distance = MathAbs(actual_tp - first_partial_price);
+      if(remaining_distance <= sym.point) return true;
+
+      double step = remaining_distance / (double)(level_count);
+      for(int i = 1; i < level_count; i++) {
+         double price = state.isBuy
+                        ? (first_partial_price + step * i)
+                        : (first_partial_price - step * i);
+         state.partialPrices[i] = NormalizeDouble(price, sym.digits);
+      }
+      return true;
+   }
+
+   // Otherwise, distribute partial levels from entry toward TP and leave a runner segment.
+   double step = distance / (double)(level_count + 1);
+   for(int i = 0; i < level_count; i++) {
+      double price = state.isBuy
+                     ? (start_price + step * (i + 1))
+                     : (start_price - step * (i + 1));
+      state.partialPrices[i] = NormalizeDouble(price, sym.digits);
+   }
+   return true;
+}
+
+double GetRoundedVolumeFromPercent(double base_volume, double percent) {
+   if(base_volume <= 0 || percent <= 0) return 0;
+   double rounded_volume = NormalizeDouble(MathCeil((base_volume * percent) / sym.lotStep) * sym.lotStep, 2);
+   return (rounded_volume < sym.minLot) ? sym.minLot : rounded_volume;
+}
+
+double GetWholePositionReferenceSize() {
+   if(!state.exists) return 0;
+
+   double current_position_size = MathAbs(state.netVolume);
+   double reference_size = state.originalPlannedPositionSize;
+   if(reference_size <= 0 || current_position_size > reference_size + (sym.lotStep * 0.5)) {
+      reference_size = current_position_size;
+   }
+   return reference_size;
+}
+
+// Trailing runner TP can be open while the remaining aggregate position fits the runner-size threshold.
+bool AllowMissingTPForTrailingRunner(ulong ticket) {
+   if(ticket == 0 || !InpEnableTrailingRunner || !state.exists || !state.trailingActive) return false;
+   if(!IsValidPosition(ticket)) return false;
+
+   double current_position_size = MathAbs(state.netVolume);
+   return (current_position_size >= sym.minLot && current_position_size <= state.calculatedMinLot + (sym.lotStep * 0.5));
+}
+
+// Ensure a position has missing SL/TP set from its own entry price.
+void EnsurePositionHasSLTP(ulong ticket) {
+   if(!IsValidPosition(ticket)) return;
+
+   double cur_sl = PositionGetDouble(POSITION_SL);
+   double cur_tp = PositionGetDouble(POSITION_TP);
+   double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+   if(entry <= 0) return;
+
+   bool isBuy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+   double new_sl = cur_sl;
+   double new_tp = cur_tp;
+   bool need_modify = false;
+
+   if(cur_sl <= 0 && InpStopLoss > 0) {
+      new_sl = NormalizeDouble(entry + (isBuy ? -1.0 : 1.0) * InpStopLoss * sym.point, sym.digits);
+      need_modify = true;
+   }
+   bool allow_missing_tp = AllowMissingTPForTrailingRunner(ticket);
+   if(!allow_missing_tp && cur_tp <= 0 && InpTakeProfit > 0) {
+      new_tp = NormalizeDouble(entry + (isBuy ? 1.0 : -1.0) * InpTakeProfit * sym.point, sym.digits);
+      need_modify = true;
+   }
+
+   if(!need_modify) return;
+
+   AddToIgnoreBuffer(ticket);
+   if(!trade.PositionModify(ticket, new_sl, new_tp)) {
+      Print("WARN: EnsurePositionHasSLTP failed for ticket ", ticket,
+            " sl=", DoubleToString(new_sl, sym.digits),
+            " tp=", DoubleToString(new_tp, sym.digits),
+            " rc=", trade.ResultRetcode(), " desc=", trade.ResultRetcodeDescription());
+   }
+}
+
+// Ensure a pending order has missing SL/TP set from its own order price.
+void EnsureOrderHasSLTP(ulong ticket) {
+   if(!IsValidOrder(ticket)) return;
+
+   double cur_sl = OrderGetDouble(ORDER_SL);
+   double cur_tp = OrderGetDouble(ORDER_TP);
+   double price = OrderGetDouble(ORDER_PRICE_OPEN);
+   if(price <= 0) return;
+
+   ENUM_ORDER_TYPE ot = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+   bool isBuy = IsBuyOrderType(ot);
+
+   double new_sl = cur_sl;
+   double new_tp = cur_tp;
+   bool need_modify = false;
+
+   if(cur_sl <= 0 && InpStopLoss > 0) {
+      new_sl = NormalizeDouble(price + (isBuy ? -1.0 : 1.0) * InpStopLoss * sym.point, sym.digits);
+      need_modify = true;
+   }
+   if(cur_tp <= 0 && InpTakeProfit > 0) {
+      new_tp = NormalizeDouble(price + (isBuy ? 1.0 : -1.0) * InpTakeProfit * sym.point, sym.digits);
+      need_modify = true;
+   }
+
+   if(!need_modify) return;
+
+   SanitizeOrderSLTPForPrice(isBuy, price, cur_sl, cur_tp, new_sl, new_tp);
+   bool still_need_modify = false;
+   if(new_sl > 0 && MathAbs(new_sl - cur_sl) > sym.point) still_need_modify = true;
+   if(new_tp > 0 && MathAbs(new_tp - cur_tp) > sym.point) still_need_modify = true;
+   if(!still_need_modify) return;
+
+   AddToIgnoreBuffer(ticket);
+   if(!trade.OrderModify(ticket, price, new_sl, new_tp, ORDER_TIME_GTC, 0)) {
+      Print("WARN: EnsureOrderHasSLTP failed for ticket ", ticket,
+            " sl=", DoubleToString(new_sl, sym.digits),
+            " tp=", DoubleToString(new_tp, sym.digits),
+            " rc=", trade.ResultRetcode(), " desc=", trade.ResultRetcodeDescription());
+   }
+}
+
+// Calculate point value per lot in account currency (cached)
+double GetPointValuePerLot() {
+   if(sym.pointValueCached) return sym.cachedPointValuePerLot;
+   
+   double result = 0;
+
+   // Method 1: derive from tick value and tick size.
+   if(result <= 0) {
+      double tick_val_profit = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE_PROFIT);
+      double tick_size = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+
+      if(tick_val_profit > 0 && tick_size > 0) {
+         result = tick_val_profit * (sym.point / tick_size);
+      }
+   }
+
+   // Method 2: fallback to generic tick value.
+   if(result <= 0) {
+      double tick_val = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+      double tick_size = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+      if(tick_val > 0 && tick_size > 0) {
+         result = tick_val * (sym.point / tick_size);
+      }
+   }
+
+   // Method 3: order profit delta for one point on one lot.
+   if(result <= 0) {
+      double current_price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      if(current_price <= 0) current_price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      if(current_price > 0) {
+         double profit = 0;
+         double price_plus_point = current_price + sym.point;
+         if(OrderCalcProfit(ORDER_TYPE_BUY, _Symbol, 1.0, current_price, price_plus_point, profit) && profit > 0) {
+            result = profit;
+         }
+      }
+   }
+
+   // Method 4: contract-size fallback.
+   if(result <= 0) {
+      double contract_size = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+      if(contract_size > 0) result = contract_size * sym.point;
+   }
+   
+   // Final fallback
+   if(result <= 0) result = (sym.point == 0.00001) ? 1.0 : 10.0;
+   
+   sym.cachedPointValuePerLot = result;
+   sym.pointValueCached = true;
+   return result;
+}
+
+
+void InitializeIgnoreBuffer() {
+   ArrayInitialize(ignoreModifications.tickets, 0);
+   ArrayInitialize(ignoreModifications.timestamps, 0);
+   ignoreModifications.writeIndex = 0;
+   ignoreModifications.count = 0;
+   ignoreModifications.size = 100;
+}
+
+void AddToIgnoreBuffer(ulong ticket) {
+   if(ticket == 0) return;
+
+   ulong now = GetTickCount64();
+
+   // Refresh existing entry instead of duplicating.
+   for(int i = 0; i < ignoreModifications.size; i++) {
+      if(ignoreModifications.tickets[i] == ticket) {
+         ignoreModifications.timestamps[i] = now;
+         return;
+      }
+   }
+
+   // Insert in ring (overwrite oldest slot when full).
+   ignoreModifications.tickets[ignoreModifications.writeIndex] = ticket;
+   ignoreModifications.timestamps[ignoreModifications.writeIndex] = now;
+   ignoreModifications.writeIndex = (ignoreModifications.writeIndex + 1) % ignoreModifications.size;
+   if(ignoreModifications.count < ignoreModifications.size) ignoreModifications.count++;
+}
+bool IsIgnored(ulong ticket) {
+   if(ticket == 0) return false;
+
+   ulong now = GetTickCount64();
+   for(int i = 0; i < ignoreModifications.size; i++) {
+      if(ignoreModifications.tickets[i] == ticket) {
+         if(now - ignoreModifications.timestamps[i] <= IGNORE_TTL_MS) {
+            return true;
+         }
+         // Expired.
+         ignoreModifications.tickets[i] = 0;
+         ignoreModifications.timestamps[i] = 0;
+         if(ignoreModifications.count > 0) ignoreModifications.count--;
+         return false;
+      }
+   }
+   return false;
+}
+void RemoveFromIgnoreBuffer(ulong ticket) {
+   if(ticket == 0) return;
+   for(int i = 0; i < ignoreModifications.size; i++) {
+      if(ignoreModifications.tickets[i] == ticket) {
+         ignoreModifications.tickets[i] = 0;
+         ignoreModifications.timestamps[i] = 0;
+         if(ignoreModifications.count > 0) ignoreModifications.count--;
+         return;
+      }
+   }
+}
+
+// === STATE MANAGEMENT ===
+
+void CalculatePositionGroup() {
+   bool wasExisting = state.exists;
+   bool previousDirection = state.isBuy;
+   
+   // Reset state
+   state.exists = false;
+   state.count = 0;
+   state.netVolume = 0;
+   state.totalVolume = 0;
+   state.currentPnL = 0;
+   
+   double buy_vol = 0, sell_vol = 0, weighted_entry = 0, weighted_sl = 0, weighted_tp = 0, total_vol = 0;
+   double sl_vol = 0, tp_vol = 0;  // Volume of positions that have SL/TP
+   
+   // Process ALL open positions (exclude PARTIAL_MAGIC only)
+   for(int i = 0; i < PositionsTotal(); i++) {
+      ulong ticket = PositionGetTicket(i);
+      if(!IsValidPosition(ticket)) continue;
+      
+      double vol = PositionGetDouble(POSITION_VOLUME);
+      double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+      bool isBuy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+      
+      state.count++;
+      total_vol += vol;
+      weighted_entry += entry * vol;
+      double sl = PositionGetDouble(POSITION_SL);
+      double tp = PositionGetDouble(POSITION_TP);
+      if(sl > 0) {
+         weighted_sl += sl * vol;
+         sl_vol += vol;
+      }
+      if(tp > 0) {
+         weighted_tp += tp * vol;
+         tp_vol += vol;
+      }
+      state.currentPnL += PositionGetDouble(POSITION_PROFIT);
+      
+      if(isBuy) buy_vol += vol; else sell_vol += vol;
+   }
+   
+   state.netVolume = buy_vol - sell_vol;
+   state.totalVolume = total_vol;
+   
+   if(state.count == 0) {
+      // No positions - reset everything completely and delete all partial orders
+      state.exists = false;
+      state.beSet = false;
+      state.trailingBestPrice = 0;
+      state.trailingActive = false;
+      state.avgEntry = 0;
+      state.avgSL = 0;
+      state.avgTP = 0;
+      state.calculatedMinLot = 0;
+      state.calculatedMinFirstPartial = 0;
+      state.lastPlannedPositionSize = 0;
+      state.lastPlannedTP = 0;
+      state.partialsValid = false;
+      state.partialCount = 0;
+      state.originalPlannedPositionSize = 0;
+      state.originalPartialCount = 0;
+      state.originalPartialFinalVolume = 0;
+      state.transientBETriggerOffset = 0;
+      state.transientTrailingDistance = 0;
+      state.transientBEOverridePrice = 0;
+      state.userOverrideSL = 0;
+      state.userOverrideTP = 0;
+      ClearExecutedPartials();  // Clear executed partials when position closed
+      
+      // Delete partial orders when fully flat.
+      trade.SetAsyncMode(true);
+      int total_orders = OrdersTotal();
+      for(int i = total_orders - 1; i >= 0; i--) {
+         ulong ticket = OrderGetTicket(i);
+         if(ticket == 0) continue;
+         if(IsPartialOrder(ticket)) trade.OrderDelete(ticket);
+      }
+      trade.SetAsyncMode(false);
+      
+      // Reset all partial flags and tracking
+      for(int i = 0; i < 10; i++) {
+         state.originalPartialVolumes[i] = 0;
+         state.partialExecuted[i] = false;
+         state.partialPassed[i] = false;
+         state.partialCombined[i] = false;
+         state.partialOrderTickets[i] = 0;
+         state.partialPositionTickets[i] = 0;
+         state.lastOrderPrice[i] = 0;
+         state.lastOrderSL[i] = 0;
+         state.lastOrderTP[i] = 0;
+      }
+      return;
+   }
+   
+   state.exists = true;
+   if(MathAbs(state.netVolume) >= sym.minLot) {
+      state.isBuy = (state.netVolume > 0);
+   } else if(buy_vol > sell_vol + sym.minLot * 0.1) {
+      state.isBuy = true;
+   } else if(sell_vol > buy_vol + sym.minLot * 0.1) {
+      state.isBuy = false;
+   } else {
+      // Fully hedged/equal exposure: keep previous direction to avoid flip-flopping.
+      state.isBuy = previousDirection;
+   }
+   state.avgEntry = (total_vol > 0) ? weighted_entry / total_vol : 0;
+   // Calculate average SL - respect user override if it was set by moving partial orders
+   if(state.userOverrideSL > 0) {
+      state.avgSL = state.userOverrideSL;  // Always use user override if set
+   } else if(InpSyncSL) {
+      state.avgSL = (sl_vol > 0 && weighted_sl > 0) ? weighted_sl / sl_vol : 0;
+   } else {
+      state.avgSL = (sl_vol > 0 && weighted_sl > 0) ? weighted_sl / sl_vol : 0;
+   }
+   
+   // Keep a whole-position reference size until flat, and only grow it when the user adds size.
+   double currentPositionSize = MathAbs(state.netVolume);
+   state.originalPlannedPositionSize = GetWholePositionReferenceSize();
+   double referencePositionSize = state.originalPlannedPositionSize;
+
+   // Recalculate lot values from the whole-position reference, not the shrinking live size.
+   double runnerSizePercent = GetEffectiveRunnerSizePercent();
+   state.calculatedMinLot = GetRoundedVolumeFromPercent(referencePositionSize, runnerSizePercent);
+   
+   // Calculate first partial size based on selected mode
+   ENUM_FIRST_PARTIAL_MODE mode = (ENUM_FIRST_PARTIAL_MODE)InpFirstPartialMode;
+   double modePercent = GetFirstPartialPercent(mode);
+   double effectiveFirstPercent = modePercent;
+   
+   if(modePercent < 0) {
+      // AUTO mode: use runner size if enabled, otherwise equal split
+      if(InpEnableTrailingRunner) {
+         effectiveFirstPercent = GetEffectiveRunnerSizePercent();
+      } else {
+         int partialCount = (int)InpMaxPartials;
+         effectiveFirstPercent = 1.0 / (double)(partialCount > 0 ? partialCount : 1);
+      }
+   }
+   
+   state.calculatedMinFirstPartial = GetRoundedVolumeFromPercent(referencePositionSize, effectiveFirstPercent);
+   
+   // Trailing activates when the remaining aggregate position fits the runner size of the whole position.
+   state.trailingActive = InpEnableTrailingRunner && MathAbs(state.netVolume) >= sym.minLot && MathAbs(state.netVolume) <= state.calculatedMinLot;
+   // Calculate average TP - use user override only if syncing is enabled
+   if(state.trailingActive) {
+      state.avgTP = 0;
+      state.userOverrideTP = 0;  // Clear override when trailing takes over
+   } else if(InpSyncTP && state.userOverrideTP > 0) {
+      state.avgTP = state.userOverrideTP;
+   } else {
+      // Always calculate weighted average TP, even if positions have different TPs
+      state.avgTP = (tp_vol > 0 && weighted_tp > 0) ? weighted_tp / tp_vol : 0;
+   }
+   
+   if(!wasExisting) {
+      state.beSet = false;
+      state.trailingBestPrice = 0;
+      state.transientBETriggerOffset = 0;
+      state.transientTrailingDistance = 0;
+      state.transientBEOverridePrice = 0;
+   }
+   
+}
+
+// === SL/TP MANAGEMENT ===
+
+// Simplified: Check for SL/TP differences and sync them (fallback safety)
+void CheckAndSyncSLTPDifferences() {
+   if(!(InpSyncSL || InpSyncTP)) return;
+   
+   double target_sl = (InpSyncSL && state.userOverrideSL > 0) ? state.userOverrideSL : state.avgSL;
+   double target_tp = (InpSyncTP && state.userOverrideTP > 0) ? state.userOverrideTP : state.avgTP;
+   bool need_sync = false;
+   double tolerance = sym.point * 0.5;
+   
+   if(state.exists && state.count > 1) {
+      bool reference_found = false;
+      for(int i = 0; i < PositionsTotal(); i++) {
+         ulong ticket = PositionGetTicket(i);
+         if(!IsValidPosition(ticket) || IsIgnored(ticket)) continue;
+         
+         bool pos_isBuy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+         double pos_sl = PositionGetDouble(POSITION_SL);
+         double pos_tp = PositionGetDouble(POSITION_TP);
+         
+         // Flip for opposite direction
+         double compare_sl = (pos_isBuy == state.isBuy) ? pos_sl : pos_tp;
+         double compare_tp = (pos_isBuy == state.isBuy) ? pos_tp : pos_sl;
+         
+         if(!reference_found) {
+            if(InpSyncSL && compare_sl > 0) target_sl = compare_sl;
+            if(InpSyncTP) target_tp = compare_tp;
+            reference_found = true;
+            continue;
+         }
+
+         if(InpSyncSL && ((compare_sl > 0) != (target_sl > 0) || (compare_sl > 0 && target_sl > 0 && MathAbs(compare_sl - target_sl) > tolerance))) {
+            need_sync = true;
+         }
+         if(InpSyncTP && ((compare_tp > 0) != (target_tp > 0) || (compare_tp > 0 && target_tp > 0 && MathAbs(compare_tp - target_tp) > tolerance))) {
+            need_sync = true;
+         }
+         if(need_sync) break;
+      }
+   }
+   
+   // Quick check pending orders: find any order with different SL/TP from other orders
+   if(!need_sync && OrdersTotal() > 1) {
+      double ref_sl = 0, ref_tp = 0;
+      for(int i = 0; i < OrdersTotal(); i++) {
+         ulong ticket = OrderGetTicket(i);
+         if(!IsValidOrder(ticket) || IsIgnored(ticket)) continue;
+         if(OrderGetInteger(ORDER_MAGIC) == PARTIAL_MAGIC) continue;
+         double ord_sl = OrderGetDouble(ORDER_SL);
+         double ord_tp = OrderGetDouble(ORDER_TP);
+         if(ref_sl == 0 && ref_tp == 0) {
+            ref_sl = ord_sl;
+            ref_tp = ord_tp;
+            continue;
+         }
+         if(InpSyncSL && ref_sl > 0 && ord_sl > 0 && MathAbs(ord_sl - ref_sl) > tolerance) {
+            need_sync = true;
+            break;
+         }
+         if(InpSyncTP && ref_tp > 0 && ord_tp > 0 && MathAbs(ord_tp - ref_tp) > tolerance) {
+            need_sync = true;
+            break;
+         }
+      }
+   }
+   
+   if(need_sync) {
+      if(InpSyncSL) state.userOverrideSL = target_sl;
+      if(InpSyncTP) state.userOverrideTP = target_tp;
+      SyncSLTPToAll(target_sl, target_tp, InpSyncSL, InpSyncTP);
+      CalculatePositionGroup();
+   }
+}
+
+// Set SL/TP on a single ticket
+void SetSLTP(ulong ticket, double target_sl, double target_tp) {
+   bool isPos = PositionSelectByTicket(ticket);
+   bool isOrd = false;
+   if(!isPos) {
+      isOrd = OrderSelect(ticket);
+      if(!isOrd) return;
+   }
+   
+   // Check symbol and magic
+   string symbol = isPos ? PositionGetString(POSITION_SYMBOL) : OrderGetString(ORDER_SYMBOL);
+   if(symbol != _Symbol) return;
+   long magic = isPos ? PositionGetInteger(POSITION_MAGIC) : OrderGetInteger(ORDER_MAGIC);
+   if(magic == PARTIAL_MAGIC) return;
+   
+   // Re-select to ensure correct data
+   if(isPos) {
+      if(!PositionSelectByTicket(ticket)) return;
+   } else {
+      if(!OrderSelect(ticket)) return;
+   }
+   
+   // Get current values
+   double current_sl = isPos ? PositionGetDouble(POSITION_SL) : OrderGetDouble(ORDER_SL);
+   double current_tp = isPos ? PositionGetDouble(POSITION_TP) : OrderGetDouble(ORDER_TP);
+   double price = isPos ? PositionGetDouble(POSITION_PRICE_OPEN) : OrderGetDouble(ORDER_PRICE_OPEN);
+   if(price <= 0) return;
+   
+   // Determine direction
+   bool isBuy = false;
+   if(isPos) {
+      isBuy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+   } else {
+      ENUM_ORDER_TYPE ot = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+      isBuy = IsBuyOrderType(ot);
+   }
+   
+   double new_sl = current_sl;
+   double new_tp = current_tp;
+   
+   // Determine if same direction as main position (if exists)
+   bool sameDir = !state.exists || (isBuy == state.isBuy);
+   
+   // Calculate new SL
+   if(current_sl == 0 && InpStopLoss > 0) {
+      if(state.exists && target_sl > 0) {
+         new_sl = sameDir ? target_sl : target_tp;
+      } else {
+         new_sl = NormalizeDouble(price + (isBuy ? -1.0 : 1.0) * InpStopLoss * sym.point, sym.digits);
+      }
+   }
+   
+   // Calculate new TP
+   if(current_tp == 0 && InpTakeProfit > 0) {
+      if(state.exists && target_tp > 0) {
+         new_tp = sameDir ? target_tp : target_sl;
+      } else {
+         new_tp = NormalizeDouble(price + (isBuy ? 1.0 : -1.0) * InpTakeProfit * sym.point, sym.digits);
+      }
+   }
+   
+   // Check if modification needed
+   bool need_modify = false;
+   if(new_sl > 0 && MathAbs(new_sl - current_sl) > sym.point) need_modify = true;
+   if(new_tp > 0 && MathAbs(new_tp - current_tp) > sym.point) need_modify = true;
+   
+   if(!need_modify) return;
+   
+   // Modify
+   if(isPos) {
+      trade.PositionModify(ticket, new_sl, new_tp);
+   } else {
+      SanitizeOrderSLTPForPrice(isBuy, price, current_sl, current_tp, new_sl, new_tp);
+      bool order_need_modify = false;
+      if(new_sl > 0 && MathAbs(new_sl - current_sl) > sym.point) order_need_modify = true;
+      if(new_tp > 0 && MathAbs(new_tp - current_tp) > sym.point) order_need_modify = true;
+      if(!order_need_modify) return;
+      trade.OrderModify(ticket, price, new_sl, new_tp, ORDER_TIME_GTC, 0);
+   }
+}
+
+// Sync SL/TP to ALL positions and orders (UNIVERSAL SL/TP)
+// This ensures everything has SL/TP set, including opposite direction (flipped)
+void SetSLTPForAll() {
+   CalculatePositionGroup();
+   
+   trade.SetAsyncMode(false);
+
+   double sl_refs_buy[512];
+   double sl_refs_sell[512];
+   int sl_ref_count_buy = 0;
+   int sl_ref_count_sell = 0;
+
+   // Build SL group references from existing non-partial positions and orders.
+   for(int i = 0; i < PositionsTotal(); i++) {
+      ulong p_ticket = PositionGetTicket(i);
+      if(!IsValidPosition(p_ticket)) continue;
+      double p_sl = PositionGetDouble(POSITION_SL);
+      if(p_sl <= 0) continue;
+      bool p_isBuy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+      if(p_isBuy) AddUniqueSLReference(sl_refs_buy, sl_ref_count_buy, 512, p_sl);
+      else AddUniqueSLReference(sl_refs_sell, sl_ref_count_sell, 512, p_sl);
+   }
+   for(int i = 0; i < OrdersTotal(); i++) {
+      ulong o_ticket = OrderGetTicket(i);
+      if(!IsValidOrder(o_ticket)) continue;
+      long o_magic = OrderGetInteger(ORDER_MAGIC);
+      if(o_magic == PARTIAL_MAGIC) continue;
+      double o_sl = OrderGetDouble(ORDER_SL);
+      if(o_sl <= 0) continue;
+      ENUM_ORDER_TYPE o_type = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+      bool o_isBuy = IsBuyOrderType(o_type);
+      if(o_isBuy) AddUniqueSLReference(sl_refs_buy, sl_ref_count_buy, 512, o_sl);
+      else AddUniqueSLReference(sl_refs_sell, sl_ref_count_sell, 512, o_sl);
+   }
+   
+   // Set SL/TP for positions
+   for(int i = 0; i < PositionsTotal(); i++) {
+      ulong ticket = PositionGetTicket(i);
+      if(!IsValidPosition(ticket)) continue;
+      double cur_sl = PositionGetDouble(POSITION_SL);
+      double cur_tp = PositionGetDouble(POSITION_TP);
+      double entry_price = PositionGetDouble(POSITION_PRICE_OPEN);
+      bool pos_isBuy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+      bool sameDir = !state.exists || (pos_isBuy == state.isBuy);
+      double new_sl = cur_sl;
+      double new_tp = cur_tp;
+      if(InpSyncSL || InpSyncTP) {
+         // Sync mode: keep existing SL groups; only fill missing SL from matching group/default.
+         double target_tp = (InpSyncTP && state.userOverrideTP > 0) ? state.userOverrideTP : state.avgTP;
+         if(target_tp <= 0 && InpTakeProfit > 0) {
+            target_tp = NormalizeDouble(entry_price + (pos_isBuy ? 1.0 : -1.0) * InpTakeProfit * sym.point, sym.digits);
+         }
+         double group_sl = 0;
+         if(pos_isBuy) group_sl = SelectBestGroupSLForPrice(pos_isBuy, entry_price, sl_refs_buy, sl_ref_count_buy);
+         else          group_sl = SelectBestGroupSLForPrice(pos_isBuy, entry_price, sl_refs_sell, sl_ref_count_sell);
+         double default_sl = (InpStopLoss > 0)
+                             ? NormalizeDouble(entry_price + (pos_isBuy ? -1.0 : 1.0) * InpStopLoss * sym.point, sym.digits)
+                             : 0;
+         double pos_sl = 0;
+         if(group_sl > 0) pos_sl = group_sl;
+         else if(default_sl > 0) pos_sl = default_sl;
+         double pos_tp = sameDir ? target_tp : pos_sl;
+         bool need_sl = InpSyncSL && cur_sl == 0 && pos_sl > 0;
+         bool need_tp = false;
+         bool allow_missing_tp = AllowMissingTPForTrailingRunner(ticket);
+         if(InpSyncTP) {
+            need_tp = !allow_missing_tp && ((cur_tp == 0 && InpTakeProfit > 0) || (MathAbs(cur_tp - pos_tp) > sym.point));
+         } else if(!allow_missing_tp && cur_tp == 0 && InpTakeProfit > 0) {
+            new_tp = NormalizeDouble(entry_price + (pos_isBuy ? 1.0 : -1.0) * InpTakeProfit * sym.point, sym.digits);
+            need_tp = true;
+         }
+         if(need_sl || need_tp) {
+            if(need_sl) new_sl = pos_sl;
+            if(need_tp) {
+               if(InpSyncTP) {
+                  new_tp = pos_tp;
+               } else if(cur_tp == 0 && InpTakeProfit > 0) {
+                  new_tp = NormalizeDouble(entry_price + (pos_isBuy ? 1.0 : -1.0) * InpTakeProfit * sym.point, sym.digits);
+               }
+            }
+            AddToIgnoreBuffer(ticket);
+            trade.PositionModify(ticket, new_sl, new_tp);
+            if(new_sl > 0) {
+               if(pos_isBuy) AddUniqueSLReference(sl_refs_buy, sl_ref_count_buy, 512, new_sl);
+               else AddUniqueSLReference(sl_refs_sell, sl_ref_count_sell, 512, new_sl);
+            }
+         }
+      } else {
+         // No sync mode: set missing SL/TP for new positions from user-assigned values if missing, else fallback to other positions
+         double ref_sl = 0, ref_tp = 0;
+         // Find any existing position (not this one) with SL/TP set
+         for(int j = 0; j < PositionsTotal(); j++) {
+            ulong t2 = PositionGetTicket(j);
+            if(t2 == ticket || !IsValidPosition(t2)) continue;
+            double s2 = PositionGetDouble(POSITION_SL);
+            double t2p = PositionGetDouble(POSITION_TP);
+            if(s2 > 0 && ref_sl == 0) ref_sl = s2;
+            if(t2p > 0 && ref_tp == 0) ref_tp = t2p;
+            if(ref_sl > 0 && ref_tp > 0) break;
+         }
+         // Always set missing SL/TP from user input if not present, regardless of other positions
+         if(cur_sl == 0 && InpStopLoss > 0) {
+            new_sl = pos_isBuy ? entry_price - InpStopLoss * sym.point : entry_price + InpStopLoss * sym.point;
+         } else if(cur_sl == 0 && ref_sl > 0) {
+            new_sl = ref_sl;
+         }
+         bool allow_missing_tp = AllowMissingTPForTrailingRunner(ticket);
+         if(!allow_missing_tp && cur_tp == 0 && InpTakeProfit > 0) {
+            new_tp = pos_isBuy ? entry_price + InpTakeProfit * sym.point : entry_price - InpTakeProfit * sym.point;
+         } else if(!allow_missing_tp && cur_tp == 0 && ref_tp > 0) {
+            new_tp = ref_tp;
+         }
+         if((new_sl != cur_sl || new_tp != cur_tp) && (new_sl > 0 || new_tp > 0)) {
+            AddToIgnoreBuffer(ticket);
+            trade.PositionModify(ticket, new_sl, new_tp);
+         }
+      }
+   }
+   
+   // Set SL/TP for orders (partials excluded by IsValidOrder)
+   // Determine sync reference TP for orders per direction.
+   // SL is handled by per-group boundary matching.
+   double order_ref_tp_buy = 0;
+   double order_ref_tp_sell = 0;
+   if(InpSyncSL || InpSyncTP) {
+      // Priority: userOverride > avgTP from positions
+      double base_ref_tp = (InpSyncTP ? ((state.userOverrideTP > 0) ? state.userOverrideTP : state.avgTP) : 0);
+
+      if(state.exists) {
+         if(state.isBuy) {
+            order_ref_tp_buy = base_ref_tp;
+         } else {
+            order_ref_tp_sell = base_ref_tp;
+         }
+      }
+
+      // If no positions, find reference from first existing order that has SL/TP set
+      if(!state.exists) {
+         for(int j = 0; j < OrdersTotal(); j++) {
+            ulong t = OrderGetTicket(j);
+            if(!IsValidOrder(t)) continue;
+            // Skip partial orders when finding reference
+            if(OrderGetInteger(ORDER_MAGIC) == PARTIAL_MAGIC) continue;
+            ENUM_ORDER_TYPE rt = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+            bool ref_is_buy = (rt == ORDER_TYPE_BUY || rt == ORDER_TYPE_BUY_LIMIT || rt == ORDER_TYPE_BUY_STOP || rt == ORDER_TYPE_BUY_STOP_LIMIT);
+            double ref_sl = OrderGetDouble(ORDER_SL);
+            double ref_tp = OrderGetDouble(ORDER_TP);
+
+            if(ref_is_buy) {
+               if(InpSyncTP && order_ref_tp_buy <= 0 && ref_tp > 0) order_ref_tp_buy = ref_tp;
+            } else {
+               if(InpSyncTP && order_ref_tp_sell <= 0 && ref_tp > 0) order_ref_tp_sell = ref_tp;
+            }
+
+            bool buy_ready = (!InpSyncTP || order_ref_tp_buy > 0);
+            bool sell_ready = (!InpSyncTP || order_ref_tp_sell > 0);
+            if(buy_ready && sell_ready) break;
+         }
+      }
+   }
+   
+   for(int i = 0; i < OrdersTotal(); i++) {
+      ulong ticket = OrderGetTicket(i);
+      if(!IsValidOrder(ticket)) continue;
+      // Skip partial orders entirely - they manage their own SL/TP
+      if(OrderGetInteger(ORDER_MAGIC) == PARTIAL_MAGIC) continue;
+      
+      double cur_sl = OrderGetDouble(ORDER_SL);
+      double cur_tp = OrderGetDouble(ORDER_TP);
+      double price = OrderGetDouble(ORDER_PRICE_OPEN);
+      if(price <= 0) continue;
+      ENUM_ORDER_TYPE ot = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+      bool isBuy = (ot == ORDER_TYPE_BUY || ot == ORDER_TYPE_BUY_LIMIT || ot == ORDER_TYPE_BUY_STOP || ot == ORDER_TYPE_BUY_STOP_LIMIT);
+      double order_default_tp = NormalizeDouble(price + (isBuy ? 1.0 : -1.0) * InpTakeProfit * sym.point, sym.digits);
+      double dir_ref_tp = isBuy ? order_ref_tp_buy : order_ref_tp_sell;
+      
+      double new_sl = cur_sl;
+      double new_tp = cur_tp;
+      
+      // SL: sync by SL-group only; keep existing non-zero SL unchanged.
+      if(InpSyncSL) {
+         if(cur_sl == 0) {
+            double group_sl = 0;
+            if(isBuy) group_sl = SelectBestGroupSLForPrice(isBuy, price, sl_refs_buy, sl_ref_count_buy);
+            else      group_sl = SelectBestGroupSLForPrice(isBuy, price, sl_refs_sell, sl_ref_count_sell);
+            if(group_sl > 0) {
+               new_sl = group_sl;
+            } else if(InpStopLoss > 0) {
+               new_sl = NormalizeDouble(price + (isBuy ? -1.0 : 1.0) * InpStopLoss * sym.point, sym.digits);
+            }
+         }
+      } else if(cur_sl == 0 && InpStopLoss > 0) {
+         new_sl = NormalizeDouble(price + (isBuy ? -1.0 : 1.0) * InpStopLoss * sym.point, sym.digits);
+      }
+      
+      // TP: Set tp from reference or default
+      if(InpSyncTP) {
+         if(dir_ref_tp > 0) {
+            if(MathAbs(cur_tp - dir_ref_tp) > sym.point) new_tp = dir_ref_tp;
+         } else if(cur_tp == 0 && InpTakeProfit > 0) {
+            new_tp = order_default_tp;
+            if(isBuy) order_ref_tp_buy = new_tp;
+            else order_ref_tp_sell = new_tp;
+         }
+      } else if(cur_tp == 0 && InpTakeProfit > 0) {
+         new_tp = order_default_tp;
+      }
+
+      if(InpSyncTP && dir_ref_tp <= 0 && InpTakeProfit > 0) {
+         if(isBuy) order_ref_tp_buy = order_default_tp;
+         else order_ref_tp_sell = order_default_tp;
+      }
+
+      // Keep SL/TP valid for each order's own entry price.
+      // A shared sync reference can be invalid for higher/lower pending orders.
+      SanitizeOrderSLTPForPrice(isBuy, price, cur_sl, cur_tp, new_sl, new_tp);
+      
+      // Validate SL/TP not equal to order price
+      if(new_sl == price) new_sl = cur_sl;
+      if(new_tp == price) new_tp = cur_tp;
+      
+      if((new_sl > 0 && MathAbs(new_sl - cur_sl) > sym.point) || (new_tp > 0 && MathAbs(new_tp - cur_tp) > sym.point)) {
+         AddToIgnoreBuffer(ticket);
+         trade.OrderModify(ticket, price, new_sl, new_tp, ORDER_TIME_GTC, 0);
+         if(new_sl > 0) {
+            if(isBuy) AddUniqueSLReference(sl_refs_buy, sl_ref_count_buy, 512, new_sl);
+            else AddUniqueSLReference(sl_refs_sell, sl_ref_count_sell, 512, new_sl);
+         }
+      }
+   }
+}
+
+// === PARTIAL MANAGEMENT ===
+
+// Validate and rebuild partial plan from existing state (for EA restarts, time frame switches, etc.)
+bool ValidateAndRebuildPartialPlan() {
+   // Partial planner is currently disabled.
+   return false;
+}
+
+// Update partial prices when TP changes slightly (preserve plan structure)
+bool UpdatePartialPricesOnly() {
+   if(!state.partialsValid || state.partialCount == 0) return false;
+   
+   double actual_tp = GetActualTP();
+   if(actual_tp <= 0) actual_tp = state.avgTP;  // Fallback to override value before sync completes
+   if(actual_tp <= 0) return false;
+   
+   // Use original plan count if available, otherwise current count
+   int pc = (state.originalPartialCount > 0) ? state.originalPartialCount : state.partialCount;
+   if(pc <= 0) return false;
+   
+   double start_price = (InpFirstPartialPoint > 0) ? 
+      NormalizeDouble(state.avgEntry + (state.isBuy ? 1 : -1) * InpFirstPartialPoint * sym.point, sym.digits) : state.avgEntry;
+   double dist = MathAbs(actual_tp - start_price);
+   
+   if(dist <= sym.point) return false;
+   
+   // Recalculate prices while preserving volumes
+   if(InpFirstPartialPoint > 0) {
+      state.partialPrices[0] = start_price;
+   } else {
+      double step = dist / (pc + 1);
+      state.partialPrices[0] = NormalizeDouble(state.avgEntry + (state.isBuy ? step : -step), sym.digits);
+   }
+   
+   if(pc > 1) {
+      double md = MathAbs(actual_tp - state.partialPrices[0]) / pc;
+      for(int i = 1; i < pc && i < 10; i++) {
+         if(i < state.partialCount) {
+            state.partialPrices[i] = NormalizeDouble(state.partialPrices[0] + (state.isBuy ? md * i : -md * i), sym.digits);
+         }
+      }
+   }
+   
+   // AFTER updating prices, snap to exact executed prices and restore flags
+   for(int i = 0; i < state.partialCount && i < 10; i++) {
+      state.partialPrices[i] = SnapToExecutedPrice(state.partialPrices[i]);
+      bool isExecuted = IsPartialPriceExecuted(state.partialPrices[i]);
+      state.partialExecuted[i] = isExecuted;
+   }
+   
+   state.lastPlannedTP = actual_tp;
+   // Update avgTP from plan for display/RR calculations
+   state.avgTP = actual_tp;
+   return true;
+}
+
+// Scale partial plan volumes when position size changes (preserve plan structure and executed flags)
+bool ScalePartialPlanVolumes() {
+   // Partial planner is currently disabled.
+   return true;
+}
+
+void PlanPartials() {
+   // Partial planner is currently disabled.
+   state.partialsValid = false;
+   state.partialCount = 0;
+   state.partialFinalVolume = 0;
+   state.lastPlannedPositionSize = 0;
+   state.lastPlannedTP = 0;
+}
+
+void ExecutePartials() {
+   // Partial execution is currently disabled.
+}
+
+bool IsPartialOrder(ulong ticket) {
+   return ticket > 0 && OrderSelect(ticket) && 
+          OrderGetString(ORDER_SYMBOL) == _Symbol && 
+          OrderGetInteger(ORDER_MAGIC) == PARTIAL_MAGIC;
+}
+
+bool IsPartialPosition(ulong ticket) {
+   return ticket > 0 && PositionSelectByTicket(ticket) && 
+          PositionGetString(POSITION_SYMBOL) == _Symbol && 
+          PositionGetInteger(POSITION_MAGIC) == PARTIAL_MAGIC;
+}
+
+// === CENTRAL EXECUTION FUNCTION (SINGLE SOURCE OF TRUTH) ===
+// Mark partial as executed by index - all execution methods use this
+void MarkPartialExecuted(int index) {
+   if(index < 0 || index >= state.partialCount || index >= 10) return;
+   if(state.partialExecuted[index]) return;  // Already executed
+   
+   // Mark as executed
+   state.partialExecuted[index] = true;
+   state.partialPassed[index] = false;
+   
+   // Add price to executed prices list (immutable - never removed)
+   MarkPartialPriceExecuted(state.partialPrices[index]);
+   
+   // Log execution for debugging
+   Print("Partial ", index, " executed at price ", DoubleToString(state.partialPrices[index], sym.digits));
+   
+   // Persist state immediately so it survives timeframe switches
+   SavePartialState();
+}
+
+// Mark partial as executed by ticket (not price) - uses central function
+void MarkPartialExecutedByTicket(ulong ticket) {
+   if(ticket == 0) return;
+   
+   // Find partial by position ticket
+   for(int i = 0; i < state.partialCount && i < 10; i++) {
+      if(state.partialPositionTickets[i] == ticket) {
+         MarkPartialExecuted(i);  // Use central function
+         return;
+      }
+   }
+   
+   // If not found by position ticket, try to find by order ticket
+   // (for pending orders that just became positions)
+   if(PositionSelectByTicket(ticket)) {
+      // Try to match by checking if this position was created from a partial order
+      // We'll check order tickets that no longer exist (they became this position)
+      for(int i = 0; i < state.partialCount && i < 10; i++) {
+         if(state.partialOrderTickets[i] > 0 && !OrderSelect(state.partialOrderTickets[i])) {
+            // Order doesn't exist - it was filled and became a position
+            // Check if position price matches
+            double pos_price = PositionGetDouble(POSITION_PRICE_OPEN);
+            if(MathAbs(state.partialPrices[i] - pos_price) < sym.point * 10.0) {
+               state.partialPositionTickets[i] = ticket;
+               MarkPartialExecuted(i);  // Use central function
+               return;
+            }
+         }
+      }
+   }
+}
+
+bool FindNettingPair(ulong &buy_ticket, bool &buy_is_partial, ulong &sell_ticket, bool &sell_is_partial) {
+   // Find the smallest BUY and SELL positions to close-by first.
+   buy_ticket = 0;
+   sell_ticket = 0;
+   buy_is_partial = false;
+   sell_is_partial = false;
+   double smallest_buy_volume = DBL_MAX;
+   double smallest_sell_volume = DBL_MAX;
+
+   for(int i = 0; i < PositionsTotal(); i++) {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+
+      bool is_buy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+      double volume = PositionGetDouble(POSITION_VOLUME);
+      if(is_buy && volume > 0 && volume < smallest_buy_volume) {
+         buy_ticket = ticket;
+         buy_is_partial = (PositionGetInteger(POSITION_MAGIC) == PARTIAL_MAGIC);
+         smallest_buy_volume = volume;
+      }
+   }
+
+   for(int i = 0; i < PositionsTotal(); i++) {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+
+      bool is_buy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+      double volume = PositionGetDouble(POSITION_VOLUME);
+      if(!is_buy && volume > 0 && volume < smallest_sell_volume) {
+         sell_ticket = ticket;
+         sell_is_partial = (PositionGetInteger(POSITION_MAGIC) == PARTIAL_MAGIC);
+         smallest_sell_volume = volume;
+      }
+   }
+
+   return buy_ticket > 0 && sell_ticket > 0;
+}
+
+bool ForceCloseNettingPair(ulong buy_ticket, bool buy_is_partial, ulong sell_ticket, bool sell_is_partial) {
+   if(!PositionSelectByTicket(buy_ticket)) return false;
+   double buy_volume = PositionGetDouble(POSITION_VOLUME);
+   if(!PositionSelectByTicket(sell_ticket)) return false;
+   double sell_volume = PositionGetDouble(POSITION_VOLUME);
+
+   ulong fallback_ticket = (buy_volume <= sell_volume) ? buy_ticket : sell_ticket;
+   bool fallback_is_partial = (fallback_ticket == buy_ticket) ? buy_is_partial : sell_is_partial;
+   ulong secondary_ticket = (fallback_ticket == buy_ticket) ? sell_ticket : buy_ticket;
+   bool secondary_is_partial = (secondary_ticket == buy_ticket) ? buy_is_partial : sell_is_partial;
+
+   if(!trade.PositionClose(fallback_ticket)) {
+      Print("WARN: fallback PositionClose failed for ", fallback_ticket, " retcode=", trade.ResultRetcode(), " desc=", trade.ResultRetcodeDescription(), ". Trying secondary ticket.");
+      if(!trade.PositionClose(secondary_ticket)) {
+         Print("ERROR: secondary PositionClose failed for ", secondary_ticket, " retcode=", trade.ResultRetcode(), " desc=", trade.ResultRetcodeDescription());
+         return false;
+      }
+      if(secondary_is_partial) MarkPartialExecutedByTicket(secondary_ticket);
+      return true;
+   }
+
+   if(fallback_is_partial) MarkPartialExecutedByTicket(fallback_ticket);
+   return true;
+}
+
+// Netting: Close opposite positions using CloseBy to avoid double spread.
+// This must work even when the grouped state sees net exposure as zero.
+void PerformNetting() {
+   trade.SetAsyncMode(false);
+
+   bool closed_any = false;
+   for(int guard = 0; guard < 100; guard++) {
+      ulong buy_ticket = 0;
+      ulong sell_ticket = 0;
+      bool buy_is_partial = false;
+      bool sell_is_partial = false;
+
+      if(!FindNettingPair(buy_ticket, buy_is_partial, sell_ticket, sell_is_partial)) {
+         break;
+      }
+
+      if(!trade.PositionCloseBy(buy_ticket, sell_ticket)) {
+         long first_rc = trade.ResultRetcode();
+         string first_desc = trade.ResultRetcodeDescription();
+
+         // Some brokers are picky about ticket ordering for CloseBy.
+         bool closed_by = trade.PositionCloseBy(sell_ticket, buy_ticket);
+         if(!closed_by) {
+            Print("WARN: PositionCloseBy not available for ", buy_ticket, " vs ", sell_ticket, " rc1=", first_rc, " desc1=", first_desc,
+                  " rc2=", trade.ResultRetcode(), " desc2=", trade.ResultRetcodeDescription(), ". Leaving opposite positions open.");
+            break;
+         }
+
+         if(buy_is_partial) MarkPartialExecutedByTicket(buy_ticket);
+         if(sell_is_partial) MarkPartialExecutedByTicket(sell_ticket);
+      } else {
+         if(buy_is_partial) MarkPartialExecutedByTicket(buy_ticket);
+         if(sell_is_partial) MarkPartialExecutedByTicket(sell_ticket);
+      }
+
+      closed_any = true;
+   }
+
+   if(closed_any) {
+      CalculatePositionGroup();
+   }
+}
+
+void ExecuteLimitPartials() {
+   // Partial execution is currently disabled.
+}
+
+bool CloseByPartialPosition(ulong partialTicket, double targetVolume) {
+   // Partial execution is currently disabled.
+   return false;
+}
+
+void CheckStopPartials() {
+   // Partial execution is currently disabled.
+}
+
+
+// === BREAK-EVEN AND TRAILING ===
+
+void CheckAndSetBE() {
+   if(!InpEnableAutoBE || !state.exists || state.avgSL <= 0) return;
+   
+   // Check if user overrode BE - wait for additional distance before triggering again
+   if(state.transientBEOverridePrice > 0 && state.transientBETriggerOffset > 0) {
+      double current_price = GetCurrentPrice(state.isBuy);
+      double price_moved_from_override = GetPriceDiff(state.isBuy, current_price, state.transientBEOverridePrice) / sym.point;
+      
+      // Don't trigger BE until price moved the additional distance user wanted
+      if(price_moved_from_override < state.transientBETriggerOffset) {
+         return;  // Wait for more price movement
+      }
+   }
+   
+   if(state.beSet) {
+      double be_price = NormalizeDouble(state.avgEntry, sym.digits);
+      if(MathAbs(state.avgSL - be_price) < sym.point) return;
+      state.beSet = false;  // User moved SL away from entry
+   }
+   
+   bool shouldSetBE = false;
+   double profit_needed = 0;
+   
+   if(InpBEMode == BE_AFTER_PARTIAL) {
+      if(InpEnablePartials && state.partialsValid && state.partialCount > 0 && state.partialExecuted[0]) {
+         shouldSetBE = true;
+      } else if(!InpEnablePartials && state.avgSL > 0) {
+         double base_trigger = GetPriceDiff(state.isBuy, state.avgEntry, state.avgSL) / sym.point;
+         profit_needed = base_trigger * sym.tickValue * MathAbs(state.netVolume);
+         if(profit_needed > 0 && state.currentPnL >= profit_needed) shouldSetBE = true;
+      }
+   } else if(InpBEMode == BE_1_TO_1_RR && state.avgSL > 0) {
+      double base_trigger = GetPriceDiff(state.isBuy, state.avgEntry, state.avgSL) / sym.point;
+      profit_needed = base_trigger * sym.tickValue * MathAbs(state.netVolume);
+      if(profit_needed > 0 && state.currentPnL >= profit_needed) shouldSetBE = true;
+   } else if(InpBEMode == BE_MANUAL && InpBETriggerPoints > 0) {
+      profit_needed = InpBETriggerPoints * sym.tickValue * MathAbs(state.netVolume);
+      if(state.currentPnL >= profit_needed) shouldSetBE = true;
+   }
+   
+   if(!shouldSetBE) return;
+   
+   double be_price = NormalizeDouble(state.avgEntry, sym.digits);
+   // Process ALL open positions (exclude PARTIAL_MAGIC)
+   for(int i = 0; i < PositionsTotal(); i++) {
+      ulong ticket = PositionGetTicket(i);
+      if(!IsValidPosition(ticket)) continue;
+      
+      double current_sl = PositionGetDouble(POSITION_SL);
+      double current_tp = PositionGetDouble(POSITION_TP);
+      bool sl_at_or_beyond_be = state.isBuy ? (current_sl >= be_price) : (current_sl <= be_price);
+      if(!sl_at_or_beyond_be) {
+         AddToIgnoreBuffer(ticket);
+         trade.PositionModify(ticket, be_price, current_tp);
+      }
+   }
+   state.beSet = true;
+   
+   // Reset override tracking when BE is set again (user override fulfilled)
+   state.transientBETriggerOffset = 0;
+   state.transientBEOverridePrice = 0;
+   
+   CalculatePositionGroup();
+   
+   // FALLBACK: Check for SL/TP differences (catches missed events)
+   if(state.exists && state.count > 1) {
+      CheckAndSyncSLTPDifferences();
+   }
+}
+
+void CheckAndUpdateTrailingRunner() {
+   if(!InpEnableTrailingRunner || !state.exists) return;
+
+   // No-hedge policy: flatten any opposite exposure before trailing.
+   PerformNetting();
+   CalculatePositionGroup();
+   if(!state.exists) return;
+   
+   if(MathAbs(state.netVolume) > state.calculatedMinLot) {
+      state.trailingActive = false;
+      return;
+   }
+   
+   state.trailingActive = true;
+   double current_price = GetCurrentPrice(state.isBuy);
+   
+   if(state.trailingBestPrice == 0 || (state.isBuy ? (current_price > state.trailingBestPrice) : (current_price < state.trailingBestPrice))) {
+      state.trailingBestPrice = current_price;
+   }
+   
+   // Use user override distance if set, otherwise use configured distance
+   double effective_trailing_distance = (state.transientTrailingDistance > 0) ? state.transientTrailingDistance : InpTrailingDistance;
+   
+   double trailing_sl = state.isBuy ? 
+      NormalizeDouble(state.trailingBestPrice - effective_trailing_distance * sym.point, sym.digits) :
+      NormalizeDouble(state.trailingBestPrice + effective_trailing_distance * sym.point, sym.digits);
+   
+   if(state.beSet) {
+      double be_price = NormalizeDouble(state.avgEntry, sym.digits);
+      if(state.isBuy && trailing_sl < be_price) trailing_sl = be_price;
+      else if(!state.isBuy && trailing_sl > be_price) trailing_sl = be_price;
+   }
+   
+   // With no-hedge policy, all valid positions should now match net direction.
+   for(int i = 0; i < PositionsTotal(); i++) {
+      ulong ticket = PositionGetTicket(i);
+      if(!IsValidPosition(ticket)) continue;
+      
+      double current_sl = PositionGetDouble(POSITION_SL);
+      double current_tp = PositionGetDouble(POSITION_TP);
+      bool need_sl_update = state.isBuy ? (current_sl == 0 || trailing_sl > current_sl) : (current_sl == 0 || trailing_sl < current_sl);
+      bool need_tp_removal = (current_tp > 0);
+      
+      if(need_sl_update || need_tp_removal) {
+         double new_sl = need_sl_update ? trailing_sl : current_sl;
+         double new_tp = need_tp_removal ? 0 : current_tp;
+         if(MathAbs(new_sl - current_sl) > sym.point || new_tp != current_tp) {
+            AddToIgnoreBuffer(ticket);
+            trade.PositionModify(ticket, new_sl, new_tp);
+         }
+      }
+   }
+   state.avgSL = trailing_sl;
+   state.avgTP = 0;  // Remove TP when trailing
+}
+
+// === EVENT HANDLERS ===
+
+void OnTradeTransaction(const MqlTradeTransaction& trans, const MqlTradeRequest& request, const MqlTradeResult& result) {
+   if(IsIgnored(trans.position) || IsIgnored(trans.order)) {
+      RemoveFromIgnoreBuffer(trans.position);
+      RemoveFromIgnoreBuffer(trans.order);
+      return;
+   }
+   
+   if(trans.type == TRADE_TRANSACTION_DEAL_ADD && trans.deal > 0) {
+      if(HistoryDealSelect(trans.deal) && HistoryDealGetString(trans.deal, DEAL_SYMBOL) == _Symbol) {
+         long magic = HistoryDealGetInteger(trans.deal, DEAL_MAGIC);
+         if(HistoryDealGetInteger(trans.deal, DEAL_ENTRY) == DEAL_ENTRY_IN) {
+            EnsurePositionHasSLTP(trans.position);
+            PerformNetting();
+            CalculatePositionGroup();
+            for(int oi = 0; oi < OrdersTotal(); oi++) {
+               ulong ot = OrderGetTicket(oi);
+               if(!IsValidOrder(ot)) continue;
+               EnsureOrderHasSLTP(ot);
+            }
+         }
+         
+         if(magic != PARTIAL_MAGIC) {
+            UpdateStateAndUI();
+            if(InpEnablePartials && state.exists) {
+               if(!state.partialsValid) {
+                  PlanPartials();
+               } else if(!ScalePartialPlanVolumes()) {
+                  PlanPartials();
+               } else {
+                  UpdateUI();
+               }
+            }
+         } else if(HistoryDealGetInteger(trans.deal, DEAL_ENTRY) == DEAL_ENTRY_IN) {
+            ulong partial_ticket = trans.position;
+            if(PositionSelectByTicket(partial_ticket)) {
+               double pos_price = PositionGetDouble(POSITION_PRICE_OPEN);
+               double pos_volume = PositionGetDouble(POSITION_VOLUME);
+               
+               for(int i = 0; i < state.partialCount; i++) {
+                  if(!state.partialExecuted[i] && MathAbs(state.partialPrices[i] - pos_price) < sym.point * 10.0) {
+                     MarkPartialExecuted(i);  // Use central function
+                     state.partialOrderTickets[i] = 0;
+                     if(i < 10) state.partialPositionTickets[i] = partial_ticket;
+                     break;
+                  }
+               }
+               
+               if((state.partialMethod == PARTIAL_LIMIT || state.partialMethod == PARTIAL_STOP) && pos_volume >= sym.minLot) {
+                  CloseByPartialPosition(partial_ticket, pos_volume);
+                  UpdateStateAndUI();
+               }
+            }
+         } else if(HistoryDealGetInteger(trans.deal, DEAL_ENTRY) == DEAL_ENTRY_OUT) {
+            // Partial position closed - mark as executed but DON'T trigger replanning
+            for(int i = 0; i < state.partialCount; i++) {
+               if(i < 10 && state.partialPositionTickets[i] == trans.position) {
+                  state.partialPositionTickets[i] = 0;
+                  MarkPartialExecuted(i);  // Use central function
+                  // Update state for display but DON'T trigger replanning
+                  CalculatePositionGroup();
+                  if(InpEnableDashboard) UpdateUI();
+                  break;
+               }
+            }
+         }
+      }
+   }
+   
+   if(trans.type == TRADE_TRANSACTION_ORDER_ADD && trans.order > 0) {
+      if(OrderSelect(trans.order) && OrderGetString(ORDER_SYMBOL) == _Symbol) {
+         long ord_magic = OrderGetInteger(ORDER_MAGIC);
+         if(ord_magic != PARTIAL_MAGIC) {
+            // Enforce default SL/TP immediately for newly created regular pending orders.
+            // This avoids waiting for timer fallback when there are no open positions.
+            EnsureOrderHasSLTP(trans.order);
+            UpdateStateAndUI();
+            
+            if(InpEnablePartials) {
+               if(state.exists && !state.partialsValid) {
+                  PlanPartials();
+               }
+            }
+         }
+      }
+   }
+   
+   if(trans.type == TRADE_TRANSACTION_ORDER_DELETE && trans.order > 0) {
+      if(HistoryOrderSelect(trans.order) && HistoryOrderGetString(trans.order, ORDER_SYMBOL) == _Symbol) {
+         // Only manual cancellation/deletion should cascade delete the whole group.
+         ENUM_ORDER_STATE ord_state = (ENUM_ORDER_STATE)HistoryOrderGetInteger(trans.order, ORDER_STATE);
+         if(ord_state == ORDER_STATE_CANCELED) {
+            long deleted_magic = HistoryOrderGetInteger(trans.order, ORDER_MAGIC);
+            if(deleted_magic == PARTIAL_MAGIC) {
+               CancelPendingPartialOrderGroup();
+               UpdateUI();
+               return;
+            }
+         }
+      }
+   }
+
+   if(trans.type == TRADE_TRANSACTION_POSITION && trans.position > 0) {
+      if(PositionSelectByTicket(trans.position)) {
+         if(PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) != PARTIAL_MAGIC) {
+            if(IsIgnored(trans.position)) {
+               RemoveFromIgnoreBuffer(trans.position);
+               return;
+            }
+            // Get new values BEFORE recalculating state - compare against other positions
+            double new_sl = PositionGetDouble(POSITION_SL);
+            double new_tp = PositionGetDouble(POSITION_TP);
+            
+            // Compare against OTHER positions to detect if THIS position was manually changed
+            // (not against avgSL/avgTP which is already a blend of all positions)
+            bool sl_changed = false;
+            bool tp_changed = false;
+            for(int _i = 0; _i < PositionsTotal(); _i++) {
+               ulong _t = PositionGetTicket(_i);
+               if(!IsValidPosition(_t) || _t == trans.position) continue;
+               // IsValidPosition calls PositionSelectByTicket, so position is now selected
+               double _other_sl = PositionGetDouble(POSITION_SL);
+               double _other_tp = PositionGetDouble(POSITION_TP);
+               if(new_sl > 0 && _other_sl > 0 && MathAbs(new_sl - _other_sl) > sym.point * 0.5) sl_changed = true;
+               if(new_tp > 0 && _other_tp > 0 && MathAbs(new_tp - _other_tp) > sym.point * 0.5) tp_changed = true;
+            }
+            // Also catch the case where it's the only position or first position being set
+            if(!sl_changed && !tp_changed) {
+               CalculatePositionGroup();
+               double old_sl = state.avgSL;
+               double old_tp = state.avgTP;
+               sl_changed = (new_sl > 0 && old_sl > 0 && MathAbs(new_sl - old_sl) > sym.point * 0.5) || ((new_sl > 0) != (old_sl > 0));
+               tp_changed = (new_tp > 0 && old_tp > 0 && MathAbs(new_tp - old_tp) > sym.point * 0.5) || ((new_tp > 0) != (old_tp > 0));
+            } else {
+               CalculatePositionGroup();
+            }
+            // Detect user SL override for transient BE trigger and trailing distance
+            if(sl_changed && !IsIgnored(trans.position) && state.exists && new_sl > 0) {
+               double sl_distance_from_current = GetDistanceFromCurrentPrice(new_sl);
+               
+               // Track BE override: distance from CURRENT PRICE when user moves SL
+               if(InpEnableAutoBE) {
+                  double be_price = NormalizeDouble(state.avgEntry, sym.digits);
+                  double be_tolerance = sym.point * 2.0;
+                  bool at_be = MathAbs(new_sl - be_price) < be_tolerance;
+                  bool moved_away_from_be = state.beSet && (state.isBuy ? (new_sl > be_price + be_tolerance) : (new_sl < be_price - be_tolerance));
+                  
+                  if(at_be || moved_away_from_be) {
+                     // User moved SL to/from BE - use distance from current price as transient trigger
+                     state.transientBETriggerOffset = sl_distance_from_current;
+                     state.transientBEOverridePrice = GetCurrentPrice(state.isBuy);
+                  } else if(state.beSet && !moved_away_from_be) {
+                     // User moved SL back towards entry, reset
+                     state.transientBETriggerOffset = 0;
+                     state.transientBEOverridePrice = 0;
+                  }
+               }
+               
+               // Track trailing distance override: distance from CURRENT PRICE when user moves SL manually
+               if(InpEnableTrailingRunner) {
+                  state.transientTrailingDistance = sl_distance_from_current;
+               }
+            }
+            
+            if(sl_changed || tp_changed) {
+               // Set overrides FIRST so CalculatePositionGroup() uses new values immediately
+               if(sl_changed && new_sl > 0) {
+                  state.userOverrideSL = new_sl;
+                  state.avgSL = new_sl;  // Force immediate update
+               }
+               if(tp_changed && new_tp > 0) {
+                  state.userOverrideTP = new_tp;
+                  state.avgTP = new_tp;  // Force immediate update so partials use correct TP
+               }
+               
+               // Sync to all positions/orders only if sync is enabled
+               if(InpSyncSL || InpSyncTP) {
+                  SyncSLTPToAll(new_sl, new_tp, sl_changed, tp_changed, trans.position);
+               }
+               
+               // Now recalculate state (will use updated overrides)
+               CalculatePositionGroup();
+               
+               if(InpEnablePartials && state.exists) {
+                  if(tp_changed && new_tp > 0) {
+                     // Check if TP is now below first partial distance
+                     bool tp_below_first_partial = IsTPBelowFirstPartialDistance(new_tp);
+                     
+                     if(!state.partialsValid || state.partialCount == 0 || tp_below_first_partial) {
+                        PlanPartials();
+                     } else {
+                        // Force lastPlannedTP to old value so UpdatePartialPricesOnly sees a change
+                        state.lastPlannedTP = 0;
+                        if(!UpdatePartialPricesOnly()) {
+                           PlanPartials();
+                        }
+                     }
+                  } else if(!state.partialsValid) {
+                     if(!ValidateAndRebuildPartialPlan()) {
+                        PlanPartials();
+                     }
+                  }
+               }
+               UpdateUI();
+            }
+         }
+      }
+   }
+   
+   if(trans.type == TRADE_TRANSACTION_ORDER_UPDATE && trans.order > 0) {
+      if(OrderSelect(trans.order) && OrderGetString(ORDER_SYMBOL) == _Symbol) {
+         long magic = OrderGetInteger(ORDER_MAGIC);
+         if(magic == PARTIAL_MAGIC && state.partialsValid && !IsIgnored(trans.order)) {
+            double new_price = OrderGetDouble(ORDER_PRICE_OPEN);
+            double new_sl = OrderGetDouble(ORDER_SL);
+            double new_tp = OrderGetDouble(ORDER_TP);
+            
+            // Find which level(s) this order belongs to (match by ticket - guaranteed match)
+            for(int i = 0; i < state.partialCount; i++) {
+               if(state.partialOrderTickets[i] == trans.order) {
+                  // Initialize baseline SL and price on first detection if not set
+                  if(state.lastOrderSL[i] == 0 && new_sl > 0) {
+                     state.lastOrderSL[i] = new_sl;
+                  }
+                  if(state.lastOrderPrice[i] == 0 && new_price > 0) {
+                     state.lastOrderPrice[i] = new_price;
+                  }
+                  
+                  // Check if user dragged order to new price or changed SL
+                  bool price_changed = (state.lastOrderPrice[i] > 0 && MathAbs(new_price - state.lastOrderPrice[i]) > sym.point * 0.5);
+                  bool sl_changed = (state.lastOrderSL[i] > 0 && MathAbs(new_sl - state.lastOrderSL[i]) > sym.point * 0.5);
+                  
+                  if(price_changed || sl_changed) {
+                     // User moved order (price and/or SL) - apply same offset to ALL orders in group
+                     double price_offset = new_price - state.lastOrderPrice[i];
+                     double sl_offset = (state.lastOrderSL[i] > 0) ? (new_sl - state.lastOrderSL[i]) : 0;
+                     
+                     if(state.partialMethod == PARTIAL_LIMIT) {
+                        // Apply same offset to ALL limit orders in group, maintaining spacing
+                        for(int j = 0; j < state.partialCount; j++) {
+                           if(state.partialOrderTickets[j] != 0 && !state.partialExecuted[j]) {
+                              // Calculate new price: if order [i] moved, apply offset to all others
+                              double new_target_price = state.partialPrices[j];
+                              if(price_changed) {
+                                 new_target_price = NormalizeDouble(state.lastOrderPrice[j] + price_offset, sym.digits);
+                                 state.lastOrderPrice[j] = new_target_price;
+                                 state.partialPrices[j] = new_target_price;
+                              }
+                              
+                              // Calculate new SL: if SL changed, apply offset to all
+                              double new_target_sl = state.lastOrderSL[j];
+                              if(sl_changed && state.lastOrderSL[j] > 0) {
+                                 new_target_sl = NormalizeDouble(state.lastOrderSL[j] + sl_offset, sym.digits);
+                                 state.lastOrderSL[j] = new_target_sl;
+                              }
+                              
+                              // Update the order if it exists
+                              if(OrderSelect(state.partialOrderTickets[j])) {
+                                 double cur_price = OrderGetDouble(ORDER_PRICE_OPEN);
+                                 double cur_sl = OrderGetDouble(ORDER_SL);
+                                 double cur_tp = OrderGetDouble(ORDER_TP);
+                                 
+                                 bool needs_update = (price_changed && MathAbs(cur_price - new_target_price) > sym.point * 0.5) ||
+                                                     (sl_changed && new_target_sl > 0 && MathAbs(cur_sl - new_target_sl) > sym.point * 0.5);
+                                 
+                                 if(needs_update) {
+                                    AddToIgnoreBuffer(state.partialOrderTickets[j]);
+                                    trade.OrderModify(state.partialOrderTickets[j], new_target_price, new_target_sl, cur_tp, ORDER_TIME_GTC, 0);
+                                 }
+                              }
+                           }
+                        }
+                        
+                        // Update the moved order's baseline
+                        if(price_changed) state.lastOrderPrice[i] = new_price;
+                        if(sl_changed) state.lastOrderSL[i] = new_sl;
+                        
+                        // If SL changed, protect it from being recalculated
+                        if(sl_changed) {
+                           state.userOverrideSL = new_sl;
+                           state.avgSL = new_sl;
+                        }
+                     } else if(state.partialMethod == PARTIAL_STOP) {
+                        // Stop order: update all levels that share this ticket
+                        for(int j = 0; j < state.partialCount; j++) {
+                           if(state.partialOrderTickets[j] == trans.order && !state.partialExecuted[j]) {
+                              if(price_changed) {
+                                 state.partialPrices[j] = new_price;
+                                 state.lastOrderPrice[j] = new_price;
+                              }
+                              if(sl_changed) {
+                                 state.lastOrderSL[j] = new_sl;
+                              }
+                           }
+                        }
+                        
+                        if(sl_changed) {
+                           state.userOverrideSL = new_sl;
+                           state.avgSL = new_sl;
+                        }
+                     }
+                  }
+                  
+                  break;
+               }
+            }
+         } else if(magic != PARTIAL_MAGIC && !IsIgnored(trans.order) && (InpSyncSL || InpSyncTP)) {
+            // Regular pending order SL/TP changed by user - sync to all other orders (and positions)
+            double new_sl = OrderGetDouble(ORDER_SL);
+            double new_tp = OrderGetDouble(ORDER_TP);
+            
+            // Detect what changed by comparing against other orders
+            bool sl_changed = false;
+            bool tp_changed = false;
+            for(int _i = 0; _i < OrdersTotal(); _i++) {
+               ulong _t = OrderGetTicket(_i);
+               if(_t == trans.order || !IsValidOrder(_t)) continue;
+               if(OrderGetInteger(ORDER_MAGIC) == PARTIAL_MAGIC) continue;
+               double _other_sl = OrderGetDouble(ORDER_SL);
+               double _other_tp = OrderGetDouble(ORDER_TP);
+               if(new_sl > 0 && _other_sl > 0 && MathAbs(new_sl - _other_sl) > sym.point * 0.5) sl_changed = true;
+               if(new_tp > 0 && _other_tp > 0 && MathAbs(new_tp - _other_tp) > sym.point * 0.5) tp_changed = true;
+            }
+            // Also detect if this is the only order or first to be set
+            if(!sl_changed && !tp_changed) {
+               double old_sl = state.userOverrideSL > 0 ? state.userOverrideSL : state.avgSL;
+               double old_tp = state.userOverrideTP > 0 ? state.userOverrideTP : state.avgTP;
+               sl_changed = (new_sl > 0 && old_sl > 0 && MathAbs(new_sl - old_sl) > sym.point * 0.5) || (new_sl > 0 && old_sl == 0);
+               tp_changed = (new_tp > 0 && old_tp > 0 && MathAbs(new_tp - old_tp) > sym.point * 0.5) || (new_tp > 0 && old_tp == 0);
+            }
+            
+            if(sl_changed || tp_changed) {
+               if(sl_changed && new_sl > 0) {
+                  state.userOverrideSL = new_sl;
+                  state.avgSL = new_sl;
+               }
+               if(tp_changed && new_tp > 0) {
+                  state.userOverrideTP = new_tp;
+                  state.avgTP = new_tp;
+               }
+               // User moved a pending order: sync only pending orders, never active positions.
+               SyncSLTPToAll(new_sl, new_tp, sl_changed, tp_changed, trans.order, false, true);
+               CalculatePositionGroup();
+               UpdateUI();
+            }
+         }
+      }
+   }
+}
+
+void OnTick() {
+   // PRICE-BASED CHECKS ONLY
+
+   // Update P&L from all positions (for display only)
+   state.currentPnL = 0;
+   for(int i = 0; i < PositionsTotal(); i++) {
+      ulong ticket = PositionGetTicket(i);
+      if(IsValidPosition(ticket)) {
+         state.currentPnL += PositionGetDouble(POSITION_PROFIT);
+      }
+   }
+   
+   // DASHBOARD: Update only P&L (price changes)
+   if(InpEnableDashboard && state.exists) {
+      UpdatePnLOnly();
+   }
+   
+   // PARTIALS: Check if price crossed levels (CLOSE method only - direct execution)
+   if(InpEnablePartials && state.exists && state.partialsValid && state.partialMethod == PARTIAL_CLOSE) {
+      ExecutePartials();
+   }
+   
+   // PARTIALS: Check if price crossed levels and execute
+   if(InpEnablePartials && state.exists && state.partialsValid) {
+      if(state.partialMethod == PARTIAL_STOP) {
+         CheckStopPartials();  // Marks passed and immediately combines/places order if multiple passed
+      } else if(state.partialMethod == PARTIAL_LIMIT) {
+         ExecuteLimitPartials();  // Place/modify limit orders
+      }
+   }
+   
+   // PARTIALS: Check for TP changes (catch manual TP moves that might miss transaction events)
+   if(InpEnablePartials && state.exists && state.partialsValid && state.partialCount > 0 && state.lastPlannedTP > 0) {
+      double actual_tp = GetActualTP();
+      if(actual_tp > 0) {
+         double tp_diff = MathAbs(actual_tp - state.lastPlannedTP);
+         if(tp_diff > sym.point * 0.5) {
+            // TP changed - update partial plan
+            bool tp_below_first_partial = IsTPBelowFirstPartialDistance(actual_tp);
+            
+            if(tp_below_first_partial) {
+               PlanPartials();  // TP below first partial - full replan
+            } else {
+               // Try to update prices only - preserves executed flags, volumes, tickets
+               if(!UpdatePartialPricesOnly()) {
+                  PlanPartials();  // If price update failed, do full replan
+               } else {
+                  UpdateUI();  // Prices updated successfully
+               }
+            }
+         }
+      }
+   }
+   
+   // BREAK-EVEN: Check condition (price-based)
+   if(InpEnableAutoBE && state.exists && !state.beSet) {
+      CheckAndSetBE();
+   }
+   
+   // TRAILING: Check and move SL (price-based, runner only)
+   if(InpEnableTrailingRunner && state.exists) {
+      CheckAndUpdateTrailingRunner();
+   }
+}
+
+void OnTimer() {
+   ulong now_ms = GetTickCount64();
+   bool run_maintenance = (g_lastMaintenanceRunMs == 0 || now_ms < g_lastMaintenanceRunMs || (now_ms - g_lastMaintenanceRunMs) >= (ulong)g_timerMaintenanceIntervalMs);
+   bool run_ui = (g_lastUiRunMs == 0 || now_ms < g_lastUiRunMs || (now_ms - g_lastUiRunMs) >= (ulong)g_timerUiIntervalMs);
+
+   if(!run_maintenance) {
+      if(InpEnableDashboard && state.exists) {
+         UpdatePnLOnly();
+      }
+      if(run_ui) {
+         UpdateLines();
+         g_lastUiRunMs = now_ms;
+      }
+      return;
+   }
+
+   g_lastMaintenanceRunMs = now_ms;
+
+   // CRITICAL FALLBACK - Update everything that might have been missed
+   // This runs on maintenance cadence to catch missed events and reconcile state.
+   PerformNetting();
+   CalculatePositionGroup();
+   
+if(state.exists) {
+      // Only call SetSLTPForAll if we have valid override values or no positions need fixing
+      // Don't call it blindly - it will overwrite user drags with stale averaged values
+      bool any_missing_sltp = false;
+      for(int _i = 0; _i < PositionsTotal(); _i++) {
+         ulong _t = PositionGetTicket(_i);
+         if(!IsValidPosition(_t)) continue;
+         bool _allow_missing_tp = AllowMissingTPForTrailingRunner(_t);
+         if(PositionGetDouble(POSITION_SL) == 0 || (!_allow_missing_tp && PositionGetDouble(POSITION_TP) == 0)) {
+            EnsurePositionHasSLTP(_t);
+            any_missing_sltp = true;
+         }
+      }
+      if(!any_missing_sltp) {
+         for(int _j = 0; _j < OrdersTotal(); _j++) {
+            ulong _ot = OrderGetTicket(_j);
+            if(!IsValidOrder(_ot)) continue;
+            if(OrderGetDouble(ORDER_SL) == 0 || OrderGetDouble(ORDER_TP) == 0) {
+               EnsureOrderHasSLTP(_ot);
+               any_missing_sltp = true;
+            }
+         }
+      }
+      if(any_missing_sltp) SetSLTPForAll();
+      // Replan partials if needed (missed events, including TP changes)
+      if(InpEnablePartials) {
+         if(!state.partialsValid && state.avgTP > 0) {
+            // No plan exists - try to rebuild from original plan first before doing full replan
+            if(!ValidateAndRebuildPartialPlan()) {
+               PlanPartials();  // Full replan only if rebuild failed
+            }
+         } else if(state.partialsValid && state.partialCount > 0 && state.lastPlannedTP > 0) {
+            // Plan exists - check if TP changed (fallback for missed transaction events)
+            double actual_tp = GetActualTP();
+            if(actual_tp > 0) {
+               double tp_diff = MathAbs(actual_tp - state.lastPlannedTP);
+               if(tp_diff > sym.point * 0.5) {
+                  // TP changed - update partial plan
+                  bool tp_below_first_partial = IsTPBelowFirstPartialDistance(actual_tp);
+                  
+                  if(tp_below_first_partial) {
+                     PlanPartials();  // TP below first partial - full replan
+                  } else {
+                     // Try to update prices only - preserves executed flags, volumes, tickets
+                     if(!UpdatePartialPricesOnly()) {
+                        PlanPartials();  // If price update failed, do full replan
+                     }
+                  }
+               }
+            }
+         }
+      }
+   } else {
+      SetSLTPForAll();
+   }
+   
+   // Always update dashboard and lines on maintenance cycles.
+   UpdateUI();
+   g_lastUiRunMs = now_ms;
+   
+   // Dashboard sync
+   if(InpEnableDashboardSync) {
+      DashboardConnector::Sync();
+   }
+}
+
+// Check and set SL/TP for positions/orders that are missing them
+
+// === INITIALIZATION ===
+
+int OnInit() {
+   // Initialize symbol info - retry if not immediately available
+   for(int retry = 0; retry < 10; retry++) {
+      sym.point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      sym.digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+      sym.minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+      sym.lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+      sym.tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+      sym.pointValueCached = false;  // Initialize cache flag
+      
+      if(sym.point > 0 && sym.minLot > 0 && sym.tickValue > 0) break;
+      Sleep(100);  // Wait 100ms and retry
+   }
+   
+   sym.displayDecimals = (InpPriceDecimals < 0) ? sym.digits : InpPriceDecimals;
+   
+   // Only fail if critical values are missing
+   if(sym.point <= 0 || sym.minLot <= 0) {
+      Print("ERROR: Symbol info not available - point=", sym.point, " minLot=", sym.minLot);
+      return INIT_FAILED;
+   }
+   
+   // tickValue - try multiple methods to get it
+   if(sym.tickValue <= 0) {
+      // Method 1: Try with lot size
+      sym.tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   }
+   if(sym.tickValue <= 0) {
+      // Method 2: Calculate from contract size
+      double contractSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+      double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+      if(contractSize > 0 && tickSize > 0) {
+         sym.tickValue = tickSize * contractSize;
+      }
+   }
+   if(sym.tickValue <= 0) {
+      // Method 3: Default fallback for forex
+      sym.tickValue = 10.0;  // Approx $10 per pip per standard lot
+   }
+   
+   if(sym.lotStep <= 0) sym.lotStep = sym.minLot;
+   
+   // Initialize ignore buffer
+   InitializeIgnoreBuffer();
+
+   // Initialize state - ALL fields must be initialized
+   state.exists = false;
+   state.isBuy = false;
+   state.count = 0;
+   state.totalVolume = 0;
+   state.netVolume = 0;
+   state.avgEntry = 0;
+   state.avgSL = 0;
+   state.avgTP = 0;
+   state.currentPnL = 0;
+   state.partialsValid = false;
+   state.partialCount = 0;
+   state.partialFinalVolume = 0;
+   state.beSet = false;
+   state.trailingBestPrice = 0;
+   state.trailingActive = false;
+   state.calculatedMinLot = sym.minLot;
+   state.calculatedMinFirstPartial = sym.minLot;
+   state.lastPlannedPositionSize = 0;
+   state.lastPlannedTP = 0;
+   state.originalPlannedPositionSize = 0;
+   state.originalPartialCount = 0;
+   state.originalPartialFinalVolume = 0;
+   state.transientBETriggerOffset = 0;
+   state.transientTrailingDistance = 0;
+   state.transientBEOverridePrice = 0;
+   state.userOverrideSL = 0;
+   state.userOverrideTP = 0;
+   for(int i = 0; i < 10; i++) {
+      state.originalPartialVolumes[i] = 0;
+   }
+   
+   
+   
+   // Initialize currency symbol (always needed for calculations)
+   string acc = AccountInfoString(ACCOUNT_CURRENCY);
+   if(acc == "USD") currencySymbol = "$";
+   else if(acc == "EUR") currencySymbol = "€";
+   else if(acc == "GBP") currencySymbol = "£";
+   else if(acc != "") currencySymbol = acc + " ";
+   else currencySymbol = "$";  // Default fallback
+   
+   // Initialize colors
+   color bg = (color)ChartGetInteger(0, CHART_COLOR_BACKGROUND);
+   int brightness = ((bg & 0xFF) + ((bg >> 8) & 0xFF) + ((bg >> 16) & 0xFF)) / 3;
+   if(brightness < 128) {
+      colorText = clrWhite; colorProfit = clrLime; colorLoss = clrRed;
+      colorSL = clrOrange; colorTP = clrDodgerBlue;
+   } else {
+      colorText = clrBlack; colorProfit = clrGreen; colorLoss = clrDarkRed;
+      colorSL = clrDarkOrange; colorTP = clrBlue;
+   }
+   
+   // Setup dashboard objects - will be positioned by UpdateDashboard()
+   if(InpEnableDashboard) {
+      string labels[] = {"Pos", "PnL", "SL", "TP"};
+      for(int i = 0; i < 4; i++) {
+         string name = "TM_" + labels[i];
+         if(ObjectFind(0, name) < 0) {
+            ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+            ObjectSetString(0, name, OBJPROP_FONT, GetFontName(InpDashboardFont));
+            ObjectSetInteger(0, name, OBJPROP_FONTSIZE, InpDashboardFontSize);
+            ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
+            ObjectSetInteger(0, name, OBJPROP_COLOR, colorText);
+            ObjectSetInteger(0, name, OBJPROP_BACK, false);
+         }
+      }
+   }
+   
+   // Rebuild state from existing positions
+   UpdateStateAndUI();
+   
+   // IMPORTANT: Recalculate AGAIN to pick up newly set SL/TP values
+   CalculatePositionGroup();
+   
+   // Try to load saved partial state (survives timeframe switches, recompilations)
+   bool stateLoaded = false;
+   if(state.exists) {
+      stateLoaded = LoadPartialState();
+   }
+
+   if(stateLoaded && (state.partialMethod < PARTIAL_CLOSE || state.partialMethod > PARTIAL_STOP)) {
+      ClearSavedPartialState();
+      state.partialsValid = false;
+      state.partialCount = 0;
+      state.partialFinalVolume = 0;
+      state.lastPlannedPositionSize = 0;
+      state.lastPlannedTP = 0;
+      state.partialMethod = PARTIAL_LIMIT;
+      stateLoaded = false;
+   }
+   
+   // Plan partials (requires state.avgTP > 0) - skip if successfully loaded from saved state
+   if(!stateLoaded) {
+      PlanPartials();
+   }
+   
+   // Setup split-timer scheduler with internal defaults only.
+   g_timerBaseIntervalMs = (int)MathMax(20, DEFAULT_TIMER_BASE_INTERVAL_MS);
+   g_timerMaintenanceIntervalMs = (int)MathMax(g_timerBaseIntervalMs, DEFAULT_TIMER_MAINTENANCE_INTERVAL_MS);
+   g_timerUiIntervalMs = (int)MathMax(g_timerBaseIntervalMs, DEFAULT_TIMER_UI_INTERVAL_MS);
+   g_lastMaintenanceRunMs = 0;
+   g_lastUiRunMs = 0;
+   EventSetMillisecondTimer(g_timerBaseIntervalMs);
+
+   if(InpEnableDashboardSync) {
+      DashboardConnector::Init(
+         InpDashboardUrl,
+         InpDashboardAccountId,
+         InpDashboardPSK,
+         InpDashboardSyncIntervalSec,
+         InpDashboardDebugLog
+      );
+   }
+   
+   // Force initial dashboard update
+   UpdateUI();
+   
+   return INIT_SUCCEEDED;
+}
+
+void OnDeinit(const int reason) {
+   EventKillTimer();
+   
+   // Save partial state for timeframe switches and recompilation
+   if(state.exists) {
+      SavePartialState();
+   }
+   
+   // Cleanup dashboard
+   if(InpEnableDashboard) {
+      ObjectDelete(0, "TM_Pos"); ObjectDelete(0, "TM_PnL"); ObjectDelete(0, "TM_SL"); ObjectDelete(0, "TM_TP");
+   }
+   for(int i = ObjectsTotal(0, 0, OBJ_HLINE) - 1; i >= 0; i--) {
+      string name = ObjectName(0, i, 0, OBJ_HLINE);
+      if(StringFind(name, "TM_Line") == 0) DeleteLineObjects(name);
+   }
+   for(int i = ObjectsTotal(0, 0, OBJ_TEXT) - 1; i >= 0; i--) {
+      string name = ObjectName(0, i, 0, OBJ_TEXT);
+      if(StringFind(name, "TM_Line") == 0) ObjectDelete(0, name);
+   }
+}
+
+// === DASHBOARD FUNCTIONS ===
+
+double GetDashboardDisplayTP() {
+   if(!state.exists) return 0;
+   if(state.count <= 1) return state.avgTP;
+
+   double weighted_tp = 0;
+   double weighted_vol = 0;
+   for(int i = 0; i < PositionsTotal(); i++) {
+      ulong ticket = PositionGetTicket(i);
+      if(!IsValidPosition(ticket)) continue;
+
+      double tp = PositionGetDouble(POSITION_TP);
+      double vol = PositionGetDouble(POSITION_VOLUME);
+      if(tp > 0 && vol > 0) {
+         weighted_tp += tp * vol;
+         weighted_vol += vol;
+      }
+   }
+
+   if(weighted_vol <= 0) return state.avgTP;
+   return weighted_tp / weighted_vol;
+}
+
+void UpdateDashboard() {
+   // Ensure objects exist - set CORNER immediately
+   string labels[] = {"Pos", "PnL", "SL", "TP"};
+   bool is_lower = (InpDashboardCorner == DASHBOARD_LEFT_LOWER || InpDashboardCorner == DASHBOARD_RIGHT_LOWER);
+   ENUM_BASE_CORNER default_corner = is_lower ? CORNER_LEFT_LOWER : CORNER_LEFT_UPPER;
+   
+   for(int i = 0; i < 4; i++) {
+      string name = "TM_" + labels[i];
+      if(ObjectFind(0, name) < 0) {
+         ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+         ObjectSetInteger(0, name, OBJPROP_CORNER, default_corner);  // Set CORNER first!
+         ObjectSetString(0, name, OBJPROP_FONT, GetFontName(InpDashboardFont));
+         ObjectSetInteger(0, name, OBJPROP_FONTSIZE, InpDashboardFontSize);
+         ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, name, OBJPROP_HIDDEN, false);
+      } else {
+         // Update font settings and ensure CORNER is set
+         ObjectSetInteger(0, name, OBJPROP_CORNER, default_corner);
+         ObjectSetString(0, name, OBJPROP_FONT, GetFontName(InpDashboardFont));
+         ObjectSetInteger(0, name, OBJPROP_FONTSIZE, InpDashboardFontSize);
+      }
+   }
+   
+   if(!state.exists) {
+      string text = "No Open Positions";
+      int center_x;
+      ENUM_BASE_CORNER corner;
+      ENUM_ANCHOR_POINT anchor;
+      
+      if(InpDashboardSingleLine) {
+         // Single line mode: old approach - just center horizontally, use upper/lower
+         bool is_lower = (InpDashboardCorner == DASHBOARD_LEFT_LOWER || InpDashboardCorner == DASHBOARD_RIGHT_LOWER);
+         corner = is_lower ? CORNER_LEFT_LOWER : CORNER_LEFT_UPPER;
+         anchor = is_lower ? ANCHOR_LEFT_LOWER : ANCHOR_LEFT_UPPER;  // Set anchor to match corner
+         int chart_width = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+         if(chart_width <= 0) chart_width = 1920;
+         int text_w = StringLen(text) * 13;  // Fixed char width like old code
+         center_x = (chart_width - text_w) / 2;
+      } else {
+         // Multi-line mode: use corner setting as-is
+         ENUM_BASE_CORNER corners[] = {CORNER_LEFT_UPPER, CORNER_RIGHT_UPPER, CORNER_LEFT_LOWER, CORNER_RIGHT_LOWER};
+         corner = corners[InpDashboardCorner];
+         anchor = (corner == CORNER_LEFT_LOWER || corner == CORNER_RIGHT_LOWER) ? ANCHOR_LEFT_LOWER : ANCHOR_LEFT_UPPER;
+         if(corner == CORNER_RIGHT_UPPER || corner == CORNER_RIGHT_LOWER) anchor = (ENUM_ANCHOR_POINT)(anchor + 1);
+         center_x = InpDashboardXOffset;
+      }
+      
+      int y_dist = MathMax(10, InpDashboardYOffset);
+      center_x = MathMax(10, center_x);
+      
+      // Only create if doesn't exist, otherwise just update properties
+      if(ObjectFind(0, "TM_Pos") < 0) {
+         ObjectCreate(0, "TM_Pos", OBJ_LABEL, 0, 0, 0);
+      }
+      ObjectSetInteger(0, "TM_Pos", OBJPROP_CORNER, corner);
+      ObjectSetInteger(0, "TM_Pos", OBJPROP_ANCHOR, anchor);  // Set anchor to prevent text cutoff
+      ObjectSetInteger(0, "TM_Pos", OBJPROP_XDISTANCE, center_x);
+      ObjectSetInteger(0, "TM_Pos", OBJPROP_YDISTANCE, y_dist);
+      ObjectSetString(0, "TM_Pos", OBJPROP_TEXT, text);
+      ObjectSetInteger(0, "TM_Pos", OBJPROP_COLOR, colorText);
+      ObjectSetString(0, "TM_Pos", OBJPROP_FONT, GetFontName(InpDashboardFont));
+      ObjectSetInteger(0, "TM_Pos", OBJPROP_FONTSIZE, InpDashboardFontSize);
+      ObjectSetInteger(0, "TM_Pos", OBJPROP_HIDDEN, false);
+      ObjectSetInteger(0, "TM_Pos", OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, "TM_Pos", OBJPROP_BACK, false);
+      
+      // Hide other objects in single-line mode when no positions
+      if(InpDashboardSingleLine) {
+         ObjectSetString(0, "TM_PnL", OBJPROP_TEXT, "");
+         ObjectSetInteger(0, "TM_PnL", OBJPROP_XDISTANCE, -1000);
+         ObjectSetInteger(0, "TM_PnL", OBJPROP_YDISTANCE, -1000);
+         ObjectSetString(0, "TM_SL", OBJPROP_TEXT, "");
+         ObjectSetInteger(0, "TM_SL", OBJPROP_XDISTANCE, -1000);
+         ObjectSetInteger(0, "TM_SL", OBJPROP_YDISTANCE, -1000);
+         ObjectSetString(0, "TM_TP", OBJPROP_TEXT, "");
+         ObjectSetInteger(0, "TM_TP", OBJPROP_XDISTANCE, -1000);
+         ObjectSetInteger(0, "TM_TP", OBJPROP_YDISTANCE, -1000);
+      } else {
+         ObjectSetString(0, "TM_PnL", OBJPROP_TEXT, "");
+         ObjectSetInteger(0, "TM_PnL", OBJPROP_XDISTANCE, -1000);
+         ObjectSetString(0, "TM_SL", OBJPROP_TEXT, "");
+         ObjectSetInteger(0, "TM_SL", OBJPROP_XDISTANCE, -1000);
+         ObjectSetString(0, "TM_TP", OBJPROP_TEXT, "");
+         ObjectSetInteger(0, "TM_TP", OBJPROP_XDISTANCE, -1000);
+      }
+      // Removed ChartRedraw() - MT5 handles redraws automatically, forcing redraws causes performance issues
+      return;
+   }
+   
+   double risk = 0, reward = 0;
+   double total_vol = MathAbs(state.netVolume);
+   double pvl = GetPointValuePerLot();
+   double sl_value = 0;  // Can be positive (profit) or negative (risk)
+   double display_tp = GetDashboardDisplayTP();
+   
+   if(state.avgSL > 0 && total_vol > 0) {
+      double diff = GetPriceDiff(state.isBuy, state.avgEntry, state.avgSL);
+      sl_value = (diff / sym.point) * pvl * total_vol;
+      // For display, use absolute value for risk calculation
+      if(diff > 0) risk = MathAbs(sl_value);
+   }
+
+   // Dashboard TP is intentionally simplified to one averaged TP level.
+   if(display_tp > 0 && total_vol > 0) {
+      double diff = GetPriceDiff(state.isBuy, display_tp, state.avgEntry);
+      if(diff > 0) reward = (diff / sym.point) * pvl * total_vol;
+   }
+   
+   string currentRR = risk > 0 ? (MathAbs(state.currentPnL) / risk <= 99 ? DoubleToString(MathAbs(state.currentPnL) / risk, 1) : "∞") : "∞";
+   string targetRR = (risk > 0 && reward > 0) ? (reward / risk <= 99 ? DoubleToString(reward / risk, 1) : "∞") : "∞";
+   
+   double account_equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double account_balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double margin_percent = 0;
+   if(state.netVolume > 0 && state.avgEntry > 0) {
+      double calculated_margin = 0;
+      if(OrderCalcMargin(state.isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, _Symbol, MathAbs(state.netVolume), state.avgEntry, calculated_margin)) {
+         margin_percent = (account_equity > 0 && calculated_margin > 0) ? (calculated_margin / account_equity) * 100.0 : 0;
+      }
+   }
+   
+   string dir = state.isBuy ? "BUY  " : "SELL ";
+   string pos_text = dir + DoubleToString(MathAbs(state.netVolume), 2) + " @" + DoubleToString(state.avgEntry, sym.displayDecimals);
+   // Add margin % only if > 0.00%
+   if(margin_percent > 0.0) {
+      pos_text += " (" + DoubleToString(margin_percent, 2) + "%)";
+   }
+   
+   string pnl_text = "P&L " + ((state.currentPnL >= 0) ? "+" : "-") + currencySymbol + DoubleToString(MathAbs(state.currentPnL), 2) + " RR(" + currentRR + "/" + targetRR + ")";
+   
+   string sl_text = "SL:  ";
+   if(state.avgSL > 0) {
+      // Show positive sign if SL is in profit (sl_value < 0), negative if in loss (sl_value > 0)
+      string sl_sign = (sl_value < 0) ? "+" : "-";
+      sl_text += "@" + DoubleToString(state.avgSL, sym.displayDecimals) + " " + sl_sign + currencySymbol + DoubleToString(MathAbs(sl_value), 2);
+      if(MathAbs(sl_value) > 0 && account_balance > 0) {
+         double sl_percent = (MathAbs(sl_value) / account_balance) * 100.0;
+         sl_text += " (" + ((sl_value < 0) ? "+" : "-") + DoubleToString(sl_percent, 2) + "%)";
+      }
+   } else sl_text += "Open";
+   
+   string tp_text = "TP:  ";
+   if(display_tp > 0) {
+      tp_text += "@" + DoubleToString(display_tp, sym.displayDecimals) + " " + currencySymbol + DoubleToString(reward, 2);
+      if(reward > 0 && account_balance > 0) tp_text += " (" + DoubleToString((reward / account_balance) * 100.0, 2) + "%)";
+   } else tp_text += "Open";
+   
+   string names[] = {"TM_Pos", "TM_PnL", "TM_SL", "TM_TP"};
+   
+   if(InpDashboardSingleLine) {
+      // Use old positioning approach - DELETE AND RECREATE to ensure visibility
+      bool is_lower = (InpDashboardCorner == DASHBOARD_LEFT_LOWER || InpDashboardCorner == DASHBOARD_RIGHT_LOWER);
+      ENUM_BASE_CORNER corner = is_lower ? CORNER_LEFT_LOWER : CORNER_LEFT_UPPER;
+      ENUM_ANCHOR_POINT anchor = is_lower ? ANCHOR_LEFT_LOWER : ANCHOR_LEFT_UPPER;  // Set anchor to match corner
+      
+      // Build texts for single line mode - consistent spacing without colons
+      string pos_text_single = pos_text;
+      // Extract P&L value part (remove "P&L " prefix)
+      string pnl_value = StringSubstr(pnl_text, 4);  // Skip "P&L "
+      string pnl_text_single = "P&L " + pnl_value;
+      
+      // SL/TP with consistent formatting (no colons)
+      string sl_text_single = "SL ";
+      if(state.avgSL > 0) {
+         // Show positive sign if SL is in profit (sl_value < 0), negative if in loss (sl_value > 0)
+         string sl_sign = (sl_value < 0) ? "+" : "-";
+         sl_text_single += "@" + DoubleToString(state.avgSL, sym.displayDecimals) + " " + sl_sign + currencySymbol + DoubleToString(MathAbs(sl_value), 2);
+         if(MathAbs(sl_value) > 0 && account_balance > 0) {
+            double sl_percent = (MathAbs(sl_value) / account_balance) * 100.0;
+            sl_text_single += " (" + ((sl_value < 0) ? "+" : "-") + DoubleToString(sl_percent, 2) + "%)";
+         }
+      } else sl_text_single += "Open";
+      
+      string tp_text_single = "TP ";
+      if(display_tp > 0) {
+         tp_text_single += "@" + DoubleToString(display_tp, sym.displayDecimals) + " " + currencySymbol + DoubleToString(reward, 2);
+         if(reward > 0 && account_balance > 0) tp_text_single += " (" + DoubleToString((reward / account_balance) * 100.0, 2) + "%)";
+      } else tp_text_single += "Open";
+      
+      // Simplified anchor and spacing: all use left anchor, spacing based on content with dynamic margin
+      int y_dist = MathMax(10, InpDashboardYOffset);
+      ENUM_ANCHOR_POINT left_anchor = is_lower ? ANCHOR_LEFT_LOWER : ANCHOR_LEFT_UPPER;
+      
+      string obj_names[] = {"TM_Pos", "TM_PnL", "TM_SL", "TM_TP"};
+      string obj_texts[] = {pos_text_single, pnl_text_single, sl_text_single, tp_text_single};
+      color obj_colors[] = {colorText, (state.currentPnL >= 0) ? colorProfit : colorLoss, colorSL, colorTP};
+      
+      // Calculate widths based on actual content length and font size - consistent for all segments
+      bool is_monospace = (InpDashboardFont == FONT_COURIER || InpDashboardFont == FONT_LUCIDA || InpDashboardFont == FONT_CONSOLAS);
+      double char_width = is_monospace ? (InpDashboardFontSize * 0.85) : (InpDashboardFontSize * 0.75);
+      int pos_w = (int)(StringLen(pos_text_single) * char_width);
+      int pnl_w = (int)(StringLen(pnl_text_single) * char_width);
+      int sl_w = (int)(StringLen(sl_text_single) * char_width);
+      int tp_w = (int)(StringLen(tp_text_single) * char_width);
+      
+      // Calculate spacing for each segment based on its width and font size (half the original spacing)
+      int spacing_after_pos = (int)((InpDashboardFontSize * 0.3 + pos_w * 0.1) * 0.5);
+      int spacing_after_pnl = (int)((InpDashboardFontSize * 0.3 + pnl_w * 0.1) * 0.5);
+      int spacing_after_sl = (int)((InpDashboardFontSize * 0.3 + sl_w * 0.1) * 0.5);
+      
+      int total_w = pos_w + spacing_after_pos + pnl_w + spacing_after_pnl + sl_w + spacing_after_sl + tp_w;
+      
+      int chart_width = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+      if(chart_width <= 0) chart_width = 1920;
+      int base_x = MathMax(10, (chart_width - total_w) / 2);
+      
+      // Position objects with measured widths and segment-specific spacing to prevent overlap
+      int obj_x[] = {
+         base_x, 
+         base_x + pos_w + spacing_after_pos, 
+         base_x + pos_w + spacing_after_pos + pnl_w + spacing_after_pnl, 
+         base_x + pos_w + spacing_after_pos + pnl_w + spacing_after_pnl + sl_w + spacing_after_sl
+      };
+      
+      for(int i = 0; i < 4; i++) {
+         if(ObjectFind(0, obj_names[i]) < 0) {
+            ObjectCreate(0, obj_names[i], OBJ_LABEL, 0, 0, 0);
+         }
+         ObjectSetInteger(0, obj_names[i], OBJPROP_CORNER, corner);
+         ObjectSetInteger(0, obj_names[i], OBJPROP_ANCHOR, left_anchor);
+         ObjectSetInteger(0, obj_names[i], OBJPROP_XDISTANCE, obj_x[i]);
+         ObjectSetInteger(0, obj_names[i], OBJPROP_YDISTANCE, y_dist);
+         ObjectSetString(0, obj_names[i], OBJPROP_TEXT, obj_texts[i]);
+         ObjectSetInteger(0, obj_names[i], OBJPROP_COLOR, obj_colors[i]);
+         ObjectSetString(0, obj_names[i], OBJPROP_FONT, GetFontName(InpDashboardFont));
+         ObjectSetInteger(0, obj_names[i], OBJPROP_FONTSIZE, InpDashboardFontSize);
+         ObjectSetInteger(0, obj_names[i], OBJPROP_HIDDEN, false);
+         ObjectSetInteger(0, obj_names[i], OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, obj_names[i], OBJPROP_BACK, false);
+      }
+      
+      // Removed ChartRedraw() - MT5 handles redraws automatically, forcing redraws causes performance issues
+   } else {
+      ENUM_BASE_CORNER corners[] = {CORNER_LEFT_UPPER, CORNER_RIGHT_UPPER, CORNER_LEFT_LOWER, CORNER_RIGHT_LOWER};
+      ENUM_ANCHOR_POINT anchors[] = {ANCHOR_LEFT_UPPER, ANCHOR_RIGHT_UPPER, ANCHOR_LEFT_LOWER, ANCHOR_RIGHT_LOWER};
+      ENUM_BASE_CORNER corner = corners[InpDashboardCorner];
+      ENUM_ANCHOR_POINT anchor = anchors[InpDashboardCorner];
+      bool is_lower = (InpDashboardCorner == DASHBOARD_LEFT_LOWER || InpDashboardCorner == DASHBOARD_RIGHT_LOWER);
+      int x_pos = (InpDashboardCorner == DASHBOARD_RIGHT_UPPER || InpDashboardCorner == DASHBOARD_RIGHT_LOWER) ? -InpDashboardXOffset : InpDashboardXOffset;
+      
+      int line_height = (int)(InpDashboardFontSize * 1.2);  // Line spacing
+      
+      string texts[] = {pos_text, pnl_text, sl_text, tp_text};
+      color colors[] = {colorText, (state.currentPnL >= 0) ? colorProfit : colorLoss, colorSL, colorTP};
+      int max_len = MathMax(MathMax(StringLen(texts[0]), StringLen(texts[1])), MathMax(StringLen(texts[2]), StringLen(texts[3])));
+      
+      for(int i = 0; i < 4; i++) {
+         string line = texts[i];
+         while(StringLen(line) < max_len) line += " ";
+         int y_pos = is_lower ? (InpDashboardYOffset + line_height * (3 - i)) : (InpDashboardYOffset + line_height * i);
+         ObjectSetInteger(0, names[i], OBJPROP_CORNER, corner);
+         ObjectSetInteger(0, names[i], OBJPROP_ANCHOR, anchor);
+         ObjectSetInteger(0, names[i], OBJPROP_YDISTANCE, y_pos);
+         ObjectSetInteger(0, names[i], OBJPROP_XDISTANCE, x_pos);
+         ObjectSetString(0, names[i], OBJPROP_TEXT, line);
+         ObjectSetInteger(0, names[i], OBJPROP_COLOR, colors[i]);
+      }
+   }
+   
+   // Removed ChartRedraw() - MT5 handles redraws automatically, forcing redraws causes performance issues
+}
+
+string CenterAlignLabel(string text, int width) {
+   int len = StringLen(text);
+   if(len >= width) return text;
+   int trailing = (width - len) / 2;
+   string result = text;
+   for(int i = 0; i < trailing; i++) result += " ";
+   return result;
+}
+
+string FormatRRPair(double reward_money, double local_risk_money, double total_risk_money) {
+   if(reward_money <= 0 || local_risk_money <= 0 || total_risk_money <= 0) return "";
+   double local_rr = reward_money / local_risk_money;
+   double effective_rr = reward_money / total_risk_money;
+   if(local_rr > 99.0) local_rr = 99.0;
+   if(effective_rr > 99.0) effective_rr = 99.0;
+   return "(" + DoubleToString(local_rr, 1) + "/" + DoubleToString(effective_rr, 2) + ")RR";
+}
+
+string FormatRiskPercent(double risk_money, double account_balance) {
+   if(risk_money <= 0 || account_balance <= 0) return "";
+   double pct = (risk_money / account_balance) * 100.0;
+   return TrimPercentage(pct);
+}
+
+string FormatAccountPercent(double value_money, double account_balance) {
+   if(account_balance <= 0) return "0%";
+   double pct = (value_money / account_balance) * 100.0;
+   return TrimPercentage(pct);
+}
+
+string TrimPercentage(double value) {
+   if(MathAbs(value - MathRound(value)) < 0.005) {
+      return IntegerToString((int)MathRound(value)) + "%";
+   }
+   string pct = DoubleToString(value, 2);
+   int len = StringLen(pct);
+   if(len >= 3 && StringSubstr(pct, len - 2, 2) == ".0") {
+      pct = StringSubstr(pct, 0, len - 2);
+   } else if(len >= 2 && StringSubstr(pct, len - 1, 1) == "0" && 
+             StringSubstr(pct, len - 3, 1) != ".") {
+      pct = StringSubstr(pct, 0, len - 1);
+   }
+   return pct + "%";
+}
+
+string TrimTrailingZeros(string text) {
+   int len = StringLen(text);
+   while(len > 0 && StringSubstr(text, len - 1, 1) == "0") {
+      text = StringSubstr(text, 0, len - 1);
+      len = StringLen(text);
+   }
+   if(len > 0 && StringSubstr(text, len - 1, 1) == ".") {
+      text = StringSubstr(text, 0, len - 1);
+   }
+   return text;
+}
+
+string FormatNumberSmart(double value, int decimals) {
+   if(decimals < 0) decimals = 0;
+   string text = DoubleToString(value, decimals);
+   return TrimTrailingZeros(text);
+}
+
+string FormatMoneyCompact(double value_money) {
+   if(value_money < 0) value_money = 0;
+   string symbol = currencySymbol;
+   if(StringLen(symbol) > 0 && StringSubstr(symbol, StringLen(symbol) - 1, 1) == " ") {
+      symbol = StringSubstr(symbol, 0, StringLen(symbol) - 1);
+   }
+   return FormatNumberSmart(MathAbs(value_money), 2) + symbol;
+}
+
+string FormatSignedMoneyCompact(double value_money) {
+   string symbol = currencySymbol;
+   if(StringLen(symbol) > 0 && StringSubstr(symbol, StringLen(symbol) - 1, 1) == " ") {
+      symbol = StringSubstr(symbol, 0, StringLen(symbol) - 1);
+   }
+   string sign = (value_money < 0) ? "-" : "";
+   return sign + FormatNumberSmart(MathAbs(value_money), 2) + symbol;
+}
+
+double CalculateMarginPercent(bool is_buy, double volume, double price) {
+   if(volume <= 0 || price <= 0) return 0;
+   double margin = 0;
+   ENUM_ORDER_TYPE mt = is_buy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   if(!OrderCalcMargin(mt, _Symbol, volume, price, margin) || margin <= 0) return 0;
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   if(equity <= 0) return 0;
+   return (margin / equity) * 100.0;
+}
+
+int GetVolumeDisplayDecimals() {
+   double step = sym.lotStep;
+   if(step <= 0) return 2;
+   int decimals = 0;
+   while(decimals < 6 && MathAbs(step - MathRound(step)) > 1e-8) {
+      step *= 10.0;
+      decimals++;
+   }
+   if(decimals < 2) decimals = 2;
+   if(decimals > 4) decimals = 4;
+   return decimals;
+}
+
+datetime GetLevelLabelTime() {
+   int visible_bars = (int)ChartGetInteger(0, CHART_VISIBLE_BARS);
+   if(visible_bars <= 1) return TimeCurrent();
+
+   double shift_ratio = InpLevelLabelShiftPercent / 100.0;
+   if(shift_ratio < -0.50) shift_ratio = -0.50;
+   if(shift_ratio > 0.90) shift_ratio = 0.90;
+
+   // Convert chart right-edge pixel to time so shift is relative to viewport edge,
+   // not relative to bar 0 (current candle).
+   int chart_width = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   if(chart_width <= 0) chart_width = 1;
+
+   datetime right_edge_time = 0;
+   double dummy_price = 0;
+   int subwindow = 0;
+   bool xy_ok = ChartXYToTimePrice(0, chart_width - 1, 1, subwindow, right_edge_time, dummy_price);
+
+   if(!xy_ok || right_edge_time <= 0) {
+      int first_visible = (int)ChartGetInteger(0, CHART_FIRST_VISIBLE_BAR);
+      int total_bars = Bars(_Symbol, _Period);
+      if(total_bars <= 0) return TimeCurrent();
+      int rightmost_visible = first_visible - visible_bars + 1;
+      if(rightmost_visible < 0) rightmost_visible = 0;
+      if(rightmost_visible > total_bars - 1) rightmost_visible = total_bars - 1;
+      right_edge_time = iTime(_Symbol, _Period, rightmost_visible);
+      if(right_edge_time <= 0) right_edge_time = TimeCurrent();
+   }
+
+   int bars_from_right = (int)MathRound((visible_bars - 1) * shift_ratio);
+   int sec = PeriodSeconds(_Period);
+   if(sec <= 0) sec = 60;
+
+   datetime shifted_time = right_edge_time - (datetime)(bars_from_right * sec);
+   if(shifted_time <= 0) shifted_time = right_edge_time;
+   return shifted_time;
+}
+
+void DeleteLineObjects(string name) {
+   ObjectDelete(0, name);
+   ObjectDelete(0, name + "_LBL");
+   ObjectDelete(0, name + "_L1");
+   ObjectDelete(0, name + "_L2");
+}
+
+void ConsiderReferenceWidth(string text, int &reference_width) {
+   int width = StringLen(text);
+   if(width > reference_width) reference_width = width;
+}
+
+void ConsiderReferenceWidthPair(string line1, string line2, int &reference_width) {
+   int width1 = StringLen(line1);
+   int width2 = StringLen(line2);
+   int pair_width = (width1 > width2) ? width1 : width2;
+   if(pair_width > reference_width) reference_width = pair_width;
+}
+
+double GetLevelLabelBelowOffsetPrice() {
+   int below_points = 15;  // fixed vertical offset below the level line (points)
+   return NormalizeDouble(below_points * sym.point, sym.digits);
+}
+
+int GetBarNumberFromTime(datetime t) {
+   for(int i = 0; i < Bars(_Symbol, _Period); i++) {
+      if(iTime(_Symbol, _Period, i) == t) return i;
+   }
+   return 0;
+}
+
+string FormatSLLabel(double sl_price, double risk_money, double account_balance) {
+   double risk_pct = 0;
+   if(account_balance > 0 && risk_money > 0) {
+      risk_pct = (risk_money / account_balance) * 100.0;
+   }
+   string pct_str = TrimPercentage(risk_pct);
+   if(StringLen(pct_str) > 0 && StringSubstr(pct_str, 0, 1) != "-") pct_str = "-" + pct_str;
+   string money_str = FormatMoneyCompact(MathAbs(risk_money));
+   if(StringLen(money_str) > 0 && StringSubstr(money_str, 0, 1) != "-") money_str = "-" + money_str;
+   return "SL @" + DoubleToString(sl_price, sym.displayDecimals) + " " + money_str + " " + pct_str;
+}
+
+string FormatEntryLabel(bool is_buy, double total_volume, double entry_price, double margin_percent) {
+   return (is_buy ? "BUY " : "SELL ") + DoubleToString(total_volume, GetVolumeDisplayDecimals()) + "@" + DoubleToString(entry_price, sym.displayDecimals) + " (" + TrimPercentage(margin_percent) + ")";
+}
+
+string FormatTPLine1(int tp_number, double quantity, double tp_price, double reward_money) {
+   string money_str = FormatMoneyCompact(MathAbs(reward_money));
+   return "TP" + IntegerToString(tp_number) + " " + DoubleToString(quantity, GetVolumeDisplayDecimals()) + "@" + DoubleToString(tp_price, sym.displayDecimals) + " " + money_str;
+}
+
+string FormatTPLine2(double local_rr, double effective_rr, double return_percent, double cumulative_reward_money) {
+   string rr_str = "(" + FormatNumberSmart(local_rr, 2) + "/" + FormatNumberSmart(effective_rr, 2) + ")RR";
+   string pct_str = TrimPercentage(return_percent);
+   string total_str = FormatMoneyCompact(MathAbs(cumulative_reward_money));
+   return rr_str + " " + pct_str + " " + total_str;
+}
+
+void EnsureLevelTextObject(string object_name) {
+   if(ObjectFind(0, object_name) >= 0) {
+      ENUM_OBJECT object_type = (ENUM_OBJECT)ObjectGetInteger(0, object_name, OBJPROP_TYPE);
+      if(object_type != OBJ_TEXT) {
+         ObjectDelete(0, object_name);
+      }
+   }
+
+   if(ObjectFind(0, object_name) < 0) {
+      ObjectCreate(0, object_name, OBJ_TEXT, 0, TimeCurrent(), 0);
+      ObjectSetInteger(0, object_name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, object_name, OBJPROP_HIDDEN, false);
+      ObjectSetInteger(0, object_name, OBJPROP_BACK, false);
+   }
+}
+
+void DrawSingleLineLabel(string name, double price, color clr, string label, int reference_width, bool is_buy) {
+   if(ObjectFind(0, name) < 0) {
+      ObjectCreate(0, name, OBJ_HLINE, 0, 0, price);
+      ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+      ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_DOT);
+      ObjectSetInteger(0, name, OBJPROP_BACK, true);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   }
+   ObjectSetDouble(0, name, OBJPROP_PRICE, price);
+   ObjectSetString(0, name, OBJPROP_TEXT, "");  // pure line, no HLINE text
+   ObjectDelete(0, name + "_L1");
+   ObjectDelete(0, name + "_L2");
+
+   string lbl_name = name + "_LBL";
+   EnsureLevelTextObject(lbl_name);
+   datetime label_time = GetLevelLabelTime();
+   double y_offset = GetLevelLabelBelowOffsetPrice();
+   int anchor = ANCHOR_RIGHT;
+   double label_price = price;
+   bool is_entry_or_sl = (StringFind(name, "Entry") >= 0 || StringFind(name, "SL") >= 0);
+   if(is_entry_or_sl) {
+      if(is_buy) {
+         // Buy levels: place Entry/SL below the line.
+         anchor = ANCHOR_RIGHT_UPPER;
+         label_price = NormalizeDouble(price - y_offset, sym.digits);
+      } else {
+         // Sell levels: place Entry/SL above the line.
+         anchor = ANCHOR_RIGHT_LOWER;
+         label_price = NormalizeDouble(price + y_offset, sym.digits);
+      }
+   }
+   ObjectMove(0, lbl_name, 0, label_time, label_price);
+   ObjectSetInteger(0, lbl_name, OBJPROP_ANCHOR, anchor);
+   ObjectSetString(0, lbl_name, OBJPROP_FONT, GetFontName(InpDashboardFont));
+   ObjectSetInteger(0, lbl_name, OBJPROP_FONTSIZE, MathMax(6, InpLevelLabelFontSize));
+   ObjectSetString(0, lbl_name, OBJPROP_TEXT, CenterAlignLabel(label, MathMax(reference_width, StringLen(label))));
+   ObjectSetInteger(0, lbl_name, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, lbl_name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, lbl_name, OBJPROP_HIDDEN, false);
+   ObjectSetInteger(0, lbl_name, OBJPROP_BACK, false);
+}
+
+void DrawLine(string name, double price, color clr, string label) {
+   DrawSingleLineLabel(name, price, clr, label, StringLen(label), true);
+}
+
+void DrawTwoLineLabel(string name, double price, color clr, string line1, string line2, int reference_width) {
+   if(ObjectFind(0, name) < 0) {
+      ObjectCreate(0, name, OBJ_HLINE, 0, 0, price);
+      ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+      ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_DOT);
+      ObjectSetInteger(0, name, OBJPROP_BACK, true);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   }
+   ObjectSetDouble(0, name, OBJPROP_PRICE, price);
+   ObjectSetString(0, name, OBJPROP_TEXT, "");  // pure line, no HLINE text
+   ObjectDelete(0, name + "_LBL");
+
+   datetime label_time = GetLevelLabelTime();
+   int rw = MathMax(reference_width, MathMax(StringLen(line1), StringLen(line2)));
+
+   // Line 1: bottom of text box anchored at price → text appears above the line
+   string l1_name = name + "_L1";
+   EnsureLevelTextObject(l1_name);
+   ObjectMove(0, l1_name, 0, label_time, price);
+   ObjectSetInteger(0, l1_name, OBJPROP_ANCHOR, ANCHOR_RIGHT_LOWER);
+   ObjectSetString(0, l1_name, OBJPROP_FONT, GetFontName(InpDashboardFont));
+   ObjectSetInteger(0, l1_name, OBJPROP_FONTSIZE, MathMax(6, InpLevelLabelFontSize));
+   ObjectSetString(0, l1_name, OBJPROP_TEXT, CenterAlignLabel(line1, rw));
+   ObjectSetInteger(0, l1_name, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, l1_name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, l1_name, OBJPROP_HIDDEN, false);
+   ObjectSetInteger(0, l1_name, OBJPROP_BACK, false);
+
+   // Line 2: top of text box anchored at price → text appears below the line
+   string l2_name = name + "_L2";
+   EnsureLevelTextObject(l2_name);
+   ObjectMove(0, l2_name, 0, label_time, price);
+   ObjectSetInteger(0, l2_name, OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
+   ObjectSetString(0, l2_name, OBJPROP_FONT, GetFontName(InpDashboardFont));
+   ObjectSetInteger(0, l2_name, OBJPROP_FONTSIZE, MathMax(6, InpLevelLabelFontSize));
+   ObjectSetString(0, l2_name, OBJPROP_TEXT, CenterAlignLabel(line2, rw));
+   ObjectSetInteger(0, l2_name, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, l2_name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, l2_name, OBJPROP_HIDDEN, false);
+   ObjectSetInteger(0, l2_name, OBJPROP_BACK, false);
+}
+
+void UpdatePnLOnly() {
+   if(!state.exists || !InpEnableDashboard) return;
+   
+   // Quick P&L update only - lightweight for OnTick
+   // In single-line mode, UpdateDashboard handles all text formatting, so we only update color here
+   if(InpDashboardSingleLine) {
+      ObjectSetInteger(0, "TM_PnL", OBJPROP_COLOR, (state.currentPnL >= 0) ? colorProfit : colorLoss);
+      return;
+   }
+   
+   // Multi-line mode: update P&L text and color
+   double total_vol = MathAbs(state.netVolume);
+   double pvl = GetPointValuePerLot();
+   double risk = 0, reward = 0;
+   
+   if(state.avgSL > 0 && total_vol > 0) {
+      double diff = GetPriceDiff(state.isBuy, state.avgEntry, state.avgSL);
+      if(diff > 0) risk = (diff / sym.point) * pvl * total_vol;
+   }
+   if(state.avgTP > 0 && total_vol > 0) {
+      double diff = GetPriceDiff(state.isBuy, state.avgTP, state.avgEntry);
+      if(diff > 0) reward = (diff / sym.point) * pvl * total_vol;
+   }
+   
+   string currentRR = risk > 0 ? (MathAbs(state.currentPnL) / risk <= 99 ? DoubleToString(MathAbs(state.currentPnL) / risk, 1) : "∞") : "∞";
+   string targetRR = (risk > 0 && reward > 0) ? (reward / risk <= 99 ? DoubleToString(reward / risk, 1) : "∞") : "∞";
+   string pnl_text = "P&L " + ((state.currentPnL >= 0) ? "+" : "-") + currencySymbol + DoubleToString(MathAbs(state.currentPnL), 2) + " RR(" + currentRR + "/" + targetRR + ")";
+   
+   double account_equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double margin_percent = 0;
+   if(total_vol > 0 && state.avgEntry > 0) {
+      double calculated_margin = 0;
+      if(OrderCalcMargin(state.isBuy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, _Symbol, total_vol, state.avgEntry, calculated_margin)) {
+         margin_percent = (account_equity > 0 && calculated_margin > 0) ? (calculated_margin / account_equity) * 100.0 : 0;
+      }
+   }
+   
+   string dir = state.isBuy ? "BUY  " : "SELL ";
+   string pos_text = dir + DoubleToString(total_vol, 2) + " @" + DoubleToString(state.avgEntry, sym.displayDecimals) + " (" + DoubleToString(margin_percent, 2) + "%)";
+   
+   ObjectSetString(0, "TM_PnL", OBJPROP_TEXT, pnl_text);
+   ObjectSetInteger(0, "TM_PnL", OBJPROP_COLOR, (state.currentPnL >= 0) ? colorProfit : colorLoss);
+   ObjectSetString(0, "TM_Pos", OBJPROP_TEXT, pos_text);
+}
+
+bool DrawPositionSingleTPGroups() {
+   ulong pos_tickets[30];
+   long pos_times[30];
+   bool pos_is_buy[30];
+   double pos_entries[30], pos_sls[30], pos_tps[30], pos_vols[30];
+   int pos_count = 0;
+   ArrayInitialize(pos_tickets, 0);
+   ArrayInitialize(pos_times, 0);
+
+   for(int i = 0; i < PositionsTotal() && pos_count < 30; i++) {
+      ulong ticket = PositionGetTicket(i);
+      if(!IsValidPosition(ticket)) continue;
+      bool is_buy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+      double vol = PositionGetDouble(POSITION_VOLUME);
+      double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+      if(vol <= 0 || entry <= 0) continue;
+
+      long t = (long)PositionGetInteger(POSITION_TIME_MSC);
+      if(t <= 0) t = (long)PositionGetInteger(POSITION_TIME) * 1000;
+
+      pos_tickets[pos_count] = ticket;
+      pos_times[pos_count] = t;
+      pos_is_buy[pos_count] = is_buy;
+      pos_entries[pos_count] = entry;
+      pos_sls[pos_count] = PositionGetDouble(POSITION_SL);
+      pos_tps[pos_count] = PositionGetDouble(POSITION_TP);
+      pos_vols[pos_count] = vol;
+      pos_count++;
+   }
+
+   if(pos_count <= 0) {
+      for(int g = 0; g < 10; g++) {
+         string prefix = "TM_Line_EG" + IntegerToString(g) + "_";
+         DeleteLineObjects(prefix + "SL");
+         DeleteLineObjects(prefix + "Entry");
+         DeleteLineObjects(prefix + "TP");
+         for(int i = 0; i < 10; i++) DeleteLineObjects(prefix + "P" + IntegerToString(i));
+      }
+      return false;
+   }
+
+   for(int i = 0; i < pos_count - 1; i++) {
+      int best = i;
+      for(int j = i + 1; j < pos_count; j++) {
+         if(pos_times[j] < pos_times[best]) best = j;
+      }
+      if(best != i) {
+         ulong t0 = pos_tickets[i]; pos_tickets[i] = pos_tickets[best]; pos_tickets[best] = t0;
+         long tm = pos_times[i]; pos_times[i] = pos_times[best]; pos_times[best] = tm;
+         bool b0 = pos_is_buy[i]; pos_is_buy[i] = pos_is_buy[best]; pos_is_buy[best] = b0;
+         double d0 = pos_entries[i]; pos_entries[i] = pos_entries[best]; pos_entries[best] = d0;
+         d0 = pos_sls[i]; pos_sls[i] = pos_sls[best]; pos_sls[best] = d0;
+         d0 = pos_tps[i]; pos_tps[i] = pos_tps[best]; pos_tps[best] = d0;
+         d0 = pos_vols[i]; pos_vols[i] = pos_vols[best]; pos_vols[best] = d0;
+      }
+   }
+
+   int group_count = 0;
+   int group_pos_count[10];
+   int group_pos_idx[10][30];
+   bool group_is_buy[10];
+   bool group_has_sl[10];
+   double group_sl[10];
+   for(int g = 0; g < 10; g++) {
+      group_pos_count[g] = 0;
+      group_is_buy[g] = true;
+      group_has_sl[g] = false;
+      group_sl[g] = 0;
+      for(int k = 0; k < 30; k++) group_pos_idx[g][k] = -1;
+   }
+
+   double sl_tol = sym.point * 2.0;
+   for(int p = 0; p < pos_count; p++) {
+      bool is_buy = pos_is_buy[p];
+      double sl = pos_sls[p];
+      bool allow_sl_group = (InpSyncSL && sl > 0);
+
+      int match_g = -1;
+      if(allow_sl_group) {
+         for(int g = 0; g < group_count; g++) {
+            if(group_is_buy[g] != is_buy) continue;
+            if(!group_has_sl[g]) continue;
+            if(MathAbs(group_sl[g] - sl) <= sl_tol) {
+               match_g = g;
+               break;
+            }
+         }
+      }
+
+      if(match_g < 0) {
+         if(group_count >= 10) continue;
+         match_g = group_count;
+         group_count++;
+         group_is_buy[match_g] = is_buy;
+         group_has_sl[match_g] = (sl > 0);
+         group_sl[match_g] = sl;
+      }
+
+      int idx = group_pos_count[match_g];
+      if(idx < 30) {
+         group_pos_idx[match_g][idx] = p;
+         group_pos_count[match_g]++;
+      }
+
+      if(sl > 0) {
+         if(!group_has_sl[match_g]) {
+            group_has_sl[match_g] = true;
+            group_sl[match_g] = sl;
+         } else {
+            group_sl[match_g] = (group_sl[match_g] + sl) * 0.5;
+         }
+      }
+   }
+
+   double pvl = GetPointValuePerLot();
+   double account_balance = AccountInfoDouble(ACCOUNT_BALANCE);
+
+   for(int g = 0; g < group_count && g < 10; g++) {
+      string prefix = "TM_Line_EG" + IntegerToString(g) + "_";
+      string group_tag = "G" + IntegerToString(g + 1) + " ";
+      bool is_buy = group_is_buy[g];
+
+      double group_total_vol = 0;
+      double group_entry_weighted = 0;
+      for(int gp = 0; gp < group_pos_count[g]; gp++) {
+         int p = group_pos_idx[g][gp];
+         if(p < 0 || p >= pos_count) continue;
+         group_total_vol += pos_vols[p];
+         group_entry_weighted += pos_entries[p] * pos_vols[p];
+      }
+      if(group_total_vol <= 0) continue;
+
+      double avg_entry = NormalizeDouble(group_entry_weighted / group_total_vol, sym.digits);
+      bool has_sl = group_has_sl[g] && group_sl[g] > 0;
+      double sl = has_sl ? NormalizeDouble(group_sl[g], sym.digits) : 0;
+      double base_risk_per_lot = 0;
+      if(has_sl) {
+         double risk_diff = GetPriceDiff(is_buy, avg_entry, sl);
+         if(risk_diff > 0) base_risk_per_lot = (risk_diff / sym.point) * pvl;
+      }
+      double total_risk = base_risk_per_lot * group_total_vol;
+
+      string sl_label = "";
+      if(has_sl) {
+         double risk_money = base_risk_per_lot * group_total_vol;
+         sl_label = FormatSLLabel(sl, MathAbs(risk_money), account_balance);
+      }
+
+      double margin_pct = CalculateMarginPercent(is_buy, group_total_vol, avg_entry);
+      string entry_label = group_tag + FormatEntryLabel(is_buy, group_total_vol, avg_entry, margin_pct);
+
+      double level_tp_prices[10], level_tp_vols[10], level_tp_rewards[10];
+      bool level_valid[10], level_has_metrics[10];
+      string level_line1[10], level_line2[10];
+      ArrayInitialize(level_tp_prices, 0.0);
+      ArrayInitialize(level_tp_vols, 0.0);
+      ArrayInitialize(level_tp_rewards, 0.0);
+      ArrayInitialize(level_valid, false);
+      ArrayInitialize(level_has_metrics, false);
+
+      int level_count = 0;
+      for(int gp = 0; gp < group_pos_count[g] && level_count < 10; gp++) {
+         int p = group_pos_idx[g][gp];
+         if(p < 0 || p >= pos_count) continue;
+         double tp = pos_tps[p];
+         if(tp <= 0) continue;
+         level_tp_prices[level_count] = tp;
+         level_tp_vols[level_count] = pos_vols[p];
+         level_count++;
+      }
+
+      for(int i = 0; i < level_count - 1; i++) {
+         int best = i;
+         for(int j = i + 1; j < level_count; j++) {
+            if(is_buy) {
+               if(level_tp_prices[j] < level_tp_prices[best]) best = j;
+            } else {
+               if(level_tp_prices[j] > level_tp_prices[best]) best = j;
+            }
+         }
+         if(best != i) {
+            double d0 = level_tp_prices[i]; level_tp_prices[i] = level_tp_prices[best]; level_tp_prices[best] = d0;
+            d0 = level_tp_vols[i]; level_tp_vols[i] = level_tp_vols[best]; level_tp_vols[best] = d0;
+         }
+      }
+
+      double cumulative_reward = 0;
+      for(int i = 0; i < level_count; i++) {
+         double tp = level_tp_prices[i];
+         double vol = level_tp_vols[i];
+         if(tp <= 0 || vol <= 0) continue;
+
+         double reward_points = GetPriceDiff(is_buy, tp, avg_entry) / sym.point;
+         if(reward_points < 0) reward_points = 0;
+         double reward = reward_points * pvl * vol;
+         double level_risk = base_risk_per_lot * vol;
+         cumulative_reward += reward;
+
+         level_valid[i] = true;
+         level_tp_rewards[i] = reward;
+         level_line1[i] = FormatTPLine1(i + 1, vol, tp, reward);
+
+         double local_rr = (level_risk > 0) ? (reward / level_risk) : 99.0;
+         if(local_rr > 99.0) local_rr = 99.0;
+         double effective_rr = (total_risk > 0) ? (cumulative_reward / total_risk) : 99.0;
+         if(effective_rr > 99.0) effective_rr = 99.0;
+         double return_pct = (account_balance > 0) ? ((reward / account_balance) * 100.0) : 0;
+         level_line2[i] = FormatTPLine2(local_rr, effective_rr, return_pct, cumulative_reward);
+         level_has_metrics[i] = true;
+      }
+
+      int reference_width = 0;
+      if(has_sl) ConsiderReferenceWidth(sl_label, reference_width);
+      ConsiderReferenceWidth(entry_label, reference_width);
+      for(int i = 0; i < level_count; i++) {
+         if(!level_valid[i]) continue;
+         if(level_has_metrics[i]) ConsiderReferenceWidthPair(level_line1[i], level_line2[i], reference_width);
+         else ConsiderReferenceWidth(level_line1[i], reference_width);
+      }
+
+      if(has_sl) DrawSingleLineLabel(prefix + "SL", sl, colorSL, sl_label, reference_width, is_buy);
+      else DeleteLineObjects(prefix + "SL");
+
+      DrawSingleLineLabel(prefix + "Entry", avg_entry, clrYellow, entry_label, reference_width, is_buy);
+
+      for(int i = 0; i < level_count; i++) {
+         string name = prefix + "P" + IntegerToString(i);
+         if(!level_valid[i]) {
+            DeleteLineObjects(name);
+            continue;
+         }
+         if(level_has_metrics[i]) DrawTwoLineLabel(name, level_tp_prices[i], clrLimeGreen, level_line1[i], level_line2[i], reference_width);
+         else DrawSingleLineLabel(name, level_tp_prices[i], clrLimeGreen, level_line1[i], reference_width, is_buy);
+      }
+      for(int i = level_count; i < 10; i++) DeleteLineObjects(prefix + "P" + IntegerToString(i));
+
+      // Manual grouped TPs are rendered as numbered levels under P-lines.
+      DeleteLineObjects(prefix + "TP");
+   }
+
+   for(int g = group_count; g < 10; g++) {
+      string prefix = "TM_Line_EG" + IntegerToString(g) + "_";
+      DeleteLineObjects(prefix + "SL");
+      DeleteLineObjects(prefix + "Entry");
+      DeleteLineObjects(prefix + "TP");
+      for(int i = 0; i < 10; i++) DeleteLineObjects(prefix + "P" + IntegerToString(i));
+   }
+
+   return (group_count > 0);
+}
+
+bool DrawPendingOrderSingleTPGroups() {
+   ulong ord_tickets[10];
+   long ord_times[10];
+   int ord_count = 0;
+   ArrayInitialize(ord_tickets, 0);
+   ArrayInitialize(ord_times, 0);
+
+   for(int i = 0; i < OrdersTotal() && ord_count < 10; i++) {
+      ulong ticket = OrderGetTicket(i);
+      if(ticket == 0 || !OrderSelect(ticket)) continue;
+      if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
+
+      long magic = OrderGetInteger(ORDER_MAGIC);
+      if(magic == PARTIAL_MAGIC) continue;
+
+      ENUM_ORDER_TYPE ot = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+      bool is_pending = (ot == ORDER_TYPE_BUY_LIMIT || ot == ORDER_TYPE_SELL_LIMIT ||
+                         ot == ORDER_TYPE_BUY_STOP  || ot == ORDER_TYPE_SELL_STOP  ||
+                         ot == ORDER_TYPE_BUY_STOP_LIMIT || ot == ORDER_TYPE_SELL_STOP_LIMIT);
+      if(!is_pending) continue;
+
+      long t = (long)OrderGetInteger(ORDER_TIME_SETUP_MSC);
+      if(t <= 0) t = (long)OrderGetInteger(ORDER_TIME_SETUP) * 1000;
+
+      ord_tickets[ord_count] = ticket;
+      ord_times[ord_count] = t;
+      ord_count++;
+   }
+
+   for(int i = 0; i < ord_count - 1; i++) {
+      int best = i;
+      for(int j = i + 1; j < ord_count; j++) {
+         if(ord_times[j] < ord_times[best]) best = j;
+      }
+      if(best != i) {
+         ulong t0 = ord_tickets[i];
+         ord_tickets[i] = ord_tickets[best];
+         ord_tickets[best] = t0;
+         long tm = ord_times[i];
+         ord_times[i] = ord_times[best];
+         ord_times[best] = tm;
+      }
+   }
+
+   double pvl = GetPointValuePerLot();
+   double account_balance = AccountInfoDouble(ACCOUNT_BALANCE);
+
+   for(int g = 0; g < ord_count; g++) {
+      ulong ticket = ord_tickets[g];
+      if(ticket == 0 || !OrderSelect(ticket)) continue;
+
+      ENUM_ORDER_TYPE ot = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+      bool is_buy = IsBuyOrderType(ot);
+      double vol = OrderGetDouble(ORDER_VOLUME_CURRENT);
+      double entry = OrderGetDouble(ORDER_PRICE_OPEN);
+      double sl = OrderGetDouble(ORDER_SL);
+      double tp = OrderGetDouble(ORDER_TP);
+      if(vol <= 0 || entry <= 0) continue;
+
+      string prefix = "TM_Line_POG" + IntegerToString(g) + "_";
+      string group_tag = "PG" + IntegerToString(g + 1) + " ";
+
+      bool has_sl = (sl > 0);
+      double base_risk_per_lot = 0;
+      if(has_sl) {
+         double risk_diff = GetPriceDiff(is_buy, entry, sl);
+         if(risk_diff > 0) base_risk_per_lot = (risk_diff / sym.point) * pvl;
+      }
+      double risk_money = base_risk_per_lot * vol;
+
+      string sl_label = "";
+      if(has_sl) sl_label = FormatSLLabel(sl, MathAbs(risk_money), account_balance);
+
+      double margin_pct = CalculateMarginPercent(is_buy, vol, entry);
+      string entry_label = group_tag + FormatEntryLabel(is_buy, vol, entry, margin_pct);
+
+      bool has_tp = (tp > 0);
+      string tp_line1 = "";
+      string tp_line2 = "";
+      bool tp_has_metrics = false;
+      if(has_tp) {
+         double reward_points = GetPriceDiff(is_buy, tp, entry) / sym.point;
+         if(reward_points < 0) reward_points = 0;
+         double reward = reward_points * pvl * vol;
+
+         tp_line1 = FormatTPLine1(1, vol, tp, reward);
+
+         double local_rr = (risk_money > 0) ? (reward / risk_money) : 99.0;
+         if(local_rr > 99.0) local_rr = 99.0;
+         double return_pct = (account_balance > 0) ? ((reward / account_balance) * 100.0) : 0;
+         tp_line2 = FormatTPLine2(local_rr, local_rr, return_pct, reward);
+         tp_has_metrics = true;
+      }
+
+      int reference_width = 0;
+      if(has_sl) ConsiderReferenceWidth(sl_label, reference_width);
+      ConsiderReferenceWidth(entry_label, reference_width);
+      if(has_tp) ConsiderReferenceWidthPair(tp_line1, tp_line2, reference_width);
+
+      if(has_sl) DrawSingleLineLabel(prefix + "SL", sl, colorSL, sl_label, reference_width, is_buy);
+      else DeleteLineObjects(prefix + "SL");
+
+      DrawSingleLineLabel(prefix + "Entry", entry, clrYellow, entry_label, reference_width, is_buy);
+
+      if(has_tp) {
+         if(tp_has_metrics) DrawTwoLineLabel(prefix + "TP", tp, clrLimeGreen, tp_line1, tp_line2, reference_width);
+         else DrawSingleLineLabel(prefix + "TP", tp, clrLimeGreen, tp_line1, reference_width, is_buy);
+      } else {
+         DeleteLineObjects(prefix + "TP");
+      }
+
+      for(int i = 0; i < 10; i++) DeleteLineObjects(prefix + "P" + IntegerToString(i));
+   }
+
+   for(int g = ord_count; g < 10; g++) {
+      string prefix = "TM_Line_POG" + IntegerToString(g) + "_";
+      DeleteLineObjects(prefix + "SL");
+      DeleteLineObjects(prefix + "Entry");
+      DeleteLineObjects(prefix + "TP");
+      for(int i = 0; i < 10; i++) DeleteLineObjects(prefix + "P" + IntegerToString(i));
+   }
+
+   return (ord_count > 0);
+}
+
+void ClearBaseLevelLines() {
+   DeleteLineObjects("TM_Line_SL");
+   DeleteLineObjects("TM_Line_Entry");
+   DeleteLineObjects("TM_Line_TP");
+   for(int i = 0; i < 100; i++) DeleteLineObjects("TM_Line_P" + IntegerToString(i));
+}
+
+void ClearPendingGroupLines() {
+   for(int g = 0; g < 10; g++) {
+      string prefix = "TM_Line_G" + IntegerToString(g) + "_";
+      DeleteLineObjects(prefix + "SL");
+      DeleteLineObjects(prefix + "Entry");
+      DeleteLineObjects(prefix + "TP");
+      for(int i = 0; i < 10; i++) DeleteLineObjects(prefix + "P" + IntegerToString(i));
+   }
+}
+
+void ClearEntryGroupLines() {
+   for(int g = 0; g < 10; g++) {
+      string prefix = "TM_Line_EG" + IntegerToString(g) + "_";
+      DeleteLineObjects(prefix + "SL");
+      DeleteLineObjects(prefix + "Entry");
+      DeleteLineObjects(prefix + "TP");
+      for(int i = 0; i < 10; i++) DeleteLineObjects(prefix + "P" + IntegerToString(i));
+   }
+}
+
+void ClearPendingOrderGroupLines() {
+   for(int g = 0; g < 10; g++) {
+      string prefix = "TM_Line_POG" + IntegerToString(g) + "_";
+      DeleteLineObjects(prefix + "SL");
+      DeleteLineObjects(prefix + "Entry");
+      DeleteLineObjects(prefix + "TP");
+      for(int i = 0; i < 10; i++) DeleteLineObjects(prefix + "P" + IntegerToString(i));
+   }
+}
+
+void UpdateLines() {
+   if(!InpShowLevels) {
+      ClearBaseLevelLines();
+      ClearPendingGroupLines();
+      ClearEntryGroupLines();
+      ClearPendingOrderGroupLines();
+      return;
+   }
+
+   // When partials are disabled, render both active positions and regular pending orders
+   // as independent single-TP groups.
+   if(!InpEnablePartials) {
+      ClearBaseLevelLines();
+      ClearPendingGroupLines();
+      DrawPositionSingleTPGroups();
+      DrawPendingOrderSingleTPGroups();
+      return;
+   }
+
+   ClearPendingGroupLines();
+   bool has_pending_groups = false;
+
+    // Smart fallback: if partial plan state is not ready/valid yet, always render
+    // detailed single-TP groups for live entries and regular pending orders.
+    // This prevents details from disappearing due to state timing.
+    bool fallback_single_groups = (!state.exists) || (!state.partialsValid) || (state.partialCount <= 0) || (state.avgTP <= 0);
+    if(fallback_single_groups) {
+       ClearBaseLevelLines();
+       DrawPositionSingleTPGroups();
+       DrawPendingOrderSingleTPGroups();
+       if(!state.exists && !has_pending_groups) {
+          ClearEntryGroupLines();
+       }
+       return;
+    }
+
+   if(!state.exists) {
+      ClearBaseLevelLines();
+      ClearEntryGroupLines();
+      ClearPendingOrderGroupLines();
+      if(has_pending_groups) return;
+      return;
+   }
+
+   ClearEntryGroupLines();
+   ClearPendingOrderGroupLines();
+   
+   double pvl = GetPointValuePerLot();
+   double vol = MathAbs(state.netVolume);
+   int vol_decimals = GetVolumeDisplayDecimals();
+   double account_balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double base_risk_per_lot = 0;
+   if(state.avgSL > 0) {
+      double risk_diff = GetPriceDiff(state.isBuy, state.avgEntry, state.avgSL);
+      if(risk_diff > 0) base_risk_per_lot = (risk_diff / sym.point) * pvl;
+   }
+   double total_risk = base_risk_per_lot * vol;
+   
+   string sl_label = "";
+   bool has_sl = false;
+   if(state.avgSL > 0) {
+      double diff = GetPriceDiff(state.isBuy, state.avgEntry, state.avgSL);
+      double sl_value = -MathAbs((diff / sym.point) * pvl * vol);
+      sl_label = FormatSLLabel(state.avgSL, MathAbs(sl_value), account_balance);
+      has_sl = true;
+   }
+
+   double active_margin_pct = CalculateMarginPercent(state.isBuy, vol, state.avgEntry);
+   string entry_label = FormatEntryLabel(state.isBuy, vol, state.avgEntry, active_margin_pct);
+
+   bool partial_valid[100];
+   string partial_line1[100];
+   string partial_line2[100];
+   bool partial_has_metrics[100];
+   int display_partial_count = 0;
+   double display_partial_prices[10];
+   double display_partial_volumes[10];
+   bool display_partial_executed[10];
+   bool using_live_partial_plan = false;
+   ArrayInitialize(partial_valid, false);
+   ArrayInitialize(partial_has_metrics, false);
+   ArrayInitialize(display_partial_prices, 0.0);
+   ArrayInitialize(display_partial_volumes, 0.0);
+   ArrayInitialize(display_partial_executed, false);
+
+   if(state.partialsValid && state.partialCount > 0) {
+      display_partial_count = MathMin(state.partialCount, 10);
+      using_live_partial_plan = true;
+      for(int i = 0; i < display_partial_count; i++) {
+         display_partial_prices[i] = state.partialPrices[i];
+         display_partial_volumes[i] = state.partialVolumes[i];
+         display_partial_executed[i] = state.partialExecuted[i];
+      }
+   } else if(state.avgTP > 0) {
+      int preview_count = MathMin((int)InpMaxPartials, 10);
+      if(preview_count > 0) {
+         double saved_partial_prices[10];
+         ArrayCopy(saved_partial_prices, state.partialPrices);
+         if(BuildPartialPriceLevels(state.avgTP, preview_count)) {
+            display_partial_count = preview_count;
+            double per_level_volume = vol / (double)(preview_count + 1);
+            if(per_level_volume <= 0) per_level_volume = sym.minLot;
+            for(int i = 0; i < display_partial_count; i++) {
+               display_partial_prices[i] = state.partialPrices[i];
+               display_partial_volumes[i] = per_level_volume;
+               display_partial_executed[i] = false;
+            }
+         }
+         ArrayCopy(state.partialPrices, saved_partial_prices);
+      }
+   }
+
+   double cumulative_partial_reward = 0;
+
+   if(display_partial_count > 0) {
+      for(int i = 0; i < display_partial_count; i++) {
+         double level_vol = display_partial_volumes[i];
+         if(level_vol <= 0) level_vol = sym.minLot;
+         double reward_points = GetPriceDiff(state.isBuy, display_partial_prices[i], state.avgEntry) / sym.point;
+         if(reward_points < 0) reward_points = 0;
+         double reward = reward_points * pvl * level_vol;
+         double level_risk = base_risk_per_lot * level_vol;
+         if(!display_partial_executed[i]) cumulative_partial_reward += reward;
+         partial_valid[i] = true;
+         
+         // Line 1: TP label with bar number
+         if(display_partial_executed[i]) {
+            partial_line1[i] = "[TAKEN] Bar " + IntegerToString(i + 1) + " @" + DoubleToString(display_partial_prices[i], sym.displayDecimals);
+         } else {
+            partial_line1[i] = FormatTPLine1(i + 1, level_vol, display_partial_prices[i], reward);
+         }
+         
+         // Line 2: RR and percentage metrics
+         if(!display_partial_executed[i]) {
+            double local_rr = level_risk > 0 ? (reward / level_risk) : 99.0;
+            if(local_rr > 99.0) local_rr = 99.0;
+            double effective_rr = total_risk > 0 ? (cumulative_partial_reward / total_risk) : 99.0;
+            if(effective_rr > 99.0) effective_rr = 99.0;
+            double return_pct = account_balance > 0 ? ((reward / account_balance) * 100.0) : 0;
+            
+            partial_line2[i] = FormatTPLine2(local_rr, effective_rr, return_pct, cumulative_partial_reward);
+            partial_has_metrics[i] = true;
+         } else {
+            partial_has_metrics[i] = false;
+         }
+      }
+   }
+   
+   string final_line1 = "";
+   string final_line2 = "";
+   bool has_final_tp = false;
+   bool final_has_metrics = false;
+   if(state.avgTP > 0) {
+      double final_vol = vol;
+      if(display_partial_count > 0) {
+         if(using_live_partial_plan && state.partialFinalVolume > 0) {
+            final_vol = state.partialFinalVolume;
+         } else {
+            double used_partial_vol = 0;
+            for(int i = 0; i < display_partial_count; i++) used_partial_vol += display_partial_volumes[i];
+            final_vol = vol - used_partial_vol;
+            if(final_vol <= 0) final_vol = sym.minLot;
+         }
+      }
+      if(final_vol <= 0) final_vol = sym.minLot;
+      double final_points = GetPriceDiff(state.isBuy, state.avgTP, state.avgEntry) / sym.point;
+      if(final_points < 0) final_points = 0;
+      double tp_reward = final_points * pvl * final_vol;
+      double final_risk = base_risk_per_lot * final_vol;
+      
+      // Line 1: Final TP with bar number
+      int final_tp_num = (display_partial_count > 0) ? (display_partial_count + 1) : 1;
+      final_line1 = FormatTPLine1(final_tp_num, final_vol, state.avgTP, tp_reward);
+      
+      // Line 2: RR and percentage metrics
+      double local_rr = final_risk > 0 ? (tp_reward / final_risk) : 99.0;
+      if(local_rr > 99.0) local_rr = 99.0;
+      double effective_rr = total_risk > 0 ? ((cumulative_partial_reward + tp_reward) / total_risk) : 99.0;
+      if(effective_rr > 99.0) effective_rr = 99.0;
+      double return_pct = account_balance > 0 ? ((tp_reward / account_balance) * 100.0) : 0;
+      
+      final_line2 = FormatTPLine2(local_rr, effective_rr, return_pct, cumulative_partial_reward + tp_reward);
+      final_has_metrics = true;
+      has_final_tp = true;
+   }
+
+   int reference_width = 0;
+   if(has_sl) ConsiderReferenceWidth(sl_label, reference_width);
+   ConsiderReferenceWidth(entry_label, reference_width);
+   for(int i = 0; i < display_partial_count; i++) {
+      if(!partial_valid[i]) continue;
+      if(partial_has_metrics[i]) ConsiderReferenceWidthPair(partial_line1[i], partial_line2[i], reference_width);
+      else ConsiderReferenceWidth(partial_line1[i], reference_width);
+   }
+   if(has_final_tp) {
+      if(final_has_metrics) ConsiderReferenceWidthPair(final_line1, final_line2, reference_width);
+      else ConsiderReferenceWidth(final_line1, reference_width);
+   }
+
+   if(has_sl) DrawSingleLineLabel("TM_Line_SL", state.avgSL, colorSL, sl_label, reference_width, state.isBuy);
+   else DeleteLineObjects("TM_Line_SL");
+
+   DrawSingleLineLabel("TM_Line_Entry", state.avgEntry, clrYellow, entry_label, reference_width, state.isBuy);
+
+
+   // Draw TP labels for all manual entries (not part of a partial plan)
+   int manual_tp_label_idx = 0;
+   for(int i = 0; i < PositionsTotal(); i++) {
+      ulong ticket = PositionGetTicket(i);
+      if(!IsValidPosition(ticket)) continue;
+      double tp = PositionGetDouble(POSITION_TP);
+      double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+      double vol = PositionGetDouble(POSITION_VOLUME);
+      if(tp > 0 && vol > 0) {
+         double profit = (GetPriceDiff(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY, tp, entry) / sym.point) * pvl * vol;
+         string label = "Entry#" + IntegerToString(manual_tp_label_idx + 1) + " TP@" + DoubleToString(tp, sym.displayDecimals) + " " + currencySymbol + DoubleToString(profit, 2);
+         DrawSingleLineLabel("TM_Line_ManualTP" + IntegerToString(manual_tp_label_idx), tp, clrDodgerBlue, label, reference_width, PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+         manual_tp_label_idx++;
+      }
+   }
+   for(int i = manual_tp_label_idx; i < 100; i++) DeleteLineObjects("TM_Line_ManualTP" + IntegerToString(i));
+
+   if(display_partial_count > 0) {
+      for(int i = 0; i < display_partial_count; i++) {
+         string name = "TM_Line_P" + IntegerToString(i);
+         if(!partial_valid[i]) {
+            DeleteLineObjects(name);
+            continue;
+         }
+         color label_color = display_partial_executed[i] ? clrLightGray : clrGray;
+         if(partial_has_metrics[i]) DrawTwoLineLabel(name, display_partial_prices[i], label_color, partial_line1[i], partial_line2[i], reference_width);
+         else DrawSingleLineLabel(name, display_partial_prices[i], label_color, partial_line1[i], reference_width, state.isBuy);
+      }
+   }
+   for(int i = display_partial_count; i < 100; i++) DeleteLineObjects("TM_Line_P" + IntegerToString(i));
+
+   if(has_final_tp) {
+      if(final_has_metrics) DrawTwoLineLabel("TM_Line_TP", state.avgTP, clrLimeGreen, final_line1, final_line2, reference_width);
+      else DrawSingleLineLabel("TM_Line_TP", state.avgTP, clrLimeGreen, final_line1, reference_width, state.isBuy);
+   }
+   else DeleteLineObjects("TM_Line_TP");
+}
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+
+
+
+
+
+
+
