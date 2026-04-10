@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import dashboardRoutes from './api/routes.js';
 import ingestionRoutes from './api/ingestion.js';
 import { ensureDatabaseSchema } from './db/bootstrap.js';
+import { isDatabaseReady } from './db/connection.js';
 
 config();
 
@@ -36,9 +37,19 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Health check
-app.get('/health', (_req, res) => {
+// Process liveness check
+app.get('/live', (_req, res) => {
   res.status(200).json({ status: 'ok', timestamp: Date.now() });
+});
+
+// Strict readiness check (DB-aware)
+app.get('/health', async (_req, res) => {
+  const ready = await isDatabaseReady();
+  if (!ready) {
+    return res.status(503).json({ status: 'error', ready: false, timestamp: Date.now() });
+  }
+
+  return res.status(200).json({ status: 'ok', ready: true, timestamp: Date.now() });
 });
 
 // Dashboard read-only routes

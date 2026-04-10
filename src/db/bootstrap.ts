@@ -1,6 +1,8 @@
 import pool from './connection.js';
 
 const MIGRATION_LOCK_KEY = 109948321;
+const MIGRATION_LOCK_WAIT_TIMEOUT_MS = 15000;
+const MIGRATION_LOCK_POLL_INTERVAL_MS = 200;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -141,8 +143,26 @@ END $$;
 
 async function bootstrapSchema() {
   const client = await pool.connect();
+  let lockHeld = false;
   try {
-    await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_KEY]);
+    const lockStartAt = Date.now();
+    while (!lockHeld) {
+      const lockResult = await client.query<{ locked: boolean }>(
+        'SELECT pg_try_advisory_lock($1) AS locked',
+        [MIGRATION_LOCK_KEY]
+      );
+      lockHeld = Boolean(lockResult.rows[0]?.locked);
+      if (lockHeld) {
+        break;
+      }
+
+      if (Date.now() - lockStartAt >= MIGRATION_LOCK_WAIT_TIMEOUT_MS) {
+        throw new Error(`Timed out acquiring migration lock after ${MIGRATION_LOCK_WAIT_TIMEOUT_MS}ms`);
+      }
+
+      await sleep(MIGRATION_LOCK_POLL_INTERVAL_MS);
+    }
+
     await client.query('BEGIN');
     try {
       await client.query(SCHEMA_SQL);
@@ -152,10 +172,12 @@ async function bootstrapSchema() {
       throw error;
     }
   } finally {
-    try {
-      await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK_KEY]);
-    } catch {
-      // Ignore unlock failures on broken connections.
+    if (lockHeld) {
+      try {
+        await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK_KEY]);
+      } catch {
+        // Ignore unlock failures on broken connections.
+      }
     }
     client.release();
   }

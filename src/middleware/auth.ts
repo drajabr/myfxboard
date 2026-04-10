@@ -1,6 +1,8 @@
 import { Response, NextFunction } from 'express';
 import crypto from 'crypto';
 
+const ALLOWED_TIMESTAMP_DRIFT_MS = 30000;
+
 declare global {
   namespace Express {
     interface Request {
@@ -46,8 +48,8 @@ export const validateIngestionAuth = async (req: any, _res: Response, next: Next
     const nowMs = Date.now();
     const timeDiff = nowMs - timestampMs;
 
-    // 5-second tolerance window
-    if (timeDiff > 5000 || timeDiff < -5000) {
+    // Accept moderate connector clock drift to avoid false 401s.
+    if (timeDiff > ALLOWED_TIMESTAMP_DRIFT_MS || timeDiff < -ALLOWED_TIMESTAMP_DRIFT_MS) {
       return _res.status(401).json({ error: 'Request timestamp out of window' });
     }
 

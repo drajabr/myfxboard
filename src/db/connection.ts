@@ -5,12 +5,13 @@ config();
 
 const { Pool } = pg;
 const LOG_SQL_QUERIES = process.env.LOG_SQL_QUERIES === 'true';
+const TRANSACTION_STATEMENT_TIMEOUT_MS = 15000;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://dashboard:dashboard_pass@localhost:5432/myfxboard',
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  max: 60,
+  idleTimeoutMillis: 15000,
+  connectionTimeoutMillis: 10000,
 });
 
 pool.on('error', (err) => {
@@ -39,12 +40,26 @@ export const transaction = async <T>(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await client.query(`SET LOCAL statement_timeout = '${TRANSACTION_STATEMENT_TIMEOUT_MS}ms'`);
     const result = await callback(client);
     await client.query('COMMIT');
     return result;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
+  } finally {
+    client.release();
+  }
+};
+
+export const isDatabaseReady = async (): Promise<boolean> => {
+  const client = await pool.connect();
+  try {
+    await client.query('SELECT 1');
+    return true;
+  } catch (error) {
+    console.error('Database readiness check failed', error);
+    return false;
   } finally {
     client.release();
   }

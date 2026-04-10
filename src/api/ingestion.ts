@@ -6,7 +6,8 @@ import { transaction } from '../db/connection.js';
 import { Trade } from '../types/index.js';
 
 const router = Router();
-const DEFAULT_MIN_INGEST_INTERVAL_MS = 500;
+const MIN_INGEST_INTERVAL_MS = 0;
+const HISTORY_CHUNK_SIZE = 200;
 const DEFAULT_BREAKEVEN_TOLERANCE_FLOOR = 1.0;
 const DEFAULT_BREAKEVEN_TOLERANCE_MAX = 5.0;
 
@@ -96,10 +97,7 @@ router.post(
 
       const account = await accountQueries.ensureByAccountNumber(accountId, sharedSecret);
       const nowMs = Date.now();
-      const minIngestIntervalMs = Math.max(
-        parseInt(process.env.SYNC_MIN_INGEST_INTERVAL_MS || `${DEFAULT_MIN_INGEST_INTERVAL_MS}`, 10) || DEFAULT_MIN_INGEST_INTERVAL_MS,
-        0
-      );
+      const minIngestIntervalMs = MIN_INGEST_INTERVAL_MS;
       const sinceLastIngestMs = account.last_ingest_received_at ? (nowMs - Number(account.last_ingest_received_at)) : Number.MAX_SAFE_INTEGER;
       const serverHistoryHash = String(account.last_history_hash || '');
       const clientHistoryHash = String(req.body.history_hash || '').trim();
@@ -221,7 +219,7 @@ router.post(
         account_id: accountId,
         history_status: historyStatus,
         from_time_ms: historyStatus === 'backfill_required' ? accountLastClosedMs : undefined,
-        chunk_size: parseInt(process.env.SYNC_HISTORY_CHUNK_SIZE || '100'),
+        chunk_size: HISTORY_CHUNK_SIZE,
         min_ingest_interval_ms: minIngestIntervalMs,
         server_history_hash: effectiveServerHistoryHash,
         history_sync_required: clientHistoryHash.length > 0 && effectiveServerHistoryHash !== clientHistoryHash,

@@ -17,19 +17,16 @@ services:
       - ./db/migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dashboard -d myfxboard"]
-      interval: 3s
+      interval: 1s
       timeout: 3s
       retries: 30
-      start_period: 0s
+      start_period: 3s
     networks:
       - myfxboard-net
 
   # Node.js server (API + frontend)
   server:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: myfxboard-server:local
+    image: ghcr.io/drajabr/myfxboard:latest
     container_name: myfxboard-server
     depends_on:
       postgres:
@@ -38,24 +35,18 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgresql://dashboard:dashboard_pass@postgres:5432/myfxboard
       PORT: 3000
-      LOG_LEVEL: info
       CONNECTOR_SHARED_SECRET: change-this-secret
-      SYNC_REQUEST_TIMEOUT_MS: 5000
-      SYNC_HISTORY_CHUNK_SIZE: 100
-      SYNC_HISTORY_RATE_LIMIT_MS: 1500
-      SYNC_MIN_INGEST_INTERVAL_MS: 500
-      BACKFILL_WINDOW_DAYS: 90
     ports:
       - "3000:3000"
     volumes:
       # Optional: mount logs directory
       - ./logs:/app/logs
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 3s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1));"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
     networks:
       - myfxboard-net
     restart: unless-stopped

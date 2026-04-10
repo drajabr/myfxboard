@@ -20,6 +20,10 @@ From the project root:
 
 	CONNECTOR_SHARED_SECRET=your_secret_here
 
+	Optional if needed:
+	DATABASE_URL=postgresql://dashboard:dashboard_pass@localhost:5432/myfxboard
+	PORT=3000
+
 3. Start everything
 
 	docker compose up --build -d
@@ -95,3 +99,15 @@ The script finds terminals, asks for confirmation, and deploys the EA to all dis
 2. Run EA deploy command after any EA code change
 3. Open MT5 and keep EAs attached
 4. Open dashboard at http://localhost:3000
+
+## Health endpoints
+
+1. Liveness (process up):
+
+	http://localhost:3000/live
+
+2. Readiness (process + database ready):
+
+	http://localhost:3000/health
+
+The Docker health check uses readiness, so a healthy container now means the API can reach PostgreSQL.
