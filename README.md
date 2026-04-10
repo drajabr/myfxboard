@@ -1,130 +1,97 @@
 # myfxboard
 
-Minimal guide for running the MT5 dashboard.
+Simple setup and usage guide for running the dashboard and syncing from MT5.
 
-## What this repo does
+## What you need
 
-- Receives MT5 position/account sync data every 3 seconds
-- Enforces configurable minimum ingest interval (`SYNC_MIN_INGEST_INTERVAL_MS`, default `3000`)
-- Stores data in PostgreSQL
-- Serves dashboard UI and API from the Node server
-- Uses HMAC-signed ingestion requests
+1. Docker Desktop (recommended) or Node.js 20+
+2. MetaTrader 5 on Windows
+3. This repo cloned locally
 
-## Protocol rules (strict)
+## Quick setup (Docker, recommended)
 
-- Ingestion auth is strict HMAC validation only; compatibility signatures are not accepted.
-- `X-Signature-Timestamp` must be unix epoch milliseconds and within the auth window.
-- Position payloads must provide explicit `direction` (`BUY` or `SELL`).
-- Ingestion writes run in a single DB transaction to avoid partial state.
+From the project root:
 
-## Supported MT5 path
+1. Copy environment file
 
-Use the included full EA:
+	Copy-Item .env.example .env
 
-- `connectors/smaGUY Trade Manger-myfxboard.mq5`
+2. Set your shared secret in .env
 
-## Quick start (Docker)
+	CONNECTOR_SHARED_SECRET=your_secret_here
 
-1. Copy env file:
+3. Start everything
 
-```bash
-cp .env.example .env
-```
+	docker compose up --build -d
 
-2. Start stack:
+4. Open dashboard
 
-```bash
-docker compose up --build -d
-```
+	http://localhost:3000
 
-3. Open dashboard:
+## Run commands
 
-```text
-http://localhost:3000
-```
+From the project root:
 
-The server now bootstraps the database schema automatically on startup, including when you reuse an existing Postgres volume.
+1. Start (Docker)
 
-The connector sync protocol now separates live updates from history sync:
+	docker compose up --build -d
 
-- Live position/account payloads can continue every sync interval.
-- Closed-trade history is sent only when its hash changes or the server requests a resend.
-- Server responds with `server_history_hash` and `history_sync_required` so clients can stay aligned.
+2. Stop (Docker)
 
-## EA setup
+	docker compose down
 
-Use the included full EA:
+3. View server logs
 
-- `connectors/smaGUY Trade Manger-myfxboard.mq5`
+	docker compose logs -f server
 
-### 1. Configure shared connector secret
+4. Local dev (without Docker)
 
-1. Set `CONNECTOR_SHARED_SECRET` in `.env`.
-2. Restart server if already running.
-3. No dashboard account creation is needed.
-4. Account records are auto-created from connector account number.
+	npm install
+	npm run dev
 
-### 2. Configure EA inputs
+5. Build
 
-Set these values in MT5 inputs:
+	npm run build
 
-```mql5
-InpEnableDashboardSync = true
-InpDashboardUrl = "http://localhost:3000"
-InpDashboardPSK = "<CONNECTOR_SHARED_SECRET from .env>"
-InpDashboardSyncIntervalSec = 3
-InpDashboardDebugLog = true
-```
+6. Test and lint
 
-### 2.1 MT5 WebRequest whitelist (required)
+	npm run test
+	npm run lint
 
-In MetaTrader 5, open `Tools -> Options -> Expert Advisors` and enable `Allow WebRequest for listed URL`.
-Add your dashboard URL (same host as `InpDashboardUrl`), for example:
+## MT5 EA file
 
-```text
-http://localhost:3000
-```
+Use this EA source:
 
-If this URL is not whitelisted, connector requests will be blocked by MT5.
+- connectors/smaGUY Trade Manger-myfxboard.mq5
 
-### 3. Verify
+## Deploy EA to all MT5 terminals (Windows)
 
-1. Attach EA to chart.
-2. Check MT5 Journal for successful sync messages.
-3. Open dashboard and confirm positions appear.
+From the project root, run:
 
-### Troubleshooting
+	powershell -ExecutionPolicy Bypass -File .\connectors\deploy-mt5-ea.ps1
 
-- Confirm `InpDashboardPSK` exactly matches `CONNECTOR_SHARED_SECRET`.
-- Confirm connector can POST to `/api/ingestion`.
-- Check backend logs: `docker compose logs server`.
-- If you previously started the stack with a schema-less Postgres volumed -d` again so the server can bootstrap the schema on that existing database.
+The script finds terminals, asks for confirmation, and deploys the EA to all discovered instances (with admin relaunch when needed).
 
-## Core commands
+## MT5 terminal setup (one time)
 
-```bash
-# local dev
-npm install
-npm run dev
+1. In MT5, open Tools -> Options -> Expert Advisors
+2. Enable Allow WebRequest for listed URL
+3. Add your dashboard URL, for example:
 
-# tests and lint
-npm run test
-npm run lint
-```
+	http://localhost:3000
 
-## Main API routes
+4. Attach the EA to your chart
+5. Set EA inputs:
 
-- `GET /api/accounts`
-- `GET /api/account/{accountId}/dashboard`
-- `POST /api/ingestion`
-- `POST /api/ingestion/backfill`
+	InpEnableDashboardSync = true
+	InpDashboardUrl = "http://localhost:3000"
+	InpDashboardPSK = "<same value as CONNECTOR_SHARED_SECRET>"
+	InpDashboardSyncIntervalSec = 3
+	InpDashboardDebugLog = true
 
-## Project layout
+## Daily use
 
-```text
-src/        backend API
-db/         sql migrations
-frontend/   dashboard html/css/js
-connectors/ mt5 full EA files
-docker/     nginx config
-```
+1. Start the stack
+2. Run EA deploy command after any EA code change
+3. Open MT5 and keep EAs attached
+4. Open dashboard at http://localhost:3000
