@@ -94,7 +94,9 @@ body {
     align-items: center;
     gap: 0.75rem;
     flex-wrap: wrap;
-    justify-content: flex-start;
+    justify-content: flex-end;
+    margin-left: auto;
+    min-width: 0;
 }
 
 .header-status {
@@ -106,7 +108,16 @@ body {
 }
 
 .account-selector {
-    min-width: 360px;
+    min-width: 280px;
+    flex: 1 1 320px;
+}
+
+.ui-controls-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    margin-left: auto;
+    flex: 0 0 auto;
 }
 
 .status-pill {
@@ -701,7 +712,7 @@ body {
 
     .header-left,
     .header-right {
-        justify-content: space-between;
+        justify-content: flex-end;
     }
 
     .header-status {
@@ -710,7 +721,11 @@ body {
 
     .account-selector {
         min-width: 0;
-        width: 100%;
+        width: min(100%, 420px);
+    }
+
+    .ui-controls-wrap {
+        margin-left: auto;
     }
 
     .charts-row {
@@ -737,5 +752,22 @@ body {
 
     .year-grid {
         grid-template-columns: 1fr;
+    }
+
+    .header-right {
+        width: 100%;
+        row-gap: 0.5rem;
+    }
+
+    .account-selector {
+        flex: 1 1 100%;
+        width: 100%;
+        max-width: none;
+    }
+
+    .ui-controls-wrap {
+        flex: 0 0 100%;
+        justify-content: flex-end;
+        margin-left: 0;
     }
 }

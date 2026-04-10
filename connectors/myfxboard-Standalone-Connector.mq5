@@ -190,11 +190,9 @@ public:
             if(s_debug_log)
                Print("[DashboardConnector] Keepalive health requested history sync");
          } else {
-            s_error_count++;
-            s_last_sync_ok = false;
             if(s_debug_log)
-               Print("[DashboardConnector] Keepalive health failed, falling back to full sync");
-            include_history = true;
+               Print("[DashboardConnector] Keepalive health failed, sync decision unchanged");
+            return false;
          }
       }
 
