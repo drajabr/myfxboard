@@ -22,7 +22,7 @@ router.get('/:accountId/dashboard', async (req: Request, res: Response) => {
     const latestSnapshot = await snapshotQueries.findLatestByAccount(accountId);
 
     // Calculate aggregates
-    let totalEquity = account.equity || 0;
+    const totalEquity = latestSnapshot?.equity || latestSnapshot?.balance || 0;
     const floatingPnL = positions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
     const todaysPnL = latestSnapshot?.losses ? (latestSnapshot.wins || 0) - Math.abs(latestSnapshot.losses || 0) : 0;
 
