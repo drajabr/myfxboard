@@ -109,19 +109,7 @@ public:
       string history_hash = StringFormat("%u", HashPayload(closed_trades_json));
       bool include_history = (history_hash != s_last_ack_history_hash);
 
-      string payload = BuildPayload(
-         timestamp_ms,
-         current_account,
-         positions_json,
-         include_history ? closed_trades_json : "[]",
-         account_json,
-         latest_closed_time_ms,
-         latest_closed_deal_id,
-         include_history,
-         history_hash
-      );
-
-      const long unchanged_keepalive_ms = 60000;
+      const long unchanged_keepalive_ms = 30000;
       if(!include_history
          && live_payload_hash == s_last_live_payload_hash
          && s_last_live_payload_sent_ms > 0
@@ -133,6 +121,18 @@ public:
          }
          return false;
       }
+
+      string payload = BuildPayload(
+         timestamp_ms,
+         current_account,
+         positions_json,
+         include_history ? closed_trades_json : "[]",
+         account_json,
+         latest_closed_time_ms,
+         latest_closed_deal_id,
+         include_history,
+         history_hash
+      );
 
       string signature = CreateSignature(current_account, timestamp_ms, s_psk);
       s_last_sync_ms = now_ms;
