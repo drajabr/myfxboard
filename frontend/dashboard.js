@@ -16,7 +16,11 @@ const state = {
     inflight: false,
     pendingRefresh: false,
     lastData: null,
+    statusLoadingSince: 0,
+    statusSettleTimer: null,
 };
+
+const MIN_SYNC_HEARTBEAT_MS = 700;
 
 const charts = {
     pnlCurve: null,
@@ -954,10 +958,21 @@ function setLoadState(loading, errorMessage = '') {
         return;
     }
 
-    systemStatus.classList.remove('status-error');
-    systemStatusDot.classList.remove('status-dot--idle', 'status-dot--loading', 'status-dot--ok', 'status-dot--error');
+    if (state.statusSettleTimer) {
+        clearTimeout(state.statusSettleTimer);
+        state.statusSettleTimer = null;
+    }
+
+    const applyHealthyState = () => {
+        systemStatus.classList.remove('status-error');
+        systemStatusDot.classList.remove('status-dot--idle', 'status-dot--loading', 'status-dot--ok', 'status-dot--error');
+        systemStatusDot.classList.add('status-dot--ok');
+        systemStatusText.textContent = 'Healthy';
+    };
 
     if (errorMessage) {
+        systemStatus.classList.remove('status-error');
+        systemStatusDot.classList.remove('status-dot--idle', 'status-dot--loading', 'status-dot--ok', 'status-dot--error');
         systemStatus.classList.add('status-error');
         systemStatusDot.classList.add('status-dot--error');
         systemStatusText.textContent = `Error: ${errorMessage}`;
@@ -965,13 +980,21 @@ function setLoadState(loading, errorMessage = '') {
     }
 
     if (loading) {
+        state.statusLoadingSince = Date.now();
+        systemStatus.classList.remove('status-error');
+        systemStatusDot.classList.remove('status-dot--idle', 'status-dot--loading', 'status-dot--ok', 'status-dot--error');
         systemStatusDot.classList.add('status-dot--loading');
-        systemStatusText.textContent = 'Syncing...';
+        systemStatusText.textContent = 'Healthy';
         return;
     }
 
-    systemStatusDot.classList.add('status-dot--ok');
-    systemStatusText.textContent = 'Healthy';
+    const elapsed = Date.now() - state.statusLoadingSince;
+    if (elapsed < MIN_SYNC_HEARTBEAT_MS) {
+        state.statusSettleTimer = setTimeout(applyHealthyState, MIN_SYNC_HEARTBEAT_MS - elapsed);
+        return;
+    }
+
+    applyHealthyState();
 }
 
 function renderDashboard(data) {

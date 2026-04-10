@@ -32,6 +32,7 @@ private:
    static string   s_last_ack_history_hash;
    static bool     s_startup_health_checked;
    static bool     s_last_sync_ok;
+   static long     s_history_start_time_ms;
 
    static uint HashPayload(const string payload) {
       uchar bytes[];
@@ -70,7 +71,7 @@ private:
    }
 
 public:
-   static void Init(string url, string psk, int interval_sec, int keepalive_sec = 0, bool debug = false) {
+   static void Init(string url, string psk, int interval_sec, int keepalive_sec = 0, bool debug = false, datetime history_start_date = 0) {
       s_url              = url;
       s_psk              = psk;
       s_sync_interval_ms = interval_sec * 1000;
@@ -86,6 +87,7 @@ public:
       s_last_ack_history_hash = "";
       s_startup_health_checked = false;
       s_last_sync_ok            = false;
+      s_history_start_time_ms = history_start_date > 0 ? ((long)history_start_date * 1000) : 0;
       if(s_debug_log)
          Print("[DashboardConnector] Initialized: url=", s_url, " interval=", interval_sec, "s");
    }
@@ -267,6 +269,7 @@ private:
       bool first_trade = true;
       latest_closed_time_ms = 0;
       latest_closed_deal_id = "";
+      long history_start_ms = s_history_start_time_ms;
       
       // HistorySelect expects datetime seconds, not unix milliseconds.
       if(HistorySelect(0, TimeCurrent())) {
@@ -347,6 +350,9 @@ private:
                      entries[pos_idx].active = false;
                   }
                }
+
+               if(history_start_ms > 0 && deal_time_ms < history_start_ms)
+                  continue;
 
                long duration_ms = deal_time_ms - entry_time;
                long duration_sec = duration_ms / 1000;
@@ -618,6 +624,7 @@ long   DashboardConnector::s_last_keepalive_probe_ms = 0;
 string DashboardConnector::s_last_ack_history_hash = "";
 bool   DashboardConnector::s_startup_health_checked = false;
 bool   DashboardConnector::s_last_sync_ok            = false;
+long   DashboardConnector::s_history_start_time_ms = 0;
 
 #define MFXB_DOT_OBJ "myfxboard_status_dot"
 int   g_dot_seen_success = -1;
@@ -798,6 +805,7 @@ input string InpDashboardUrl = "http://localhost:3000";  // Server URL
 input string InpDashboardPSK = "";                   // Shared connector secret
 input int    InpDashboardSyncIntervalSec = 3;        // Sync Interval (seconds)
 input int    InpDashboardKeepaliveSec = 0;           // Keepalive Interval (seconds, 0=disable)
+input datetime InpDashboardHistoryStartDate = 0;     // History Start Date (0=all history)
 input bool   InpDashboardDebugLog = false;           // Debug Logging
 
 // === GLOBALS ==="
@@ -3212,7 +3220,8 @@ int OnInit() {
          InpDashboardPSK,
          InpDashboardSyncIntervalSec,
          InpDashboardKeepaliveSec,
-         InpDashboardDebugLog
+         InpDashboardDebugLog,
+         InpDashboardHistoryStartDate
       );
    }
    

@@ -130,7 +130,7 @@ body {
     display: inline-block;
     background: var(--pnl-neutral);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--surface-alt) 70%, transparent);
-    transition: background-color 180ms ease, box-shadow 180ms ease;
+    transition: background-color 260ms ease, box-shadow 260ms ease, transform 260ms ease;
 }
 
 @keyframes statusHeartbeat {
@@ -139,13 +139,21 @@ body {
         filter: saturate(1);
         transform: scale(1);
     }
-    45% {
-        filter: saturate(1.35);
-        transform: scale(1.06);
+    22% {
+        filter: saturate(1.18);
+        transform: scale(1.12);
     }
-    70% {
-        filter: saturate(1.1);
-        transform: scale(1.02);
+    38% {
+        filter: saturate(1.08);
+        transform: scale(0.98);
+    }
+    54% {
+        filter: saturate(1.14);
+        transform: scale(1.08);
+    }
+    72% {
+        filter: saturate(1.04);
+        transform: scale(1.01);
     }
 }
 
@@ -154,14 +162,14 @@ body {
 }
 
 .status-dot--loading {
-    background: #d69f1a;
-    animation: statusHeartbeat 850ms ease-in-out infinite;
-    box-shadow: 0 0 0 2px color-mix(in srgb, #d69f1a 25%, var(--surface-alt));
+    background: #27a35f;
+    animation: statusHeartbeat 980ms ease-in-out infinite;
+    box-shadow: 0 0 0 2px color-mix(in srgb, #27a35f 32%, var(--surface-alt));
 }
 
 .status-dot--ok {
     background: #27a35f;
-    animation: statusHeartbeat 1100ms ease-in-out infinite;
+    animation: none;
     box-shadow: 0 0 0 2px color-mix(in srgb, #27a35f 25%, var(--surface-alt));
 }
 

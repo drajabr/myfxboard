@@ -15,6 +15,7 @@ input string InpDashboardUrl         = "http://localhost:3000"; // Server URL
 input string InpDashboardPSK         = "";                      // Shared Secret (PSK)
 input int    InpSyncIntervalSec      = 3;                       // Sync Interval (seconds)
 input int    InpKeepaliveSec         = 0;                       // Keepalive Interval (seconds, 0=disable)
+input datetime InpHistoryStartDate   = 0;                       // History Start Date (0=all history)
 input bool   InpDebugLog             = false;                   // Debug Logging
 
 //+------------------------------------------------------------------+
@@ -39,6 +40,7 @@ private:
    static bool     s_startup_health_checked;
    static bool     s_last_sync_ok;
    static long     s_last_keepalive_attempt_ms;
+   static long     s_history_start_time_ms;
 
    static uint HashPayload(const string payload) {
       uchar bytes[];
@@ -77,7 +79,7 @@ private:
    }
 
 public:
-   static void Init(string url, string psk, int interval_sec, int keepalive_sec = 0, bool debug = false) {
+   static void Init(string url, string psk, int interval_sec, int keepalive_sec = 0, bool debug = false, datetime history_start_date = 0) {
       s_url              = url;
       s_psk              = psk;
       s_sync_interval_ms = interval_sec * 1000;
@@ -95,6 +97,7 @@ public:
       s_startup_health_checked = false;
       s_last_sync_ok            = false;
       s_last_keepalive_attempt_ms = 0;
+      s_history_start_time_ms = history_start_date > 0 ? ((long)history_start_date * 1000) : 0;
       if(s_debug_log)
          Print("[DashboardConnector] Initialized: url=", s_url, " interval=", interval_sec, "s, keepalive=60s");
    }
@@ -255,110 +258,106 @@ private:
       bool first_trade = true;
       latest_closed_time_ms = 0;
       latest_closed_deal_id = "";
-      
+
+      long history_start_ms = s_history_start_time_ms;
+
       // HistorySelect expects datetime seconds, not unix milliseconds.
       if(HistorySelect(0, TimeCurrent())) {
-         static bool Sync() {
-            if(s_url == "" || s_psk == "") return false;
+         int deals_total = HistoryDealsTotal();
 
-            ulong now_ms = GetTickCount64();
+         struct PositionEntry {
+            long position_id;
+            string symbol;
+            double avg_entry_price;
+            double open_volume;
+            long first_entry_time_ms;
+            bool active;
+         };
+         PositionEntry entries[2000];
+         int entry_count = 0;
 
-            if(s_in_flight) {
-               if(s_debug_log && now_ms - s_last_log_ms > 60000) {
-                  Print("[DashboardConnector] Sync in flight, skipping");
-                  s_last_log_ms = now_ms;
-               }
-               return false;
-            }
+         for(int i = 0; i < deals_total; i++) {
+            ulong deal_ticket = HistoryDealGetTicket(i);
+            if(deal_ticket == 0) continue;
 
-            if(s_last_sync_ms > 0 && now_ms < s_last_sync_ms + s_sync_interval_ms)
-               return false;
+            int deal_type = (int)HistoryDealGetInteger(deal_ticket, DEAL_TYPE);
+            if(deal_type != DEAL_TYPE_BUY && deal_type != DEAL_TYPE_SELL)
+               continue;
 
-            // Backend auth expects unix epoch milliseconds, not terminal uptime milliseconds.
-            long timestamp_ms = (long)TimeGMT() * 1000;
-            string current_account = IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN));
+            int deal_entry = (int)HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
+            long position_id = (long)HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
+            string deal_symbol = HistoryDealGetString(deal_ticket, DEAL_SYMBOL);
+            if(deal_symbol == "")
+               continue;
 
-            long latest_closed_time_ms = 0;
-            string latest_closed_deal_id = "";
-            string positions_json = BuildPositionsJson();
-            string closed_trades_json = BuildClosedTradesJson(latest_closed_time_ms, latest_closed_deal_id);
-            string account_json = BuildAccountJson();
+            double deal_volume = HistoryDealGetDouble(deal_ticket, DEAL_VOLUME);
+            double deal_price = HistoryDealGetDouble(deal_ticket, DEAL_PRICE);
+            long deal_time_ms = HistoryDealGetInteger(deal_ticket, DEAL_TIME_MSC);
+            double deal_profit = HistoryDealGetDouble(deal_ticket, DEAL_PROFIT) + HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION) + HistoryDealGetDouble(deal_ticket, DEAL_SWAP);
 
-            uint live_payload_hash = HashPayload(positions_json + "|" + account_json + "|" + StringFormat("%lld", latest_closed_time_ms));
-            string history_hash = StringFormat("%u", HashPayload(closed_trades_json));
+            if(position_id <= 0)
+               continue;
 
-            if(!s_startup_health_checked) {
-               // One-shot probe: if unavailable/fails, continue with normal sync and avoid retry spam.
-               s_startup_health_checked = true;
-               bool history_sync_required = true;
-               string server_history_hash = "";
-               if(PostHealthCheck(current_account, timestamp_ms, history_hash, history_sync_required, server_history_hash)) {
-                  if(server_history_hash != "")
-                     s_last_ack_history_hash = server_history_hash;
-
-                  if(!history_sync_required) {
-                     s_last_live_payload_hash = live_payload_hash;
-                     s_last_live_payload_sent_ms = timestamp_ms;
-                     s_last_sync_ms = now_ms;
-                     s_last_sync_ok = true;
-                     s_success_count++;
-                     if(s_debug_log)
-                        Print("[DashboardConnector] Startup health check matched server state, skipping initial full sync");
-                     return false;
-                  }
+            int pos_idx = -1;
+            for(int idx = 0; idx < entry_count; idx++) {
+               if(entries[idx].active && entries[idx].position_id == position_id) {
+                  pos_idx = idx;
+                  break;
                }
             }
 
-            bool include_history = (history_hash != s_last_ack_history_hash);
-            long keepalive_reference_ms = s_last_live_payload_sent_ms;
-            if(s_last_keepalive_probe_ms > keepalive_reference_ms)
-               keepalive_reference_ms = s_last_keepalive_probe_ms;
-
-            // Only run keepalive every 60s, not every sync tick
-            if(!include_history && live_payload_hash == s_last_live_payload_hash && keepalive_reference_ms > 0) {
-               if(s_keepalive_ms <= 0 || (timestamp_ms - keepalive_reference_ms) < s_keepalive_ms) {
-                  s_last_sync_ms = now_ms;
-                  if(s_debug_log && now_ms - s_last_log_ms > 30000) {
-                     Print("[DashboardConnector] No live payload changes, skipping sync");
-                     s_last_log_ms = now_ms;
+            if(deal_entry == DEAL_ENTRY_IN) {
+               if(pos_idx >= 0) {
+                  double new_total_volume = entries[pos_idx].open_volume + deal_volume;
+                  if(new_total_volume > 0.0) {
+                     entries[pos_idx].avg_entry_price = ((entries[pos_idx].avg_entry_price * entries[pos_idx].open_volume) + (deal_price * deal_volume)) / new_total_volume;
+                     entries[pos_idx].open_volume = new_total_volume;
+                     if(deal_time_ms < entries[pos_idx].first_entry_time_ms)
+                        entries[pos_idx].first_entry_time_ms = deal_time_ms;
                   }
-                  return false;
-               }
-
-               // Only attempt keepalive if 60s have passed since last attempt
-               if(timestamp_ms - s_last_keepalive_attempt_ms >= 60000) {
-                  bool history_sync_required = false;
-                  string server_history_hash = "";
-                  s_last_sync_ms = now_ms;
-                  s_last_keepalive_probe_ms = timestamp_ms;
-                  s_last_keepalive_attempt_ms = timestamp_ms;
-                  if(PostHealthCheck(current_account, timestamp_ms, history_hash, history_sync_required, server_history_hash)) {
-                     if(server_history_hash != "")
-                        s_last_ack_history_hash = server_history_hash;
-                     s_success_count++;
-                     s_last_sync_ok = true;
-                     s_last_live_payload_sent_ms = timestamp_ms;
-                     if(!history_sync_required) {
-                        if(s_debug_log)
-                           Print("[DashboardConnector] Keepalive health accepted, no payload needed");
-                        return false;
-                     }
-                     include_history = true;
-                     if(s_debug_log)
-                        Print("[DashboardConnector] Keepalive health requested history sync");
-                  } else {
-                     s_error_count++;
-                     s_last_sync_ok = false;
-                     if(s_debug_log)
-                        Print("[DashboardConnector] Keepalive health failed, will retry in 60s");
-                     return false;
-                  }
-               } else {
-                  // Not time for keepalive yet
-                  s_last_sync_ms = now_ms;
-                  return false;
+               } else if(entry_count < 2000) {
+                  entries[entry_count].position_id = position_id;
+                  entries[entry_count].symbol = deal_symbol;
+                  entries[entry_count].avg_entry_price = deal_price;
+                  entries[entry_count].open_volume = deal_volume;
+                  entries[entry_count].first_entry_time_ms = deal_time_ms;
+                  entries[entry_count].active = true;
+                  entry_count++;
                }
             }
+
+            if(deal_entry == DEAL_ENTRY_OUT || deal_entry == DEAL_ENTRY_OUT_BY) {
+               long entry_time = deal_time_ms;
+               double entry_price = deal_price;
+
+               if(pos_idx >= 0) {
+                  entry_time = entries[pos_idx].first_entry_time_ms;
+                  entry_price = entries[pos_idx].avg_entry_price;
+
+                  entries[pos_idx].open_volume -= deal_volume;
+                  if(entries[pos_idx].open_volume <= 0.00000001) {
+                     entries[pos_idx].open_volume = 0.0;
+                     entries[pos_idx].active = false;
+                  }
+               }
+
+               if(history_start_ms > 0 && deal_time_ms < history_start_ms)
+                  continue;
+
+               long duration_ms = deal_time_ms - entry_time;
+               long duration_sec = duration_ms / 1000;
+               if(duration_sec < 0) duration_sec = 0;
+
+               if(!first_trade) closed_trades_json += ",";
+               first_trade = false;
+
+               closed_trades_json += StringFormat(
+                  "{\"symbol\":\"%s\",\"volume\":%.2f,\"entry\":%.5f,\"exit\":%.5f,\"profit\":%.5f,\"entry_time_ms\":%lld,\"exit_time_ms\":%lld,\"duration_sec\":%lld,\"method\":\"deal_out\"}",
+                  deal_symbol, deal_volume, entry_price, deal_price, deal_profit, entry_time, deal_time_ms, duration_sec
+               );
+
+               if(deal_time_ms > latest_closed_time_ms) {
+                  latest_closed_time_ms = deal_time_ms;
                   latest_closed_deal_id = StringFormat("%llu", deal_ticket);
                }
             }
@@ -627,6 +626,8 @@ long   DashboardConnector::s_last_keepalive_probe_ms = 0;
 string DashboardConnector::s_last_ack_history_hash = "";
 bool   DashboardConnector::s_startup_health_checked = false;
 bool   DashboardConnector::s_last_sync_ok            = false;
+long   DashboardConnector::s_last_keepalive_attempt_ms = 0;
+long   DashboardConnector::s_history_start_time_ms = 0;
 
 //+------------------------------------------------------------------+
 //| Status dot                                                       |
@@ -693,7 +694,7 @@ int OnInit() {
       Print("[myfxboard] ERROR: Server URL and PSK must be set.");
       return INIT_PARAMETERS_INCORRECT;
    }
-   DashboardConnector::Init(InpDashboardUrl, InpDashboardPSK, InpSyncIntervalSec, InpKeepaliveSec, InpDebugLog);
+   DashboardConnector::Init(InpDashboardUrl, InpDashboardPSK, InpSyncIntervalSec, InpKeepaliveSec, InpDebugLog, InpHistoryStartDate);
    EventSetMillisecondTimer(500);
    Print("[myfxboard] Connector started. Syncing every ", InpSyncIntervalSec, "s to ", InpDashboardUrl);
    return INIT_SUCCEEDED;
