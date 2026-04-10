@@ -71,4 +71,6 @@ export const ingestPayloadSchema = z.object({
   ea_latest_closed_time_ms: z.number(),
   ea_latest_closed_deal_id: z.string(),
   open_positions_hash: z.string(),
+  include_history: z.boolean().optional(),
+  history_hash: z.string().optional(),
 });

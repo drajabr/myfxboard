@@ -270,6 +270,17 @@ body {
     font-weight: 700;
 }
 
+.account-tag {
+    display: inline-block;
+    padding: 0.16rem 0.42rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-alt);
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
 .calendar-card {
     overflow: hidden;
 }

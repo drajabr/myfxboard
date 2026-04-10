@@ -299,15 +299,17 @@ function updatePositionsTable(positions) {
 function updateTradesTable(trades) {
     const tbody = document.getElementById('tradesTable');
     if (!trades || trades.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No trades</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">No trades</td></tr>';
         return;
     }
 
     tbody.innerHTML = trades.map((trade) => {
         const openTime = formatDateTimeMs(trade.entry_time_ms);
         const closeTime = formatDateTimeMs(trade.exit_time_ms);
+        const accountLabel = trade.account_id ? String(trade.account_id) : '-';
         return `
         <tr>
+            <td><span class="account-tag">${accountLabel}</span></td>
             <td>${trade.symbol}</td>
             <td>${formatPrice(trade.entry_price)}</td>
             <td>${trade.exit_price !== null ? formatPrice(trade.exit_price) : '-'}</td>

@@ -7,8 +7,10 @@ CREATE TABLE IF NOT EXISTS accounts (
   broker TEXT DEFAULT 'MT5',
   created_at BIGINT NOT NULL,
   last_sync_at BIGINT,
+  last_ingest_received_at BIGINT,
   last_closed_deal_id TEXT,
   last_closed_time_ms BIGINT,
+  last_history_hash TEXT,
   history_sync_cursor TEXT,
   history_in_sync BOOLEAN DEFAULT false,
   equity NUMERIC(20, 2),
@@ -107,3 +109,6 @@ CREATE TABLE IF NOT EXISTS unlock_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_unlock_sessions_token ON unlock_sessions(token);
 CREATE INDEX IF NOT EXISTS idx_unlock_sessions_expires ON unlock_sessions(expires_at);
+
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_ingest_received_at BIGINT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_history_hash TEXT;

@@ -5,6 +5,7 @@ import { accountQueries, positionQueries, tradeQueries, snapshotQueries } from '
 import { Trade } from '../types/index.js';
 
 const router = Router();
+const DEFAULT_MIN_INGEST_INTERVAL_MS = 3000;
 
 const resolveAccountId = (req: Request) => String(req.accountId || req.body?.account_number || '').trim();
 
@@ -35,9 +36,39 @@ router.post(
       }
 
       const account = await accountQueries.ensureByAccountNumber(accountId, sharedSecret);
+      const nowMs = Date.now();
+      const minIngestIntervalMs = Math.max(
+        parseInt(process.env.SYNC_MIN_INGEST_INTERVAL_MS || `${DEFAULT_MIN_INGEST_INTERVAL_MS}`, 10) || DEFAULT_MIN_INGEST_INTERVAL_MS,
+        0
+      );
+      const sinceLastIngestMs = account.last_ingest_received_at ? (nowMs - Number(account.last_ingest_received_at)) : Number.MAX_SAFE_INTEGER;
+      const serverHistoryHash = String(account.last_history_hash || '');
+      const clientHistoryHash = String(req.body.history_hash || '').trim();
+
+      if (sinceLastIngestMs < minIngestIntervalMs) {
+        return res.status(200).json({
+          status: 'throttled',
+          sync_id: req.body.sync_id,
+          account_id: accountId,
+          min_ingest_interval_ms: minIngestIntervalMs,
+          retry_after_ms: minIngestIntervalMs - sinceLastIngestMs,
+          server_history_hash: serverHistoryHash,
+          history_sync_required: clientHistoryHash.length > 0 && serverHistoryHash !== clientHistoryHash,
+        });
+      }
+
       console.log(`[INGEST] Account: ${accountId}, positions: ${req.body.positions?.length || 0}, closed_trades: ${req.body.closed_trades?.length || 0}`);
 
-      const { positions, closed_trades, account: accountData, sync_id, ea_latest_closed_time_ms, ea_latest_closed_deal_id } = req.body;
+      const {
+        positions,
+        closed_trades,
+        account: accountData,
+        sync_id,
+        ea_latest_closed_time_ms,
+        ea_latest_closed_deal_id,
+        include_history,
+      } = req.body;
+      const shouldIncludeHistory = include_history !== false;
 
       // Positions payload is a full snapshot; clear stale rows first.
       await positionQueries.deleteByAccount(accountId);
@@ -58,10 +89,9 @@ router.post(
         });
       }
 
-      // Closed trades payload from EA is a full snapshot of MT5 history.
-      // Replace server-side history when non-empty so all-time PnL matches MT5 exactly.
-      if (closed_trades.length > 0) {
-        await tradeQueries.deleteByAccount(accountId);
+      // Closed trades are append-only per account; duplicates are ignored by DB constraint.
+      // Never delete here because payloads may be partial (multi-account sync cadence).
+      if (shouldIncludeHistory) {
         for (const trade of closed_trades) {
           const tradeRecord: Omit<Trade, 'id'> = {
             account_id: accountId,
@@ -102,16 +132,27 @@ router.post(
         ea_latest_closed_time_ms
       );
 
+      const savedIngestion = await accountQueries.updateIngestionState(
+        accountId,
+        nowMs,
+        shouldIncludeHistory && clientHistoryHash.length > 0 ? clientHistoryHash : undefined
+      );
+
       // Check for history backfill needs
-      const historyStatus = ea_latest_closed_time_ms > account.last_closed_time_ms ? 'up_to_date' : 'backfill_required';
+      const accountLastClosedMs = Number(account.last_closed_time_ms || 0);
+      const historyStatus = ea_latest_closed_time_ms > accountLastClosedMs ? 'up_to_date' : 'backfill_required';
+      const effectiveServerHistoryHash = String(savedIngestion?.last_history_hash || account.last_history_hash || '');
 
       res.status(200).json({
         status: 'ok',
         sync_id,
         account_id: accountId,
         history_status: historyStatus,
-        from_time_ms: historyStatus === 'backfill_required' ? account.last_closed_time_ms : undefined,
+        from_time_ms: historyStatus === 'backfill_required' ? accountLastClosedMs : undefined,
         chunk_size: parseInt(process.env.SYNC_HISTORY_CHUNK_SIZE || '100'),
+        min_ingest_interval_ms: minIngestIntervalMs,
+        server_history_hash: effectiveServerHistoryHash,
+        history_sync_required: clientHistoryHash.length > 0 && effectiveServerHistoryHash !== clientHistoryHash,
       });
     } catch (error) {
       console.error('Ingestion endpoint error:', error);

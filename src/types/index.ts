@@ -5,8 +5,10 @@ export interface Account {
   broker: string;
   created_at: number;
   last_sync_at: number | null;
+  last_ingest_received_at: number | null;
   last_closed_deal_id: string | null;
   last_closed_time_ms: number | null;
+  last_history_hash: string | null;
   history_sync_cursor: string | null;
   history_in_sync: boolean;
 }
@@ -110,6 +112,8 @@ export interface IngestPayload {
   ea_latest_closed_time_ms: number;
   ea_latest_closed_deal_id: string;
   open_positions_hash: string;
+  include_history?: boolean;
+  history_hash?: string;
 }
 
 export interface AuthContext {

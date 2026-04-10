@@ -47,6 +47,23 @@ export const accountQueries = {
     return result.rows[0];
   },
 
+  async updateIngestionState(
+    account_id: string,
+    last_ingest_received_at: number,
+    last_history_hash?: string
+  ) {
+    const result = await query(
+      `UPDATE accounts
+         SET last_sync_at = $2,
+             last_ingest_received_at = $2,
+             last_history_hash = COALESCE($3, last_history_hash)
+       WHERE account_id = $1
+       RETURNING *`,
+      [account_id, last_ingest_received_at, last_history_hash ?? null]
+    );
+    return result.rows[0] || null;
+  },
+
   async list() {
     const result = await query('SELECT * FROM accounts ORDER BY created_at DESC');
     return result.rows;

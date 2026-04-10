@@ -30,6 +30,45 @@ private:
    static int      s_error_count;
    static bool     s_debug_log;
    static ulong    s_last_log_ms;
+   static uint     s_last_live_payload_hash;
+   static long     s_last_live_payload_sent_ms;
+   static string   s_last_ack_history_hash;
+
+   static uint HashPayload(const string payload) {
+      uchar bytes[];
+      int n = StringToCharArray(payload, bytes, 0, WHOLE_ARRAY, CP_UTF8);
+      if(n <= 1)
+         return 0;
+
+      uint hash = 2166136261;
+      for(int i = 0; i < n - 1; i++) {
+         hash ^= (uint)bytes[i];
+         hash *= 16777619;
+      }
+      return hash;
+   }
+
+   static string ExtractJsonString(const string json, const string key) {
+      string token = "\"" + key + "\":\"";
+      int start = StringFind(json, token);
+      if(start < 0)
+         return "";
+      start += StringLen(token);
+      int finish = StringFind(json, "\"", start);
+      if(finish < 0)
+         return "";
+      return StringSubstr(json, start, finish - start);
+   }
+
+   static bool ExtractJsonBool(const string json, const string key, bool default_value = false) {
+      string true_token = "\"" + key + "\":true";
+      if(StringFind(json, true_token) >= 0)
+         return true;
+      string false_token = "\"" + key + "\":false";
+      if(StringFind(json, false_token) >= 0)
+         return false;
+      return default_value;
+   }
 
 public:
    static void Init(string url, string psk, int interval_sec, bool debug = false) {
@@ -41,6 +80,9 @@ public:
       s_in_flight        = false;
       s_success_count    = 0;
       s_error_count      = 0;
+      s_last_live_payload_hash = 0;
+      s_last_live_payload_sent_ms = 0;
+      s_last_ack_history_hash = "";
       if(s_debug_log)
          Print("[DashboardConnector] Initialized: url=", s_url, " interval=", interval_sec, "s");
    }
@@ -64,12 +106,46 @@ public:
       // Backend auth expects unix epoch milliseconds, not terminal uptime milliseconds.
       long timestamp_ms = (long)TimeGMT() * 1000;
       string current_account = IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN));
+
+      long latest_closed_time_ms = 0;
+      string latest_closed_deal_id = "";
+      string positions_json = BuildPositionsJson();
+      string closed_trades_json = BuildClosedTradesJson(latest_closed_time_ms, latest_closed_deal_id);
+      string account_json = BuildAccountJson();
+
+      uint live_payload_hash = HashPayload(positions_json + "|" + account_json + "|" + StringFormat("%lld", latest_closed_time_ms));
+      string history_hash = StringFormat("%u", HashPayload(closed_trades_json));
+      bool include_history = (history_hash != s_last_ack_history_hash);
+
+      string payload = BuildPayload(
+         timestamp_ms,
+         current_account,
+         positions_json,
+         include_history ? closed_trades_json : "[]",
+         account_json,
+         latest_closed_time_ms,
+         latest_closed_deal_id,
+         include_history,
+         history_hash
+      );
+
+      const long unchanged_keepalive_ms = 60000;
+      if(!include_history
+         && live_payload_hash == s_last_live_payload_hash
+         && s_last_live_payload_sent_ms > 0
+         && (timestamp_ms - s_last_live_payload_sent_ms) < unchanged_keepalive_ms) {
+         s_last_sync_ms = now_ms;
+         if(s_debug_log && now_ms - s_last_log_ms > 30000) {
+            Print("[DashboardConnector] No live payload changes, skipping sync");
+            s_last_log_ms = now_ms;
+         }
+         return false;
+      }
+
+      string signature = CreateSignature(current_account, timestamp_ms, s_psk);
       s_last_sync_ms = now_ms;
       s_in_flight    = true;
-
-      string payload   = BuildPayload(timestamp_ms, current_account);
-      string signature = CreateSignature(current_account, timestamp_ms, s_psk);
-      PostSync(payload, current_account, signature, timestamp_ms);
+      PostSync(payload, current_account, signature, timestamp_ms, live_payload_hash, include_history, history_hash);
       return true;
    }
 
@@ -78,7 +154,7 @@ public:
    static void SetDebugLog(bool enabled)  { s_debug_log = enabled; }
 
 private:
-   static string BuildPayload(long sync_time_ms, string account_number) {
+   static string BuildPositionsJson() {
       string positions_json = "[";
       bool first_pos = true;
 
@@ -103,11 +179,15 @@ private:
       }
       positions_json += "]";
 
+      return positions_json;
+   }
+
+   static string BuildClosedTradesJson(long &latest_closed_time_ms, string &latest_closed_deal_id) {
       // Collect closed trades from deal history, paired by position id.
       string closed_trades_json = "[";
       bool first_trade = true;
-      long latest_closed_time_ms = 0;
-      string latest_closed_deal_id = "";
+      latest_closed_time_ms = 0;
+      latest_closed_deal_id = "";
       
       // HistorySelect expects datetime seconds, not unix milliseconds.
       if(HistorySelect(0, TimeCurrent())) {
@@ -210,9 +290,10 @@ private:
       }
       closed_trades_json += "]";
 
-      if(latest_closed_time_ms == 0)
-         latest_closed_time_ms = sync_time_ms;
+      return closed_trades_json;
+   }
 
+   static string BuildAccountJson() {
       double equity       = AccountInfoDouble(ACCOUNT_EQUITY);
       double balance      = AccountInfoDouble(ACCOUNT_BALANCE);
       double margin_used  = AccountInfoDouble(ACCOUNT_MARGIN);
@@ -224,13 +305,36 @@ private:
          equity, balance, margin_used, margin_free, margin_level
       );
 
+      return account_json;
+   }
+
+   static string BuildPayload(
+      long sync_time_ms,
+      string account_number,
+      string positions_json,
+      string closed_trades_json,
+      string account_json,
+      long latest_closed_time_ms,
+      string latest_closed_deal_id,
+      bool include_history,
+      string history_hash
+   ) {
+
       string payload = StringFormat(
-         "{\"account_number\":\"%s\",\"positions\":%s,\"closed_trades\":%s,\"account\":%s,\"sync_id\":\"%lld\",\"ea_latest_closed_time_ms\":%lld,\"ea_latest_closed_deal_id\":\"%s\",\"open_positions_hash\":\"\"}",
-         account_number, positions_json, closed_trades_json, account_json, sync_time_ms, latest_closed_time_ms, latest_closed_deal_id
+         "{\"account_number\":\"%s\",\"positions\":%s,\"closed_trades\":%s,\"account\":%s,\"sync_id\":\"%lld\",\"ea_latest_closed_time_ms\":%lld,\"ea_latest_closed_deal_id\":\"%s\",\"open_positions_hash\":\"\",\"include_history\":%s,\"history_hash\":\"%s\"}",
+         account_number,
+         positions_json,
+         closed_trades_json,
+         account_json,
+         sync_time_ms,
+         latest_closed_time_ms,
+         latest_closed_deal_id,
+         include_history ? "true" : "false",
+         history_hash
       );
 
       if(s_debug_log)
-         Print("[DashboardConnector] Payload: ", StringLen(payload), " bytes, trades: ", HistoryDealsTotal());
+         Print("[DashboardConnector] Payload: ", StringLen(payload), " bytes, include_history=", include_history ? "true" : "false");
 
       return payload;
    }
@@ -239,7 +343,15 @@ private:
       return "dashboard_v2_" + account_number + "_" + StringFormat("%lld", timestamp_ms) + "_" + psk;
    }
 
-   static void PostSync(string payload, string account_number, string signature, long timestamp_ms) {
+   static void PostSync(
+      string payload,
+      string account_number,
+      string signature,
+      long timestamp_ms,
+      uint live_payload_hash,
+      bool include_history,
+      string history_hash
+   ) {
       string url = s_url + "/api/ingestion";
 
       uchar request_data[];
@@ -265,10 +377,21 @@ private:
       } else {
          string response_text = CharArrayToString(response_data, 0, WHOLE_ARRAY, CP_UTF8);
          if(res >= 200 && res < 300) {
+            string server_history_hash = ExtractJsonString(response_text, "server_history_hash");
+            if(server_history_hash != "")
+               s_last_ack_history_hash = server_history_hash;
+            else if(include_history)
+               s_last_ack_history_hash = history_hash;
+
+            bool history_sync_required = ExtractJsonBool(response_text, "history_sync_required", false);
             if(s_debug_log)
                Print("[DashboardConnector] Sync accepted for account ", account_number,
                      " (", StringLen(payload), " bytes, status=", res, ")");
             s_success_count++;
+            s_last_live_payload_hash = live_payload_hash;
+            s_last_live_payload_sent_ms = timestamp_ms;
+            if(history_sync_required && s_debug_log)
+               Print("[DashboardConnector] Server requested history resend (hash mismatch)");
          } else {
             s_error_count++;
             if(s_debug_log)
@@ -290,6 +413,9 @@ int    DashboardConnector::s_success_count    = 0;
 int    DashboardConnector::s_error_count      = 0;
 bool   DashboardConnector::s_debug_log        = false;
 ulong  DashboardConnector::s_last_log_ms      = 0;
+uint   DashboardConnector::s_last_live_payload_hash = 0;
+long   DashboardConnector::s_last_live_payload_sent_ms = 0;
+string DashboardConnector::s_last_ack_history_hash = "";
 
 //+------------------------------------------------------------------+
 //| EA lifecycle                                                     |

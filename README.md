@@ -5,6 +5,7 @@ Minimal guide for running the MT5 dashboard.
 ## What this repo does
 
 - Receives MT5 position/account sync data every 3 seconds
+- Enforces configurable minimum ingest interval (`SYNC_MIN_INGEST_INTERVAL_MS`, default `3000`)
 - Stores data in PostgreSQL
 - Serves dashboard UI and API from the Node server
 - Uses HMAC-signed ingestion requests
@@ -36,6 +37,12 @@ http://localhost:3000
 ```
 
 The server now bootstraps the database schema automatically on startup, including when you reuse an existing Postgres volume.
+
+The connector sync protocol now separates live updates from history sync:
+
+- Live position/account payloads can continue every sync interval.
+- Closed-trade history is sent only when its hash changes or the server requests a resend.
+- Server responds with `server_history_hash` and `history_sync_required` so clients can stay aligned.
 
 ## EA setup
 
