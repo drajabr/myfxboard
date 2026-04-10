@@ -216,7 +216,25 @@ body {
 }
 
 .spotlight-card--equity {
-    min-height: 86px;
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+.spotlight-card--equity .equity-main {
+    font-size: 2.5rem;
+    font-weight: 900;
+    margin-bottom: 0.2rem;
+}
+.spotlight-card--equity .floating-pnl-label {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin-bottom: 0.1rem;
+}
+.spotlight-card--equity .floating-pnl {
+    font-size: 1.25rem;
+    font-weight: 700;
 }
 
 .kpi-cards {

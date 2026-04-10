@@ -35,13 +35,11 @@
             <section class="table-section section-performance-windows">
                 <h3>Performance Windows</h3>
                 <div class="summary-spotlight">
-                    <div class="card spotlight-card spotlight-card--floating">
-                        <label>Floating PnL</label>
-                        <div class="value" id="floatingPnl">$ 0.00</div>
-                    </div>
                     <div class="card spotlight-card spotlight-card--equity">
                         <label>Equity</label>
-                        <div class="value" id="equity">$ 0.00</div>
+                        <div class="value equity-main" id="equity">$ 0.00</div>
+                        <div class="floating-pnl-label">Floating PnL</div>
+                        <div class="value floating-pnl" id="floatingPnl">$ 0.00</div>
                     </div>
                 </div>
                 <div class="metric-grid" id="periodStatsGrid"></div>
@@ -119,14 +117,27 @@
                 </div>
             </section>
 
+
             <section class="charts-row">
                 <div class="chart-container">
                     <h3>Win/Loss Distribution</h3>
                     <canvas id="winLossChart"></canvas>
                 </div>
                 <div class="chart-container">
-                    <h3 id="dailyPnlChartTitle">Daily PnL (Last 30 Days)</h3>
+                    <h3 id="dailyPnlChartTitle">Daily PnL (All Time)</h3>
                     <canvas id="dailyPnlChart"></canvas>
+                </div>
+            </section>
+
+            <!-- New charts before historic trades table -->
+            <section class="charts-row">
+                <div class="chart-container">
+                    <h3>PnL by Day of Week</h3>
+                    <canvas id="pnlByDayOfWeekChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>PnL by Hour of Day</h3>
+                    <canvas id="pnlByHourOfDayChart"></canvas>
                 </div>
             </section>
 

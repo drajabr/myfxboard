@@ -21,6 +21,8 @@ const charts = {
     equityCurve: null,
     winLoss: null,
     dailyPnl: null,
+    pnlByDayOfWeek: null,
+    pnlByHourOfDay: null,
 };
 
 const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
@@ -563,7 +565,12 @@ function updateCharts(data) {
         charts.winLoss.update();
     }
 
-    const dailyRows = Array.isArray(data.filtered_daily_pnl) ? data.filtered_daily_pnl : [];
+    // Show all-time daily PnL by default; use filtered range when a trade filter is active
+    const dailyRows = state.activeTradeFilter
+        ? (Array.isArray(data.filtered_daily_pnl) ? data.filtered_daily_pnl : [])
+        : ((Array.isArray(data.alltime_daily_pnl) && data.alltime_daily_pnl.length > 0)
+            ? data.alltime_daily_pnl
+            : (Array.isArray(data.filtered_daily_pnl) ? data.filtered_daily_pnl : []));
     const dailyLabels = dailyRows.map((r) => r.date || '');
     const dailyValues = dailyRows.map((r) => toNum(r.pnl));
 
@@ -571,7 +578,7 @@ function updateCharts(data) {
     if (dailyTitle) {
         dailyTitle.textContent = state.activeTradeFilter
             ? `Daily PnL (${state.activeTradeFilter.label})`
-            : 'Daily PnL (Last 30 Days)';
+            : 'Daily PnL (All Time)';
     }
 
     if (!charts.dailyPnl) {
@@ -597,6 +604,68 @@ function updateCharts(data) {
         charts.dailyPnl.data.datasets[0].backgroundColor = dailyValues.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
         charts.dailyPnl.options.plugins.legend.labels.color = text;
         charts.dailyPnl.update();
+    }
+
+    // PnL by Day of Week
+    const dayOfWeekRows = Array.isArray(data.pnl_by_day_of_week) ? data.pnl_by_day_of_week : [];
+    const dayOfWeekLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const dayOfWeekPnL = Array(7).fill(0);
+    dayOfWeekRows.forEach((row) => {
+        if (row.day_of_week >= 0 && row.day_of_week <= 6) dayOfWeekPnL[row.day_of_week] = toNum(row.pnl);
+    });
+    if (!charts.pnlByDayOfWeek) {
+        charts.pnlByDayOfWeek = new Chart(document.getElementById('pnlByDayOfWeekChart'), {
+            type: 'bar',
+            data: {
+                labels: dayOfWeekLabels,
+                datasets: [{
+                    label: 'PnL',
+                    data: dayOfWeekPnL,
+                    backgroundColor: dayOfWeekPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral),
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: text } } },
+            },
+        });
+    } else {
+        charts.pnlByDayOfWeek.data.datasets[0].data = dayOfWeekPnL;
+        charts.pnlByDayOfWeek.data.datasets[0].backgroundColor = dayOfWeekPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
+        charts.pnlByDayOfWeek.options.plugins.legend.labels.color = text;
+        charts.pnlByDayOfWeek.update();
+    }
+
+    // PnL by Hour of Day
+    const hourOfDayRows = Array.isArray(data.pnl_by_hour_of_day) ? data.pnl_by_hour_of_day : [];
+    const hourOfDayLabels = Array.from({length: 24}, (_, i) => `${i}:00`);
+    const hourOfDayPnL = Array(24).fill(0);
+    hourOfDayRows.forEach((row) => {
+        if (row.hour_of_day >= 0 && row.hour_of_day <= 23) hourOfDayPnL[row.hour_of_day] = toNum(row.pnl);
+    });
+    if (!charts.pnlByHourOfDay) {
+        charts.pnlByHourOfDay = new Chart(document.getElementById('pnlByHourOfDayChart'), {
+            type: 'bar',
+            data: {
+                labels: hourOfDayLabels,
+                datasets: [{
+                    label: 'PnL',
+                    data: hourOfDayPnL,
+                    backgroundColor: hourOfDayPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral),
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: text } } },
+            },
+        });
+    } else {
+        charts.pnlByHourOfDay.data.datasets[0].data = hourOfDayPnL;
+        charts.pnlByHourOfDay.data.datasets[0].backgroundColor = hourOfDayPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
+        charts.pnlByHourOfDay.options.plugins.legend.labels.color = text;
+        charts.pnlByHourOfDay.update();
     }
 }
 

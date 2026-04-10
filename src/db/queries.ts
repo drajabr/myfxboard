@@ -325,6 +325,60 @@ export const tradeQueries = {
     return result.rows;
   },
 
+  async summarizeDailyPnlAllTimeByEventTime(
+    account_id: string
+  ): Promise<Array<{ date: string; pnl: number }>> {
+    const result = await query(
+      `SELECT
+          TO_CHAR(TO_TIMESTAMP(COALESCE(exit_time_ms, entry_time_ms) / 1000.0), 'YYYY-MM-DD') AS date,
+          COALESCE(SUM(profit), 0)::float8 AS pnl
+         FROM trades
+        WHERE account_id = $1
+        GROUP BY 1
+        ORDER BY 1 ASC`,
+      [account_id]
+    );
+    return result.rows;
+  },
+
+  async summarizePnlByDayOfWeekByEventTimeRange(
+    account_id: string,
+    from_time_ms: number,
+    to_time_ms: number
+  ): Promise<Array<{ day_of_week: number; pnl: number }>> {
+    const result = await query(
+      `SELECT
+          EXTRACT(DOW FROM TO_TIMESTAMP(COALESCE(exit_time_ms, entry_time_ms) / 1000.0))::int AS day_of_week,
+          COALESCE(SUM(profit), 0)::float8 AS pnl
+         FROM trades
+        WHERE account_id = $1
+          AND COALESCE(exit_time_ms, entry_time_ms) BETWEEN $2 AND $3
+        GROUP BY 1
+        ORDER BY 1 ASC`,
+      [account_id, from_time_ms, to_time_ms]
+    );
+    return result.rows;
+  },
+
+  async summarizePnlByHourOfDayByEventTimeRange(
+    account_id: string,
+    from_time_ms: number,
+    to_time_ms: number
+  ): Promise<Array<{ hour_of_day: number; pnl: number }>> {
+    const result = await query(
+      `SELECT
+          EXTRACT(HOUR FROM TO_TIMESTAMP(COALESCE(exit_time_ms, entry_time_ms) / 1000.0))::int AS hour_of_day,
+          COALESCE(SUM(profit), 0)::float8 AS pnl
+         FROM trades
+        WHERE account_id = $1
+          AND COALESCE(exit_time_ms, entry_time_ms) BETWEEN $2 AND $3
+        GROUP BY 1
+        ORDER BY 1 ASC`,
+      [account_id, from_time_ms, to_time_ms]
+    );
+    return result.rows;
+  },
+
   async summarizeMonthCalendar(
     account_id: string,
     from_time_ms: number,

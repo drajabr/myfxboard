@@ -160,6 +160,9 @@ const buildEmptyAnalyticsResponse = (
     trades_returned: 0,
     filtered_distribution: { wins: 0, losses: 0, neutral: 0 },
     filtered_daily_pnl: [],
+    alltime_daily_pnl: [],
+    pnl_by_day_of_week: [],
+    pnl_by_hour_of_day: [],
     equity_curve: buildFlatZeroCurve(curveDays, nowMs),
     balance_curve: buildFlatZeroBalanceCurve(curveDays, nowMs),
     symbol_exposure: [],
@@ -218,6 +221,9 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const curveByDay = new Map<string, { ts: number; equity: number }>();
     const balanceByDay = new Map<string, { ts: number; balance: number }>();
     const filteredDailyMap = new Map<string, number>();
+    const allTimeDailyMap = new Map<string, number>();
+    const dayOfWeekMap = new Map<number, number>();
+    const hourOfDayMap = new Map<number, number>();
     const monthDayMap = new Map<number, { pnl: number; trades: number }>();
     const yearMonthMap = new Map<number, { pnl: number; trades: number }>();
 
@@ -225,6 +231,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const filterEndMs = Number.isFinite(tradeToMs) ? tradeToMs : nowMs;
     const dailyPnlStartMs = hasTradeFilter ? filterStartMs : Math.max(nowMs - (30 * 24 * 60 * 60 * 1000), 0);
     const dailyPnlEndMs = hasTradeFilter ? filterEndMs : nowMs;
+    const groupedPnlStartMs = hasTradeFilter ? filterStartMs : 0;
+    const groupedPnlEndMs = hasTradeFilter ? filterEndMs : nowMs;
     const todayStartMs = getRangeStart('today', nowMs);
     const last7dStartMs = getRangeStart('last7d', nowMs);
     const last30dStartMs = getRangeStart('last30d', nowMs);
@@ -277,6 +285,9 @@ router.get('/analytics', async (req: Request, res: Response) => {
         filteredCount,
         filteredSummary,
         filteredDailyRows,
+        allTimeDailyRows,
+        dayOfWeekRows,
+        hourOfDayRows,
         monthRows,
         yearRows,
         metricsRow,
@@ -293,6 +304,9 @@ router.get('/analytics', async (req: Request, res: Response) => {
         tradeQueries.countByEventTimeRange(accountId, filterStartMs, filterEndMs),
         tradeQueries.summarizeByEventTimeRange(accountId, filterStartMs, filterEndMs),
         tradeQueries.summarizeDailyPnlByEventTimeRange(accountId, dailyPnlStartMs, dailyPnlEndMs),
+        tradeQueries.summarizeDailyPnlAllTimeByEventTime(accountId),
+        tradeQueries.summarizePnlByDayOfWeekByEventTimeRange(accountId, groupedPnlStartMs, groupedPnlEndMs),
+        tradeQueries.summarizePnlByHourOfDayByEventTimeRange(accountId, groupedPnlStartMs, groupedPnlEndMs),
         tradeQueries.summarizeMonthCalendar(accountId, monthStart, monthEnd),
         tradeQueries.summarizeYearCalendar(accountId, targetYear),
         tradeQueries.summarizeMetrics(accountId),
@@ -363,6 +377,20 @@ router.get('/analytics', async (req: Request, res: Response) => {
         filteredDailyMap.set(row.date, (filteredDailyMap.get(row.date) || 0) + toNum(row.pnl));
       });
 
+      allTimeDailyRows.forEach((row) => {
+        allTimeDailyMap.set(row.date, (allTimeDailyMap.get(row.date) || 0) + toNum(row.pnl));
+      });
+
+      dayOfWeekRows.forEach((row) => {
+        const key = toNum(row.day_of_week);
+        dayOfWeekMap.set(key, (dayOfWeekMap.get(key) || 0) + toNum(row.pnl));
+      });
+
+      hourOfDayRows.forEach((row) => {
+        const key = toNum(row.hour_of_day);
+        hourOfDayMap.set(key, (hourOfDayMap.get(key) || 0) + toNum(row.pnl));
+      });
+
       monthRows.forEach((row) => {
         const existing = monthDayMap.get(row.day) || { pnl: 0, trades: 0 };
         existing.pnl += toNum(row.pnl);
@@ -414,6 +442,15 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const filteredDailyPnl = Array.from(filteredDailyMap.entries())
       .map(([date, pnl]) => ({ date, pnl }))
       .sort((a, b) => a.date.localeCompare(b.date));
+    const allTimeDailyPnl = Array.from(allTimeDailyMap.entries())
+      .map(([date, pnl]) => ({ date, pnl }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    const pnlByDayOfWeek = Array.from(dayOfWeekMap.entries())
+      .map(([day_of_week, pnl]) => ({ day_of_week, pnl }))
+      .sort((a, b) => a.day_of_week - b.day_of_week);
+    const pnlByHourOfDay = Array.from(hourOfDayMap.entries())
+      .map(([hour_of_day, pnl]) => ({ hour_of_day, pnl }))
+      .sort((a, b) => a.hour_of_day - b.hour_of_day);
 
     const periods = {
       today: {
@@ -506,6 +543,9 @@ router.get('/analytics', async (req: Request, res: Response) => {
       trades_returned: recentTrades.length,
       filtered_distribution: distribution,
       filtered_daily_pnl: filteredDailyPnl,
+      alltime_daily_pnl: allTimeDailyPnl,
+      pnl_by_day_of_week: pnlByDayOfWeek,
+      pnl_by_hour_of_day: pnlByHourOfDay,
       trade_pnl_series: tradePnlSeries,
       equity_curve: equityCurve,
       balance_curve: balanceCurve,
