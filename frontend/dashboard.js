@@ -10,6 +10,7 @@ const state = {
     tradesLimit: 10,
     activeTradeFilter: null,
     exposureSort: { key: 'size', direction: 'desc' },
+    tradesSort: { key: 'exit_time_ms', direction: 'desc' },
     accounts: [],
     accountsFetchedAt: 0,
     inflight: false,
@@ -195,6 +196,24 @@ function setupEventListeners() {
                 state.exposureSort.direction = key === 'symbol' ? 'asc' : 'desc';
             }
             loadDashboard();
+        });
+    });
+
+    document.querySelectorAll('[data-trades-sort]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const key = btn.getAttribute('data-trades-sort');
+            if (!key) {
+                return;
+            }
+            if (state.tradesSort.key === key) {
+                state.tradesSort.direction = state.tradesSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                state.tradesSort.key = key;
+                state.tradesSort.direction = key === 'account_id' || key === 'symbol' || key === 'result' ? 'asc' : 'desc';
+            }
+            if (state.lastData) {
+                renderDashboard(state.lastData);
+            }
         });
     });
 
@@ -394,15 +413,31 @@ function updatePositionsTable(positions) {
 
 function updateTradesTable(trades) {
     const tbody = document.getElementById('tradesTable');
-    if (!trades || trades.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">No trades</td></tr>';
+    const rows = Array.isArray(trades) ? [...trades] : [];
+
+    if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;">No trades</td></tr>';
         return;
     }
 
-    tbody.innerHTML = trades.map((trade) => {
+    rows.sort((a, b) => {
+        const key = state.tradesSort.key;
+        let cmp = 0;
+
+        if (key === 'account_id' || key === 'symbol' || key === 'result') {
+            cmp = String(a[key] || '').localeCompare(String(b[key] || ''));
+        } else {
+            cmp = toNum(a[key]) - toNum(b[key]);
+        }
+
+        return state.tradesSort.direction === 'asc' ? cmp : -cmp;
+    });
+
+    tbody.innerHTML = rows.map((trade) => {
         const openTime = formatDateTimeMs(trade.entry_time_ms);
         const closeTime = formatDateTimeMs(trade.exit_time_ms);
         const accountLabel = trade.account_id ? String(trade.account_id) : '-';
+        const duration = durationLabel(trade.duration_sec);
         return `
         <tr>
             <td><span class="account-tag">${accountLabel}</span></td>
@@ -414,6 +449,7 @@ function updateTradesTable(trades) {
             <td>${trade.result || '-'}</td>
             <td>${openTime}</td>
             <td>${closeTime}</td>
+            <td>${duration}</td>
         </tr>
     `}).join('');
 }
@@ -537,15 +573,19 @@ function buildBarChartOptions(text) {
     };
 }
 
-function updateDistributionProgress(wins, losses, neutralCount) {
+function updateDistributionProgress(wins, losses, neutralCount, longs, shorts) {
     const winsSegment = document.getElementById('distWinsSegment');
     const lossesSegment = document.getElementById('distLossesSegment');
     const neutralSegment = document.getElementById('distNeutralSegment');
     const winsText = document.getElementById('distWinsText');
     const lossesText = document.getElementById('distLossesText');
     const neutralText = document.getElementById('distNeutralText');
+    const longsSegment = document.getElementById('distLongsSegment');
+    const shortsSegment = document.getElementById('distShortsSegment');
+    const longsText = document.getElementById('distLongsText');
+    const shortsText = document.getElementById('distShortsText');
 
-    if (!winsSegment || !lossesSegment || !neutralSegment || !winsText || !lossesText || !neutralText) {
+    if (!winsSegment || !lossesSegment || !neutralSegment || !winsText || !lossesText || !neutralText || !longsSegment || !shortsSegment || !longsText || !shortsText) {
         return;
     }
 
@@ -561,6 +601,15 @@ function updateDistributionProgress(wins, losses, neutralCount) {
     winsText.textContent = `Wins: ${wins} (${winsPct.toFixed(1)}%)`;
     lossesText.textContent = `Losses: ${losses} (${lossesPct.toFixed(1)}%)`;
     neutralText.textContent = `Neutral: ${neutralCount} (${neutralPct.toFixed(1)}%)`;
+
+    const directionTotal = Math.max(0, longs + shorts);
+    const longsPct = directionTotal > 0 ? (longs / directionTotal) * 100 : 0;
+    const shortsPct = directionTotal > 0 ? (shorts / directionTotal) * 100 : 0;
+
+    longsSegment.style.width = `${longsPct}%`;
+    shortsSegment.style.width = `${shortsPct}%`;
+    longsText.textContent = `${longs} (${longsPct.toFixed(1)}%)`;
+    shortsText.textContent = `${shorts} (${shortsPct.toFixed(1)}%)`;
 }
 
 function updateCharts(data) {
@@ -679,7 +728,9 @@ function updateCharts(data) {
     const wins = toNum(data.filtered_distribution?.wins);
     const losses = toNum(data.filtered_distribution?.losses);
     const neutralCount = toNum(data.filtered_distribution?.neutral);
-    updateDistributionProgress(wins, losses, neutralCount);
+    const longs = toNum(data.filtered_direction_distribution?.longs);
+    const shorts = toNum(data.filtered_direction_distribution?.shorts);
+    updateDistributionProgress(wins, losses, neutralCount, longs, shorts);
 
     // Show all-time daily PnL by default; use filtered range when a trade filter is active
     const dailyRows = state.activeTradeFilter

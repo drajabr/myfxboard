@@ -160,6 +160,7 @@ const buildEmptyAnalyticsResponse = (
     trades_returned: 0,
     filtered_summary: { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0 },
     filtered_distribution: { wins: 0, losses: 0, neutral: 0 },
+    filtered_direction_distribution: { longs: 0, shorts: 0, unknown: 0 },
     filtered_daily_pnl: [],
     alltime_daily_pnl: [],
     pnl_by_day_of_week: [],
@@ -265,6 +266,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
     let filteredTradesTotal = 0;
     const filteredSummaryTotals = { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0 };
     const distribution = { wins: 0, losses: 0, neutral: 0 };
+    const directionDistribution = { longs: 0, shorts: 0, unknown: 0 };
 
     const monthBase = new Date();
     monthBase.setMonth(monthBase.getMonth() + monthShift);
@@ -286,6 +288,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
         curveTradesRaw,
         filteredCount,
         filteredSummary,
+        filteredDirectionSummary,
         filteredDailyRows,
         allTimeDailyRows,
         dayOfWeekRows,
@@ -305,6 +308,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
         tradeQueries.findByEventTimeRange(accountId, filterStartMs, filterEndMs),
         tradeQueries.countByEventTimeRange(accountId, filterStartMs, filterEndMs),
         tradeQueries.summarizeByEventTimeRange(accountId, filterStartMs, filterEndMs),
+        tradeQueries.summarizeDirectionDistributionByEventTimeRange(accountId, filterStartMs, filterEndMs),
         tradeQueries.summarizeDailyPnlByEventTimeRange(accountId, dailyPnlStartMs, dailyPnlEndMs),
         tradeQueries.summarizeDailyPnlAllTimeByEventTime(accountId),
         tradeQueries.summarizePnlByDayOfWeekByEventTimeRange(accountId, groupedPnlStartMs, groupedPnlEndMs),
@@ -337,6 +341,9 @@ router.get('/analytics', async (req: Request, res: Response) => {
       distribution.wins += filteredSummary.wins || 0;
       distribution.losses += filteredSummary.losses || 0;
       distribution.neutral += filteredSummary.neutral || 0;
+      directionDistribution.longs += filteredDirectionSummary.longs || 0;
+      directionDistribution.shorts += filteredDirectionSummary.shorts || 0;
+      directionDistribution.unknown += filteredDirectionSummary.unknown || 0;
 
       metricsTotals.trade_count += metricsRow.trade_count || 0;
       metricsTotals.win_count += metricsRow.win_count || 0;
@@ -542,6 +549,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
         neutral: toNum(filteredSummaryTotals.neutral),
       },
       filtered_distribution: distribution,
+      filtered_direction_distribution: directionDistribution,
       filtered_daily_pnl: filteredDailyPnl,
       alltime_daily_pnl: allTimeDailyPnl,
       pnl_by_day_of_week: pnlByDayOfWeek,

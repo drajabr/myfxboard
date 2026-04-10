@@ -276,6 +276,36 @@ export const tradeQueries = {
     return result.rows[0] || { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0 };
   },
 
+  async summarizeDirectionDistributionByEventTimeRange(
+    account_id: string,
+    from_time_ms: number,
+    to_time_ms: number
+  ): Promise<{ longs: number; shorts: number; unknown: number }> {
+    const result = await query(
+      `SELECT
+          COUNT(*) FILTER (
+            WHERE exit_price IS NOT NULL
+              AND profit IS NOT NULL
+              AND ((exit_price - entry_price) * profit) > 0
+          )::int AS longs,
+          COUNT(*) FILTER (
+            WHERE exit_price IS NOT NULL
+              AND profit IS NOT NULL
+              AND ((exit_price - entry_price) * profit) < 0
+          )::int AS shorts,
+          COUNT(*) FILTER (
+            WHERE exit_price IS NULL
+               OR profit IS NULL
+               OR ((exit_price - entry_price) * profit) = 0
+          )::int AS unknown
+         FROM trades
+        WHERE account_id = $1
+          AND COALESCE(exit_time_ms, entry_time_ms) BETWEEN $2 AND $3`,
+      [account_id, from_time_ms, to_time_ms]
+    );
+    return result.rows[0] || { longs: 0, shorts: 0, unknown: 0 };
+  },
+
   async summarizeMetrics(account_id: string): Promise<{
     trade_count: number;
     win_count: number;

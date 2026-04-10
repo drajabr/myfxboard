@@ -145,6 +145,22 @@
                                 <span id="distNeutralText">Neutral: 0 (0.0%)</span>
                             </div>
                         </div>
+                        <div class="distribution-secondary">
+                            <div class="distribution-secondary-row">
+                                <span class="distribution-secondary-label">Longs</span>
+                                <div class="distribution-secondary-track">
+                                    <div id="distLongsSegment" class="distribution-secondary-fill distribution-secondary-fill--longs" style="width:0%"></div>
+                                </div>
+                                <span id="distLongsText" class="distribution-secondary-value">0 (0.0%)</span>
+                            </div>
+                            <div class="distribution-secondary-row">
+                                <span class="distribution-secondary-label">Shorts</span>
+                                <div class="distribution-secondary-track">
+                                    <div id="distShortsSegment" class="distribution-secondary-fill distribution-secondary-fill--shorts" style="width:0%"></div>
+                                </div>
+                                <span id="distShortsText" class="distribution-secondary-value">0 (0.0%)</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="chart-container">
@@ -175,19 +191,20 @@
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>Account</th>
-                            <th>Symbol</th>
-                            <th>Entry</th>
-                            <th>Exit</th>
-                            <th>Size</th>
-                            <th>PnL</th>
-                            <th>Result</th>
-                            <th>Open Time</th>
-                            <th>Close Time</th>
+                            <th><button class="sort-btn" type="button" data-trades-sort="account_id">Account</button></th>
+                            <th><button class="sort-btn" type="button" data-trades-sort="symbol">Symbol</button></th>
+                            <th><button class="sort-btn" type="button" data-trades-sort="entry_price">Entry</button></th>
+                            <th><button class="sort-btn" type="button" data-trades-sort="exit_price">Exit</button></th>
+                            <th><button class="sort-btn" type="button" data-trades-sort="size">Size</button></th>
+                            <th><button class="sort-btn" type="button" data-trades-sort="profit">PnL</button></th>
+                            <th><button class="sort-btn" type="button" data-trades-sort="result">Result</button></th>
+                            <th><button class="sort-btn" type="button" data-trades-sort="entry_time_ms">Open Time</button></th>
+                            <th><button class="sort-btn" type="button" data-trades-sort="exit_time_ms">Close Time</button></th>
+                            <th><button class="sort-btn" type="button" data-trades-sort="duration_sec">Duration</button></th>
                         </tr>
                     </thead>
                     <tbody id="tradesTable">
-                        <tr><td colspan="9" style="text-align:center;">No trades</td></tr>
+                        <tr><td colspan="10" style="text-align:center;">No trades</td></tr>
                     </tbody>
                 </table>
                 <div class="trades-footer">
