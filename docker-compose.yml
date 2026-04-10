@@ -17,9 +17,10 @@ services:
       - ./db/migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dashboard -d myfxboard"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 0s
     networks:
       - myfxboard-net
 
@@ -50,10 +51,10 @@ services:
       - ./logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
+      interval: 3s
+      timeout: 3s
       retries: 3
-      start_period: 40s
+      start_period: 5s
     networks:
       - myfxboard-net
     restart: unless-stopped

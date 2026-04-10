@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS trades (
   duration_sec INTEGER,
   result TEXT CHECK (result IN ('win', 'loss', 'breakeven', 'open')),
   close_method TEXT,
-  UNIQUE(account_id, symbol, entry_time_ms)
+  CONSTRAINT trades_unique_trade_event UNIQUE(account_id, symbol, entry_time_ms, exit_time_ms, size)
 );
 
 CREATE INDEX IF NOT EXISTS idx_trades_account_time ON trades(account_id, entry_time_ms DESC);
@@ -112,6 +112,25 @@ CREATE TABLE IF NOT EXISTS unlock_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_unlock_sessions_token ON unlock_sessions(token);
 CREATE INDEX IF NOT EXISTS idx_unlock_sessions_expires ON unlock_sessions(expires_at);
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'trades_account_id_symbol_entry_time_ms_key'
+  ) THEN
+    ALTER TABLE trades DROP CONSTRAINT trades_account_id_symbol_entry_time_ms_key;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'trades_unique_trade_event'
+  ) THEN
+    ALTER TABLE trades
+      ADD CONSTRAINT trades_unique_trade_event
+      UNIQUE(account_id, symbol, entry_time_ms, exit_time_ms, size);
+  END IF;
+END $$;
 `;
 
 async function bootstrapSchema() {
@@ -149,7 +168,8 @@ export async function ensureDatabaseSchema(maxAttempts: number = 10) {
       }
 
       console.warn(`Database schema bootstrap attempt ${attempt} failed; retrying...`, error);
-      await sleep(2000);
+      const retryDelayMs = Math.min(250 * attempt, 2000);
+      await sleep(retryDelayMs);
     }
   }
 }

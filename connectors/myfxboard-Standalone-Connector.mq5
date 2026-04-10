@@ -103,82 +103,115 @@ private:
       }
       positions_json += "]";
 
-      // Collect all closed trades/deals from history
-      // MT5 trades are pairs: BUY deal (entry) + SELL deal (exit)
+      // Collect closed trades from deal history, paired by position id.
       string closed_trades_json = "[";
       bool first_trade = true;
+      long latest_closed_time_ms = 0;
+      string latest_closed_deal_id = "";
       
-      // Build a map of deals by symbol, then pair entry/exit
-      if(HistorySelect(0, sync_time_ms)) {
+      // HistorySelect expects datetime seconds, not unix milliseconds.
+      if(HistorySelect(0, TimeCurrent())) {
          int deals_total = HistoryDealsTotal();
-         
-         // Temporary storage for unpaired BUY deals (entry price, entry time, and the deal ticket)
-         struct UnpairedEntry {
+
+         struct PositionEntry {
+            long position_id;
             string symbol;
-            double entry_price;
-            long entry_time_ms;
-            ulong buy_deal_ticket;
+            double avg_entry_price;
+            double open_volume;
+            long first_entry_time_ms;
+            bool active;
          };
-         UnpairedEntry entries[1000];
+         PositionEntry entries[2000];
          int entry_count = 0;
-         
-         // First pass: collect all deals and pair them
+
          for(int i = 0; i < deals_total; i++) {
             ulong deal_ticket = HistoryDealGetTicket(i);
             if(deal_ticket == 0) continue;
-            
+
             int deal_type = (int)HistoryDealGetInteger(deal_ticket, DEAL_TYPE);
+            if(deal_type != DEAL_TYPE_BUY && deal_type != DEAL_TYPE_SELL)
+               continue;
+
+            int deal_entry = (int)HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
+            long position_id = (long)HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
             string deal_symbol = HistoryDealGetString(deal_ticket, DEAL_SYMBOL);
+            if(deal_symbol == "")
+               continue;
+
             double deal_volume = HistoryDealGetDouble(deal_ticket, DEAL_VOLUME);
             double deal_price = HistoryDealGetDouble(deal_ticket, DEAL_PRICE);
             long deal_time_ms = HistoryDealGetInteger(deal_ticket, DEAL_TIME_MSC);
             double deal_profit = HistoryDealGetDouble(deal_ticket, DEAL_PROFIT) + HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION) + HistoryDealGetDouble(deal_ticket, DEAL_SWAP);
-            
-            // BUY deal (type=0) = entry
-            if(deal_type == 0) {
-               if(entry_count < 1000) {
+
+            if(position_id <= 0)
+               continue;
+
+            int pos_idx = -1;
+            for(int idx = 0; idx < entry_count; idx++) {
+               if(entries[idx].active && entries[idx].position_id == position_id) {
+                  pos_idx = idx;
+                  break;
+               }
+            }
+
+            if(deal_entry == DEAL_ENTRY_IN) {
+               if(pos_idx >= 0) {
+                  double new_total_volume = entries[pos_idx].open_volume + deal_volume;
+                  if(new_total_volume > 0.0) {
+                     entries[pos_idx].avg_entry_price = ((entries[pos_idx].avg_entry_price * entries[pos_idx].open_volume) + (deal_price * deal_volume)) / new_total_volume;
+                     entries[pos_idx].open_volume = new_total_volume;
+                     if(deal_time_ms < entries[pos_idx].first_entry_time_ms)
+                        entries[pos_idx].first_entry_time_ms = deal_time_ms;
+                  }
+               } else if(entry_count < 2000) {
+                  entries[entry_count].position_id = position_id;
                   entries[entry_count].symbol = deal_symbol;
-                  entries[entry_count].entry_price = deal_price;
-                  entries[entry_count].entry_time_ms = deal_time_ms;
-                  entries[entry_count].buy_deal_ticket = deal_ticket;
+                  entries[entry_count].avg_entry_price = deal_price;
+                  entries[entry_count].open_volume = deal_volume;
+                  entries[entry_count].first_entry_time_ms = deal_time_ms;
+                  entries[entry_count].active = true;
                   entry_count++;
                }
             }
-            // SELL deal (type=1) = exit — match with most recent unpaired entry for same symbol
-            else if(deal_type == 1) {
-               int matched_idx = -1;
-               // Find the most recent unpaired BUY for this symbol
-               for(int j = entry_count - 1; j >= 0; j--) {
-                  if(entries[j].symbol == deal_symbol) {
-                     matched_idx = j;
-                     break;
+
+            if(deal_entry == DEAL_ENTRY_OUT || deal_entry == DEAL_ENTRY_OUT_BY) {
+               long entry_time = deal_time_ms;
+               double entry_price = deal_price;
+
+               if(pos_idx >= 0) {
+                  entry_time = entries[pos_idx].first_entry_time_ms;
+                  entry_price = entries[pos_idx].avg_entry_price;
+
+                  entries[pos_idx].open_volume -= deal_volume;
+                  if(entries[pos_idx].open_volume <= 0.00000001) {
+                     entries[pos_idx].open_volume = 0.0;
+                     entries[pos_idx].active = false;
                   }
                }
-               
-               if(matched_idx >= 0) {
-                  long entry_time = entries[matched_idx].entry_time_ms;
-                  double entry_price = entries[matched_idx].entry_price;
-                  long duration_ms = deal_time_ms - entry_time;
-                  long duration_sec = duration_ms / 1000;
-                  
-                  if(!first_trade) closed_trades_json += ",";
-                  first_trade = false;
-                  
-                  closed_trades_json += StringFormat(
-                     "{\"symbol\":\"%s\",\"volume\":%.2f,\"entry\":%.5f,\"exit\":%.5f,\"profit\":%.2f,\"entry_time_ms\":%lld,\"exit_time_ms\":%lld,\"duration_sec\":%lld,\"method\":\"paired\"}",
-                     deal_symbol, deal_volume, entry_price, deal_price, deal_profit, entry_time, deal_time_ms, duration_sec
-                  );
-                  
-                  // Remove matched entry from the list
-                  for(int k = matched_idx; k < entry_count - 1; k++) {
-                     entries[k] = entries[k + 1];
-                  }
-                  entry_count--;
+
+               long duration_ms = deal_time_ms - entry_time;
+               long duration_sec = duration_ms / 1000;
+               if(duration_sec < 0) duration_sec = 0;
+
+               if(!first_trade) closed_trades_json += ",";
+               first_trade = false;
+
+               closed_trades_json += StringFormat(
+                  "{\"symbol\":\"%s\",\"volume\":%.2f,\"entry\":%.5f,\"exit\":%.5f,\"profit\":%.5f,\"entry_time_ms\":%lld,\"exit_time_ms\":%lld,\"duration_sec\":%lld,\"method\":\"deal_out\"}",
+                  deal_symbol, deal_volume, entry_price, deal_price, deal_profit, entry_time, deal_time_ms, duration_sec
+               );
+
+               if(deal_time_ms > latest_closed_time_ms) {
+                  latest_closed_time_ms = deal_time_ms;
+                  latest_closed_deal_id = StringFormat("%llu", deal_ticket);
                }
             }
          }
       }
       closed_trades_json += "]";
+
+      if(latest_closed_time_ms == 0)
+         latest_closed_time_ms = sync_time_ms;
 
       double equity       = AccountInfoDouble(ACCOUNT_EQUITY);
       double balance      = AccountInfoDouble(ACCOUNT_BALANCE);
@@ -192,8 +225,8 @@ private:
       );
 
       string payload = StringFormat(
-         "{\"account_number\":\"%s\",\"positions\":%s,\"closed_trades\":%s,\"account\":%s,\"sync_id\":\"%lld\",\"ea_latest_closed_time_ms\":%lld,\"ea_latest_closed_deal_id\":\"\",\"open_positions_hash\":\"\"}",
-         account_number, positions_json, closed_trades_json, account_json, sync_time_ms, sync_time_ms
+         "{\"account_number\":\"%s\",\"positions\":%s,\"closed_trades\":%s,\"account\":%s,\"sync_id\":\"%lld\",\"ea_latest_closed_time_ms\":%lld,\"ea_latest_closed_deal_id\":\"%s\",\"open_positions_hash\":\"\"}",
+         account_number, positions_json, closed_trades_json, account_json, sync_time_ms, latest_closed_time_ms, latest_closed_deal_id
       );
 
       if(s_debug_log)

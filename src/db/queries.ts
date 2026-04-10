@@ -83,7 +83,7 @@ export const tradeQueries = {
     const result = await query(
       `INSERT INTO trades (account_id, symbol, size, entry_price, exit_price, profit, profit_pct, entry_time_ms, exit_time_ms, duration_sec, result, close_method)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-       ON CONFLICT (account_id, symbol, entry_time_ms) DO NOTHING
+       ON CONFLICT ON CONSTRAINT trades_unique_trade_event DO NOTHING
        RETURNING *`,
       [trade.account_id, trade.symbol, trade.size, trade.entry_price, trade.exit_price, trade.profit, 
        trade.profit_pct, trade.entry_time_ms, trade.exit_time_ms, trade.duration_sec, trade.result, trade.close_method]

@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS trades (
   duration_sec INTEGER,
   result TEXT CHECK (result IN ('win', 'loss', 'breakeven', 'open')),
   close_method TEXT,
-  UNIQUE(account_id, symbol, entry_time_ms)
+  CONSTRAINT trades_unique_trade_event UNIQUE(account_id, symbol, entry_time_ms, exit_time_ms, size)
 );
 
 CREATE INDEX IF NOT EXISTS idx_trades_account_time ON trades(account_id, entry_time_ms DESC);
