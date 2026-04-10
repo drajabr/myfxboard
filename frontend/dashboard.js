@@ -567,7 +567,7 @@ function buildBarChartOptions(text, labelCount = 0) {
         responsive: true,
         maintainAspectRatio: false,
         layout: {
-            padding: { left: 8, right: 12, top: 6, bottom: 4 },
+            padding: { left: 10, right: 18, top: 8, bottom: 18 },
         },
         plugins: {
             legend: { labels: { color: text } },
@@ -600,19 +600,33 @@ function buildBarChartOptions(text, labelCount = 0) {
     };
 }
 
-function updateDistributionProgress(wins, losses, neutralCount, longs, shorts) {
+function updateDistributionProgress(wins, losses, neutralCount, directionalOutcomes) {
     const winsSegment = document.getElementById('distWinsSegment');
     const lossesSegment = document.getElementById('distLossesSegment');
     const neutralSegment = document.getElementById('distNeutralSegment');
+    const allText = document.getElementById('distAllText');
     const winsText = document.getElementById('distWinsText');
     const lossesText = document.getElementById('distLossesText');
     const neutralText = document.getElementById('distNeutralText');
-    const longsSegment = document.getElementById('distLongsSegment');
-    const shortsSegment = document.getElementById('distShortsSegment');
+
     const longsText = document.getElementById('distLongsText');
     const shortsText = document.getElementById('distShortsText');
 
-    if (!winsSegment || !lossesSegment || !neutralSegment || !winsText || !lossesText || !neutralText || !longsSegment || !shortsSegment || !longsText || !shortsText) {
+    const longWinsSegment = document.getElementById('distLongWinsSegment');
+    const longLossesSegment = document.getElementById('distLongLossesSegment');
+    const longNeutralSegment = document.getElementById('distLongNeutralSegment');
+    const longWinsText = document.getElementById('distLongWinsText');
+    const longLossesText = document.getElementById('distLongLossesText');
+    const longNeutralText = document.getElementById('distLongNeutralText');
+
+    const shortWinsSegment = document.getElementById('distShortWinsSegment');
+    const shortLossesSegment = document.getElementById('distShortLossesSegment');
+    const shortNeutralSegment = document.getElementById('distShortNeutralSegment');
+    const shortWinsText = document.getElementById('distShortWinsText');
+    const shortLossesText = document.getElementById('distShortLossesText');
+    const shortNeutralText = document.getElementById('distShortNeutralText');
+
+    if (!winsSegment || !lossesSegment || !neutralSegment || !allText || !winsText || !lossesText || !neutralText || !longsText || !shortsText || !longWinsSegment || !longLossesSegment || !longNeutralSegment || !longWinsText || !longLossesText || !longNeutralText || !shortWinsSegment || !shortLossesSegment || !shortNeutralSegment || !shortWinsText || !shortLossesText || !shortNeutralText) {
         return;
     }
 
@@ -625,18 +639,46 @@ function updateDistributionProgress(wins, losses, neutralCount, longs, shorts) {
     lossesSegment.style.width = `${lossesPct}%`;
     neutralSegment.style.width = `${neutralPct}%`;
 
-    winsText.textContent = `Wins: ${wins} (${winsPct.toFixed(1)}%)`;
-    lossesText.textContent = `Losses: ${losses} (${lossesPct.toFixed(1)}%)`;
-    neutralText.textContent = `Neutral: ${neutralCount} (${neutralPct.toFixed(1)}%)`;
+    allText.textContent = `${total} total`;
+    winsText.textContent = `W ${wins} (${winsPct.toFixed(1)}%)`;
+    lossesText.textContent = `L ${losses} (${lossesPct.toFixed(1)}%)`;
+    neutralText.textContent = `N ${neutralCount} (${neutralPct.toFixed(1)}%)`;
 
-    const directionTotal = Math.max(0, longs + shorts);
-    const longsPct = directionTotal > 0 ? (longs / directionTotal) * 100 : 0;
-    const shortsPct = directionTotal > 0 ? (shorts / directionTotal) * 100 : 0;
+    const longWins = toNum(directionalOutcomes?.long_wins);
+    const longLosses = toNum(directionalOutcomes?.long_losses);
+    const longNeutral = toNum(directionalOutcomes?.long_neutral);
+    const shortWins = toNum(directionalOutcomes?.short_wins);
+    const shortLosses = toNum(directionalOutcomes?.short_losses);
+    const shortNeutral = toNum(directionalOutcomes?.short_neutral);
 
-    longsSegment.style.width = `${longsPct}%`;
-    shortsSegment.style.width = `${shortsPct}%`;
-    longsText.textContent = `${longs} (${longsPct.toFixed(1)}%)`;
-    shortsText.textContent = `${shorts} (${shortsPct.toFixed(1)}%)`;
+    const longTotal = Math.max(0, longWins + longLosses + longNeutral);
+    const shortTotal = Math.max(0, shortWins + shortLosses + shortNeutral);
+
+    const longWinsPct = longTotal > 0 ? (longWins / longTotal) * 100 : 0;
+    const longLossesPct = longTotal > 0 ? (longLosses / longTotal) * 100 : 0;
+    const longNeutralPct = longTotal > 0 ? (longNeutral / longTotal) * 100 : 100;
+
+    const shortWinsPct = shortTotal > 0 ? (shortWins / shortTotal) * 100 : 0;
+    const shortLossesPct = shortTotal > 0 ? (shortLosses / shortTotal) * 100 : 0;
+    const shortNeutralPct = shortTotal > 0 ? (shortNeutral / shortTotal) * 100 : 100;
+
+    longWinsSegment.style.width = `${longWinsPct}%`;
+    longLossesSegment.style.width = `${longLossesPct}%`;
+    longNeutralSegment.style.width = `${longNeutralPct}%`;
+
+    shortWinsSegment.style.width = `${shortWinsPct}%`;
+    shortLossesSegment.style.width = `${shortLossesPct}%`;
+    shortNeutralSegment.style.width = `${shortNeutralPct}%`;
+
+    longsText.textContent = `${longTotal} total`;
+    longWinsText.textContent = `W ${longWins} (${longWinsPct.toFixed(1)}%)`;
+    longLossesText.textContent = `L ${longLosses} (${longLossesPct.toFixed(1)}%)`;
+    longNeutralText.textContent = `N ${longNeutral} (${longNeutralPct.toFixed(1)}%)`;
+
+    shortsText.textContent = `${shortTotal} total`;
+    shortWinsText.textContent = `W ${shortWins} (${shortWinsPct.toFixed(1)}%)`;
+    shortLossesText.textContent = `L ${shortLosses} (${shortLossesPct.toFixed(1)}%)`;
+    shortNeutralText.textContent = `N ${shortNeutral} (${shortNeutralPct.toFixed(1)}%)`;
 }
 
 function updateCharts(data) {
@@ -676,11 +718,6 @@ function updateCharts(data) {
         idx === mainCurveRows.length - 1 ? 5 : mainCurvePointRadius
     );
 
-    const pnlCurveTitle = document.getElementById('pnlCurveTitle');
-    if (pnlCurveTitle) {
-        pnlCurveTitle.textContent = 'PnL Curve (Last Point Includes Floating PnL)';
-    }
-
     if (!charts.pnlCurve) {
         charts.pnlCurve = new Chart(document.getElementById('pnlCurveChart'), {
             type: mainCurveType,
@@ -704,7 +741,7 @@ function updateCharts(data) {
                 responsive: true,
                 maintainAspectRatio: false,
                 layout: {
-                    padding: { left: 8, right: 12, top: 6, bottom: 4 },
+                    padding: { left: 10, right: 18, top: 8, bottom: 18 },
                 },
                 plugins: {
                     legend: { labels: { color: text } },
@@ -759,9 +796,7 @@ function updateCharts(data) {
     const wins = toNum(data.filtered_distribution?.wins);
     const losses = toNum(data.filtered_distribution?.losses);
     const neutralCount = toNum(data.filtered_distribution?.neutral);
-    const longs = toNum(data.filtered_direction_distribution?.longs);
-    const shorts = toNum(data.filtered_direction_distribution?.shorts);
-    updateDistributionProgress(wins, losses, neutralCount, longs, shorts);
+    updateDistributionProgress(wins, losses, neutralCount, data.filtered_direction_outcome_distribution);
 
     // Show all-time daily PnL by default; use filtered range when a trade filter is active
     const dailyRows = state.activeTradeFilter
@@ -772,13 +807,6 @@ function updateCharts(data) {
     const dailyRawLabels = dailyRows.map((r) => r.date || '');
     const dailyLabels = dailyRawLabels.map((d) => formatIsoDateShort(d));
     const dailyValues = dailyRows.map((r) => toNum(r.pnl));
-
-    const dailyTitle = document.getElementById('dailyPnlChartTitle');
-    if (dailyTitle) {
-        dailyTitle.textContent = state.activeTradeFilter
-            ? `Daily PnL (${state.activeTradeFilter.label})`
-            : 'Daily PnL (All Time)';
-    }
 
     if (!charts.dailyPnl) {
         charts.dailyPnl = new Chart(document.getElementById('dailyPnlChart'), {
@@ -880,7 +908,7 @@ function renderMonthlyCalendar(monthly) {
     document.getElementById('monthCalendarTitle').textContent = monthly.title;
     const target = document.getElementById('monthCalendar');
 
-    const cells = [];
+    const cells = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => `<div class="calendar-dow">${day}</div>`);
     for (let i = 0; i < monthly.first_weekday; i += 1) {
         cells.push('<div class="calendar-cell empty"></div>');
     }

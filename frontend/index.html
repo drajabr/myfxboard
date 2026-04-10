@@ -55,7 +55,6 @@
                     <div class="metric-grid" id="tradeMetricsGrid"></div>
                 </div>
                 <div class="chart-container">
-                    <h3 id="pnlCurveTitle">PnL Curve</h3>
                     <canvas id="pnlCurveChart"></canvas>
                 </div>
             </section>
@@ -124,47 +123,87 @@
 
             <section class="charts-row">
                 <div class="chart-container">
-                    <h3>Win/Loss Distribution</h3>
                     <div id="winLossProgress" class="distribution-progress" aria-live="polite">
-                        <div class="distribution-track" role="img" aria-label="Wins, losses, and neutral distribution">
-                            <div id="distWinsSegment" class="distribution-segment distribution-segment--wins" style="width:0%"></div>
-                            <div id="distLossesSegment" class="distribution-segment distribution-segment--losses" style="width:0%"></div>
-                            <div id="distNeutralSegment" class="distribution-segment distribution-segment--neutral" style="width:100%"></div>
-                        </div>
-                        <div class="distribution-legend">
-                            <div class="distribution-item">
-                                <span class="distribution-dot distribution-dot--wins"></span>
-                                <span id="distWinsText">Wins: 0 (0.0%)</span>
+                        <div class="distribution-block">
+                            <div class="distribution-block-head">
+                                <span class="distribution-block-title">All Trades</span>
+                                <span id="distAllText" class="distribution-block-meta">0 total</span>
                             </div>
-                            <div class="distribution-item">
-                                <span class="distribution-dot distribution-dot--losses"></span>
-                                <span id="distLossesText">Losses: 0 (0.0%)</span>
+                            <div class="distribution-track" role="img" aria-label="Wins, losses, and neutral distribution">
+                                <div id="distWinsSegment" class="distribution-segment distribution-segment--wins" style="width:0%"></div>
+                                <div id="distLossesSegment" class="distribution-segment distribution-segment--losses" style="width:0%"></div>
+                                <div id="distNeutralSegment" class="distribution-segment distribution-segment--neutral" style="width:100%"></div>
                             </div>
-                            <div class="distribution-item">
-                                <span class="distribution-dot distribution-dot--neutral"></span>
-                                <span id="distNeutralText">Neutral: 0 (0.0%)</span>
-                            </div>
-                        </div>
-                        <div class="distribution-secondary">
-                            <div class="distribution-secondary-row">
-                                <span class="distribution-secondary-label">Longs</span>
-                                <div class="distribution-secondary-track">
-                                    <div id="distLongsSegment" class="distribution-secondary-fill distribution-secondary-fill--longs" style="width:0%"></div>
+                            <div class="distribution-legend">
+                                <div class="distribution-item">
+                                    <span class="distribution-dot distribution-dot--wins"></span>
+                                    <span id="distWinsText">W 0 (0.0%)</span>
                                 </div>
-                                <span id="distLongsText" class="distribution-secondary-value">0 (0.0%)</span>
-                            </div>
-                            <div class="distribution-secondary-row">
-                                <span class="distribution-secondary-label">Shorts</span>
-                                <div class="distribution-secondary-track">
-                                    <div id="distShortsSegment" class="distribution-secondary-fill distribution-secondary-fill--shorts" style="width:0%"></div>
+                                <div class="distribution-item">
+                                    <span class="distribution-dot distribution-dot--losses"></span>
+                                    <span id="distLossesText">L 0 (0.0%)</span>
                                 </div>
-                                <span id="distShortsText" class="distribution-secondary-value">0 (0.0%)</span>
+                                <div class="distribution-item">
+                                    <span class="distribution-dot distribution-dot--neutral"></span>
+                                    <span id="distNeutralText">N 0 (0.0%)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="distribution-block">
+                            <div class="distribution-block-head">
+                                <span class="distribution-block-title">Longs</span>
+                                <span id="distLongsText" class="distribution-block-meta">0 total</span>
+                            </div>
+                            <div class="distribution-track" role="img" aria-label="Long trades win, loss, and neutral distribution">
+                                <div id="distLongWinsSegment" class="distribution-segment distribution-segment--wins" style="width:0%"></div>
+                                <div id="distLongLossesSegment" class="distribution-segment distribution-segment--losses" style="width:0%"></div>
+                                <div id="distLongNeutralSegment" class="distribution-segment distribution-segment--neutral" style="width:100%"></div>
+                            </div>
+                            <div class="distribution-legend">
+                                <div class="distribution-item">
+                                    <span class="distribution-dot distribution-dot--wins"></span>
+                                    <span id="distLongWinsText">W 0 (0.0%)</span>
+                                </div>
+                                <div class="distribution-item">
+                                    <span class="distribution-dot distribution-dot--losses"></span>
+                                    <span id="distLongLossesText">L 0 (0.0%)</span>
+                                </div>
+                                <div class="distribution-item">
+                                    <span class="distribution-dot distribution-dot--neutral"></span>
+                                    <span id="distLongNeutralText">N 0 (0.0%)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="distribution-block">
+                            <div class="distribution-block-head">
+                                <span class="distribution-block-title">Shorts</span>
+                                <span id="distShortsText" class="distribution-block-meta">0 total</span>
+                            </div>
+                            <div class="distribution-track" role="img" aria-label="Short trades win, loss, and neutral distribution">
+                                <div id="distShortWinsSegment" class="distribution-segment distribution-segment--wins" style="width:0%"></div>
+                                <div id="distShortLossesSegment" class="distribution-segment distribution-segment--losses" style="width:0%"></div>
+                                <div id="distShortNeutralSegment" class="distribution-segment distribution-segment--neutral" style="width:100%"></div>
+                            </div>
+                            <div class="distribution-legend">
+                                <div class="distribution-item">
+                                    <span class="distribution-dot distribution-dot--wins"></span>
+                                    <span id="distShortWinsText">W 0 (0.0%)</span>
+                                </div>
+                                <div class="distribution-item">
+                                    <span class="distribution-dot distribution-dot--losses"></span>
+                                    <span id="distShortLossesText">L 0 (0.0%)</span>
+                                </div>
+                                <div class="distribution-item">
+                                    <span class="distribution-dot distribution-dot--neutral"></span>
+                                    <span id="distShortNeutralText">N 0 (0.0%)</span>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
                 <div class="chart-container">
-                    <h3 id="dailyPnlChartTitle">Daily PnL (All Time)</h3>
                     <canvas id="dailyPnlChart"></canvas>
                 </div>
             </section>
@@ -172,11 +211,9 @@
             <!-- New charts before historic trades table -->
             <section class="charts-row">
                 <div class="chart-container">
-                    <h3>PnL by Day of Week</h3>
                     <canvas id="pnlByDayOfWeekChart"></canvas>
                 </div>
                 <div class="chart-container">
-                    <h3>PnL by Hour of Day</h3>
                     <canvas id="pnlByHourOfDayChart"></canvas>
                 </div>
             </section>

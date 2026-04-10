@@ -306,6 +306,52 @@ export const tradeQueries = {
     return result.rows[0] || { longs: 0, shorts: 0, unknown: 0 };
   },
 
+  async summarizeDirectionOutcomeDistributionByEventTimeRange(
+    account_id: string,
+    from_time_ms: number,
+    to_time_ms: number
+  ): Promise<{
+    long_wins: number;
+    long_losses: number;
+    long_neutral: number;
+    short_wins: number;
+    short_losses: number;
+    short_neutral: number;
+  }> {
+    const result = await query(
+      `WITH scoped AS (
+          SELECT
+            profit,
+            CASE
+              WHEN exit_price IS NULL OR profit IS NULL THEN 'unknown'
+              WHEN ((exit_price - entry_price) * profit) > 0 THEN 'long'
+              WHEN ((exit_price - entry_price) * profit) < 0 THEN 'short'
+              ELSE 'unknown'
+            END AS direction
+          FROM trades
+          WHERE account_id = $1
+            AND COALESCE(exit_time_ms, entry_time_ms) BETWEEN $2 AND $3
+      )
+      SELECT
+        COUNT(*) FILTER (WHERE direction = 'long' AND profit > 0)::int AS long_wins,
+        COUNT(*) FILTER (WHERE direction = 'long' AND profit < 0)::int AS long_losses,
+        COUNT(*) FILTER (WHERE direction = 'long' AND profit = 0)::int AS long_neutral,
+        COUNT(*) FILTER (WHERE direction = 'short' AND profit > 0)::int AS short_wins,
+        COUNT(*) FILTER (WHERE direction = 'short' AND profit < 0)::int AS short_losses,
+        COUNT(*) FILTER (WHERE direction = 'short' AND profit = 0)::int AS short_neutral
+      FROM scoped`,
+      [account_id, from_time_ms, to_time_ms]
+    );
+    return result.rows[0] || {
+      long_wins: 0,
+      long_losses: 0,
+      long_neutral: 0,
+      short_wins: 0,
+      short_losses: 0,
+      short_neutral: 0,
+    };
+  },
+
   async summarizeMetrics(account_id: string): Promise<{
     trade_count: number;
     win_count: number;
