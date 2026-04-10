@@ -635,7 +635,7 @@ function updateDistributionProgress(wins, losses, neutralCount, directionalOutco
     }
 
     const total = Math.max(0, wins + losses + neutralCount);
-                legend: { display: false, labels: { color: text } },
+    const winsPct = total > 0 ? (wins / total) * 100 : 0;
     const lossesPct = total > 0 ? (losses / total) * 100 : 0;
     const neutralPct = total > 0 ? (neutralCount / total) * 100 : 100;
 
