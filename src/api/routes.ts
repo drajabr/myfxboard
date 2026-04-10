@@ -3,6 +3,19 @@ import { accountQueries, positionQueries, tradeQueries, snapshotQueries } from '
 import { DashboardSummary } from '../types/index.js';
 
 const router = Router();
+const DEFAULT_BREAKEVEN_TOLERANCE_FLOOR = 1.0;
+const DEFAULT_BREAKEVEN_TOLERANCE_MAX = 5.0;
+
+const resolveBreakevenToleranceFloor = () => {
+  const configured = Number(process.env.BREAKEVEN_TOLERANCE_FLOOR);
+  return Number.isFinite(configured) && configured >= 0 ? configured : DEFAULT_BREAKEVEN_TOLERANCE_FLOOR;
+};
+
+const resolveBreakevenToleranceMax = (floor: number) => {
+  const configured = Number(process.env.BREAKEVEN_TOLERANCE_MAX);
+  const effective = Number.isFinite(configured) && configured >= 0 ? configured : DEFAULT_BREAKEVEN_TOLERANCE_MAX;
+  return Math.max(effective, floor);
+};
 
 const toNum = (value: unknown, fallback = 0): number => {
   if (value === null || value === undefined) {
@@ -158,8 +171,8 @@ const buildEmptyAnalyticsResponse = (
     recent_trades: [],
     trades_total_matching: 0,
     trades_returned: 0,
-    filtered_summary: { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0 },
-    filtered_distribution: { wins: 0, losses: 0, neutral: 0 },
+    filtered_summary: { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0, breakeven: 0 },
+    filtered_distribution: { wins: 0, losses: 0, neutral: 0, breakeven: 0 },
     filtered_direction_distribution: { longs: 0, shorts: 0, unknown: 0 },
     filtered_direction_outcome_distribution: {
       long_wins: 0,
@@ -239,6 +252,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
 
     const filterStartMs = Number.isFinite(tradeFromMs) ? tradeFromMs : 0;
     const filterEndMs = Number.isFinite(tradeToMs) ? tradeToMs : nowMs;
+    const breakevenToleranceFloor = resolveBreakevenToleranceFloor();
+    const breakevenToleranceMax = resolveBreakevenToleranceMax(breakevenToleranceFloor);
     const dailyPnlStartMs = hasTradeFilter ? filterStartMs : Math.max(nowMs - (30 * 24 * 60 * 60 * 1000), 0);
     const dailyPnlEndMs = hasTradeFilter ? filterEndMs : nowMs;
     const groupedPnlStartMs = hasTradeFilter ? filterStartMs : 0;
@@ -297,6 +312,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const targetYear = yearBase.getFullYear();
 
     for (const accountId of accountIds) {
+      const breakevenTolerance = await tradeQueries.getBreakevenTolerance(accountId, breakevenToleranceFloor, breakevenToleranceMax);
       const [
         accPositionsRaw,
         latestSnapshotRaw,
@@ -324,21 +340,21 @@ router.get('/analytics', async (req: Request, res: Response) => {
         tradeQueries.findWindowedByEventTime(accountId, filterStartMs, filterEndMs, recentTradesLimit),
         tradeQueries.findByEventTimeRange(accountId, filterStartMs, filterEndMs),
         tradeQueries.countByEventTimeRange(accountId, filterStartMs, filterEndMs),
-        tradeQueries.summarizeByEventTimeRange(accountId, filterStartMs, filterEndMs),
+        tradeQueries.summarizeByEventTimeRange(accountId, filterStartMs, filterEndMs, breakevenTolerance),
         tradeQueries.summarizeDirectionDistributionByEventTimeRange(accountId, filterStartMs, filterEndMs),
-        tradeQueries.summarizeDirectionOutcomeDistributionByEventTimeRange(accountId, filterStartMs, filterEndMs),
+        tradeQueries.summarizeDirectionOutcomeDistributionByEventTimeRange(accountId, filterStartMs, filterEndMs, breakevenTolerance),
         tradeQueries.summarizeDailyPnlByEventTimeRange(accountId, dailyPnlStartMs, dailyPnlEndMs),
         tradeQueries.summarizeDailyPnlAllTimeByEventTime(accountId),
         tradeQueries.summarizePnlByDayOfWeekByEventTimeRange(accountId, groupedPnlStartMs, groupedPnlEndMs),
         tradeQueries.summarizePnlByHourOfDayByEventTimeRange(accountId, groupedPnlStartMs, groupedPnlEndMs),
         tradeQueries.summarizeMonthCalendar(accountId, monthStart, monthEnd),
         tradeQueries.summarizeYearCalendar(accountId, targetYear),
-        tradeQueries.summarizeMetrics(accountId),
-        tradeQueries.summarizeByEventTimeRange(accountId, todayStartMs, nowMs),
-        tradeQueries.summarizeByEventTimeRange(accountId, last7dStartMs, nowMs),
-        tradeQueries.summarizeByEventTimeRange(accountId, last30dStartMs, nowMs),
-        tradeQueries.summarizeByEventTimeRange(accountId, ytdStartMs, nowMs),
-        tradeQueries.summarizeByEventTimeRange(accountId, 0, nowMs),
+        tradeQueries.summarizeMetrics(accountId, breakevenTolerance),
+        tradeQueries.summarizeByEventTimeRange(accountId, todayStartMs, nowMs, breakevenTolerance),
+        tradeQueries.summarizeByEventTimeRange(accountId, last7dStartMs, nowMs, breakevenTolerance),
+        tradeQueries.summarizeByEventTimeRange(accountId, last30dStartMs, nowMs, breakevenTolerance),
+        tradeQueries.summarizeByEventTimeRange(accountId, ytdStartMs, nowMs, breakevenTolerance),
+        tradeQueries.summarizeByEventTimeRange(accountId, 0, nowMs, breakevenTolerance),
       ]);
 
       const accPositions = accPositionsRaw.map(normalizePosition);
@@ -571,8 +587,12 @@ router.get('/analytics', async (req: Request, res: Response) => {
         wins: toNum(filteredSummaryTotals.wins),
         losses: toNum(filteredSummaryTotals.losses),
         neutral: toNum(filteredSummaryTotals.neutral),
+        breakeven: toNum(filteredSummaryTotals.neutral),
       },
-      filtered_distribution: distribution,
+      filtered_distribution: {
+        ...distribution,
+        breakeven: toNum(distribution.neutral),
+      },
       filtered_direction_distribution: directionDistribution,
       filtered_direction_outcome_distribution: directionOutcomeDistribution,
       filtered_daily_pnl: filteredDailyPnl,

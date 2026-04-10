@@ -136,6 +136,21 @@ export const positionQueries = {
 };
 
 export const tradeQueries = {
+  async getBreakevenTolerance(account_id: string, floor: number = 1.0, maxTolerance: number = 5.0): Promise<number> {
+    const result = await query(
+      `SELECT
+          COALESCE(PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY ABS(profit)) FILTER (WHERE profit < 0), 0)::float8 AS be_abs_loss_percentile
+         FROM trades
+        WHERE account_id = $1`,
+      [account_id]
+    );
+    const percentileTolerance = Number(result.rows[0]?.be_abs_loss_percentile || 0);
+    const safeFloor = Number.isFinite(floor) && floor >= 0 ? floor : 1.0;
+    const safeMax = Number.isFinite(maxTolerance) && maxTolerance >= safeFloor ? maxTolerance : 5.0;
+    const boundedPercentile = Math.min(Number.isFinite(percentileTolerance) ? percentileTolerance : 0, safeMax);
+    return Math.max(safeFloor, boundedPercentile);
+  },
+
   async deleteByAccount(account_id: string) {
     await query('DELETE FROM trades WHERE account_id = $1', [account_id]);
   },
@@ -239,19 +254,20 @@ export const tradeQueries = {
     account_id: string,
     from_time_ms: number,
     to_time_ms: number,
+    breakeven_tolerance: number,
     client?: pg.PoolClient
   ): Promise<{ trades_count: number; wins: number; losses: number }> {
     const q = getQueryFn(client);
     const result = await q(
       `SELECT
           COUNT(*)::int AS trades_count,
-          COUNT(*) FILTER (WHERE profit > 0)::int AS wins,
-          COUNT(*) FILTER (WHERE profit < 0)::int AS losses
+          COUNT(*) FILTER (WHERE profit > $4)::int AS wins,
+          COUNT(*) FILTER (WHERE profit < -$4)::int AS losses
          FROM trades
         WHERE account_id = $1
           AND exit_time_ms IS NOT NULL
           AND exit_time_ms BETWEEN $2 AND $3`,
-      [account_id, from_time_ms, to_time_ms]
+      [account_id, from_time_ms, to_time_ms, breakeven_tolerance]
     );
     return result.rows[0] || { trades_count: 0, wins: 0, losses: 0 };
   },
@@ -259,19 +275,20 @@ export const tradeQueries = {
   async summarizeByEventTimeRange(
     account_id: string,
     from_time_ms: number,
-    to_time_ms: number
+    to_time_ms: number,
+    breakeven_tolerance: number
   ): Promise<{ pnl: number; trades_count: number; wins: number; losses: number; neutral: number }> {
     const result = await query(
       `SELECT
           COALESCE(SUM(profit), 0)::float8 AS pnl,
           COUNT(*)::int AS trades_count,
-          COUNT(*) FILTER (WHERE profit > 0)::int AS wins,
-          COUNT(*) FILTER (WHERE profit < 0)::int AS losses,
-          COUNT(*) FILTER (WHERE profit = 0)::int AS neutral
+          COUNT(*) FILTER (WHERE profit > $4)::int AS wins,
+          COUNT(*) FILTER (WHERE profit < -$4)::int AS losses,
+          COUNT(*) FILTER (WHERE ABS(profit) <= $4)::int AS neutral
          FROM trades
         WHERE account_id = $1
           AND COALESCE(exit_time_ms, entry_time_ms) BETWEEN $2 AND $3`,
-      [account_id, from_time_ms, to_time_ms]
+      [account_id, from_time_ms, to_time_ms, breakeven_tolerance]
     );
     return result.rows[0] || { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0 };
   },
@@ -309,7 +326,8 @@ export const tradeQueries = {
   async summarizeDirectionOutcomeDistributionByEventTimeRange(
     account_id: string,
     from_time_ms: number,
-    to_time_ms: number
+    to_time_ms: number,
+    breakeven_tolerance: number
   ): Promise<{
     long_wins: number;
     long_losses: number;
@@ -333,14 +351,14 @@ export const tradeQueries = {
             AND COALESCE(exit_time_ms, entry_time_ms) BETWEEN $2 AND $3
       )
       SELECT
-        COUNT(*) FILTER (WHERE direction = 'long' AND profit > 0)::int AS long_wins,
-        COUNT(*) FILTER (WHERE direction = 'long' AND profit < 0)::int AS long_losses,
-        COUNT(*) FILTER (WHERE direction = 'long' AND profit = 0)::int AS long_neutral,
-        COUNT(*) FILTER (WHERE direction = 'short' AND profit > 0)::int AS short_wins,
-        COUNT(*) FILTER (WHERE direction = 'short' AND profit < 0)::int AS short_losses,
-        COUNT(*) FILTER (WHERE direction = 'short' AND profit = 0)::int AS short_neutral
+        COUNT(*) FILTER (WHERE direction = 'long' AND profit > $4)::int AS long_wins,
+        COUNT(*) FILTER (WHERE direction = 'long' AND profit < -$4)::int AS long_losses,
+        COUNT(*) FILTER (WHERE direction = 'long' AND ABS(profit) <= $4)::int AS long_neutral,
+        COUNT(*) FILTER (WHERE direction = 'short' AND profit > $4)::int AS short_wins,
+        COUNT(*) FILTER (WHERE direction = 'short' AND profit < -$4)::int AS short_losses,
+        COUNT(*) FILTER (WHERE direction = 'short' AND ABS(profit) <= $4)::int AS short_neutral
       FROM scoped`,
-      [account_id, from_time_ms, to_time_ms]
+      [account_id, from_time_ms, to_time_ms, breakeven_tolerance]
     );
     return result.rows[0] || {
       long_wins: 0,
@@ -352,7 +370,7 @@ export const tradeQueries = {
     };
   },
 
-  async summarizeMetrics(account_id: string): Promise<{
+  async summarizeMetrics(account_id: string, breakeven_tolerance: number): Promise<{
     trade_count: number;
     win_count: number;
     loss_count: number;
@@ -368,20 +386,20 @@ export const tradeQueries = {
     const result = await query(
       `SELECT
           COUNT(*)::int AS trade_count,
-          COUNT(*) FILTER (WHERE profit > 0)::int AS win_count,
-          COUNT(*) FILTER (WHERE profit < 0)::int AS loss_count,
-          COALESCE(AVG(profit) FILTER (WHERE profit > 0), 0)::float8 AS avg_win,
-          COALESCE(AVG(profit) FILTER (WHERE profit < 0), 0)::float8 AS avg_loss,
+          COUNT(*) FILTER (WHERE profit > $2)::int AS win_count,
+          COUNT(*) FILTER (WHERE profit < -$2)::int AS loss_count,
+          COALESCE(AVG(profit) FILTER (WHERE profit > $2), 0)::float8 AS avg_win,
+          COALESCE(AVG(profit) FILTER (WHERE profit < -$2), 0)::float8 AS avg_loss,
           COALESCE(MAX(profit), 0)::float8 AS max_win,
           COALESCE(MIN(profit), 0)::float8 AS max_loss,
           COALESCE(AVG(profit), 0)::float8 AS expectancy,
-          COALESCE(SUM(profit) FILTER (WHERE profit > 0), 0)::float8 AS gross_profit,
-          COALESCE(ABS(SUM(profit) FILTER (WHERE profit < 0)), 0)::float8 AS gross_loss,
+          COALESCE(SUM(profit) FILTER (WHERE profit > $2), 0)::float8 AS gross_profit,
+          COALESCE(ABS(SUM(profit) FILTER (WHERE profit < -$2)), 0)::float8 AS gross_loss,
           COALESCE(AVG(duration_sec) FILTER (WHERE duration_sec > 0), 0)::float8 AS avg_hold_seconds
          FROM trades
         WHERE account_id = $1
           AND profit IS NOT NULL`,
-      [account_id]
+      [account_id, breakeven_tolerance]
     );
     return result.rows[0] || {
       trade_count: 0,

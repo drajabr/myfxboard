@@ -642,7 +642,7 @@ function updateDistributionProgress(wins, losses, neutralCount, directionalOutco
     allText.textContent = `${total} total`;
     winsText.textContent = `W ${wins} (${winsPct.toFixed(1)}%)`;
     lossesText.textContent = `L ${losses} (${lossesPct.toFixed(1)}%)`;
-    neutralText.textContent = `N ${neutralCount} (${neutralPct.toFixed(1)}%)`;
+    neutralText.textContent = `BE ${neutralCount} (${neutralPct.toFixed(1)}%)`;
 
     const longWins = toNum(directionalOutcomes?.long_wins);
     const longLosses = toNum(directionalOutcomes?.long_losses);
@@ -673,12 +673,12 @@ function updateDistributionProgress(wins, losses, neutralCount, directionalOutco
     longsText.textContent = `${longTotal} total`;
     longWinsText.textContent = `W ${longWins} (${longWinsPct.toFixed(1)}%)`;
     longLossesText.textContent = `L ${longLosses} (${longLossesPct.toFixed(1)}%)`;
-    longNeutralText.textContent = `N ${longNeutral} (${longNeutralPct.toFixed(1)}%)`;
+    longNeutralText.textContent = `BE ${longNeutral} (${longNeutralPct.toFixed(1)}%)`;
 
     shortsText.textContent = `${shortTotal} total`;
     shortWinsText.textContent = `W ${shortWins} (${shortWinsPct.toFixed(1)}%)`;
     shortLossesText.textContent = `L ${shortLosses} (${shortLossesPct.toFixed(1)}%)`;
-    shortNeutralText.textContent = `N ${shortNeutral} (${shortNeutralPct.toFixed(1)}%)`;
+    shortNeutralText.textContent = `BE ${shortNeutral} (${shortNeutralPct.toFixed(1)}%)`;
 }
 
 function updateCharts(data) {
@@ -795,7 +795,7 @@ function updateCharts(data) {
 
     const wins = toNum(data.filtered_distribution?.wins);
     const losses = toNum(data.filtered_distribution?.losses);
-    const neutralCount = toNum(data.filtered_distribution?.neutral);
+    const neutralCount = toNum(data.filtered_distribution?.breakeven ?? data.filtered_distribution?.neutral);
     updateDistributionProgress(wins, losses, neutralCount, data.filtered_direction_outcome_distribution);
 
     // Show all-time daily PnL by default; use filtered range when a trade filter is active

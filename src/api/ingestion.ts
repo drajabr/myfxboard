@@ -7,6 +7,8 @@ import { Trade } from '../types/index.js';
 
 const router = Router();
 const DEFAULT_MIN_INGEST_INTERVAL_MS = 500;
+const DEFAULT_BREAKEVEN_TOLERANCE_FLOOR = 1.0;
+const DEFAULT_BREAKEVEN_TOLERANCE_MAX = 5.0;
 
 const resolveAccountId = (req: Request) => String(req.accountId || req.body?.account_number || '').trim();
 
@@ -24,11 +26,22 @@ const requireSharedSecret = () => {
   return sharedSecret;
 };
 
-const classifyTradeResult = (profit: number): Trade['result'] => {
-  if (profit > 0) {
+const resolveBreakevenToleranceFloor = () => {
+  const configured = Number(process.env.BREAKEVEN_TOLERANCE_FLOOR);
+  return Number.isFinite(configured) && configured >= 0 ? configured : DEFAULT_BREAKEVEN_TOLERANCE_FLOOR;
+};
+
+const resolveBreakevenToleranceMax = (floor: number) => {
+  const configured = Number(process.env.BREAKEVEN_TOLERANCE_MAX);
+  const effective = Number.isFinite(configured) && configured >= 0 ? configured : DEFAULT_BREAKEVEN_TOLERANCE_MAX;
+  return Math.max(effective, floor);
+};
+
+const classifyTradeResult = (profit: number, breakevenTolerance: number): Trade['result'] => {
+  if (profit > breakevenTolerance) {
     return 'win';
   }
-  if (profit < 0) {
+  if (profit < -breakevenTolerance) {
     return 'loss';
   }
   return 'breakeven';
@@ -122,6 +135,9 @@ router.post(
         include_history,
       } = req.body;
       const shouldIncludeHistory = include_history !== false;
+      const breakevenToleranceFloor = resolveBreakevenToleranceFloor();
+      const breakevenToleranceMax = resolveBreakevenToleranceMax(breakevenToleranceFloor);
+      const breakevenTolerance = await tradeQueries.getBreakevenTolerance(accountId, breakevenToleranceFloor, breakevenToleranceMax);
       const dayStartMs = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
       const dayEndMs = new Date(new Date().setHours(23, 59, 59, 999)).getTime();
 
@@ -156,7 +172,7 @@ router.post(
               entry_time_ms: trade.entry_time_ms,
               exit_time_ms: trade.exit_time_ms,
               duration_sec: trade.duration_sec,
-              result: classifyTradeResult(trade.profit),
+              result: classifyTradeResult(trade.profit, breakevenTolerance),
               close_method: trade.method,
             };
             await tradeQueries.insertTrade(tradeRecord, client);
@@ -164,7 +180,7 @@ router.post(
         }
 
         const today = new Date().toISOString().split('T')[0];
-        const daySummary = await tradeQueries.summarizeByExitRange(accountId, dayStartMs, dayEndMs, client);
+        const daySummary = await tradeQueries.summarizeByExitRange(accountId, dayStartMs, dayEndMs, breakevenTolerance, client);
         const safeEquity = asFiniteNumber(accountData?.equity, 0);
         const safeBalance = asFiniteNumber(accountData?.balance, 0);
         await snapshotQueries.insertSnapshot({
@@ -237,6 +253,9 @@ router.post(
       const sharedSecret = requireSharedSecret();
       await accountQueries.ensureByAccountNumber(accountId, sharedSecret);
       const { closed_trades, sync_id } = req.body;
+      const breakevenToleranceFloor = resolveBreakevenToleranceFloor();
+      const breakevenToleranceMax = resolveBreakevenToleranceMax(breakevenToleranceFloor);
+      const breakevenTolerance = await tradeQueries.getBreakevenTolerance(accountId, breakevenToleranceFloor, breakevenToleranceMax);
 
       // Insert closed trades (idempotent -- duplicates rejected)
       for (const trade of closed_trades) {
@@ -251,7 +270,7 @@ router.post(
           entry_time_ms: trade.entry_time_ms,
           exit_time_ms: trade.exit_time_ms,
           duration_sec: trade.duration_sec,
-          result: classifyTradeResult(trade.profit),
+          result: classifyTradeResult(trade.profit, breakevenTolerance),
           close_method: trade.method,
         };
         await tradeQueries.insertTrade(tradeRecord);
