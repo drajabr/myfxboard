@@ -35,6 +35,7 @@ router.post(
       }
 
       const account = await accountQueries.ensureByAccountNumber(accountId, sharedSecret);
+      console.log(`[INGEST] Account: ${accountId}, positions: ${req.body.positions?.length || 0}, closed_trades: ${req.body.closed_trades?.length || 0}`);
 
       const { positions, closed_trades, account: accountData, sync_id, ea_latest_closed_time_ms, ea_latest_closed_deal_id } = req.body;
 

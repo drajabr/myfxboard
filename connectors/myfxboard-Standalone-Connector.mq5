@@ -7,6 +7,8 @@
 #property strict
 #property description "Standalone connector EA - syncs positions and account data to myfxboard dashboard"
 
+#include <Trade\DealInfo.mqh>
+
 //--- Inputs
 input group "myfxboard Dashboard Connection"
 input string InpDashboardUrl         = "http://localhost:3000"; // Server URL
@@ -59,13 +61,15 @@ public:
       if(s_last_sync_ms > 0 && now_ms < s_last_sync_ms + s_sync_interval_ms)
          return false;
 
+      // Backend auth expects unix epoch milliseconds, not terminal uptime milliseconds.
+      long timestamp_ms = (long)TimeGMT() * 1000;
       string current_account = IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN));
       s_last_sync_ms = now_ms;
       s_in_flight    = true;
 
-      string payload   = BuildPayload(now_ms, current_account);
-      string signature = CreateSignature(current_account, now_ms, s_psk);
-      PostSync(payload, current_account, signature, now_ms);
+      string payload   = BuildPayload(timestamp_ms, current_account);
+      string signature = CreateSignature(current_account, timestamp_ms, s_psk);
+      PostSync(payload, current_account, signature, timestamp_ms);
       return true;
    }
 
@@ -74,7 +78,7 @@ public:
    static void SetDebugLog(bool enabled)  { s_debug_log = enabled; }
 
 private:
-   static string BuildPayload(ulong sync_time_ms, string account_number) {
+   static string BuildPayload(long sync_time_ms, string account_number) {
       string positions_json = "[";
       bool first_pos = true;
 
@@ -99,6 +103,83 @@ private:
       }
       positions_json += "]";
 
+      // Collect all closed trades/deals from history
+      // MT5 trades are pairs: BUY deal (entry) + SELL deal (exit)
+      string closed_trades_json = "[";
+      bool first_trade = true;
+      
+      // Build a map of deals by symbol, then pair entry/exit
+      if(HistorySelect(0, sync_time_ms)) {
+         int deals_total = HistoryDealsTotal();
+         
+         // Temporary storage for unpaired BUY deals (entry price, entry time, and the deal ticket)
+         struct UnpairedEntry {
+            string symbol;
+            double entry_price;
+            long entry_time_ms;
+            ulong buy_deal_ticket;
+         };
+         UnpairedEntry entries[1000];
+         int entry_count = 0;
+         
+         // First pass: collect all deals and pair them
+         for(int i = 0; i < deals_total; i++) {
+            ulong deal_ticket = HistoryDealGetTicket(i);
+            if(deal_ticket == 0) continue;
+            
+            int deal_type = (int)HistoryDealGetInteger(deal_ticket, DEAL_TYPE);
+            string deal_symbol = HistoryDealGetString(deal_ticket, DEAL_SYMBOL);
+            double deal_volume = HistoryDealGetDouble(deal_ticket, DEAL_VOLUME);
+            double deal_price = HistoryDealGetDouble(deal_ticket, DEAL_PRICE);
+            long deal_time_ms = HistoryDealGetInteger(deal_ticket, DEAL_TIME_MSC);
+            double deal_profit = HistoryDealGetDouble(deal_ticket, DEAL_PROFIT) + HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION) + HistoryDealGetDouble(deal_ticket, DEAL_SWAP);
+            
+            // BUY deal (type=0) = entry
+            if(deal_type == 0) {
+               if(entry_count < 1000) {
+                  entries[entry_count].symbol = deal_symbol;
+                  entries[entry_count].entry_price = deal_price;
+                  entries[entry_count].entry_time_ms = deal_time_ms;
+                  entries[entry_count].buy_deal_ticket = deal_ticket;
+                  entry_count++;
+               }
+            }
+            // SELL deal (type=1) = exit — match with most recent unpaired entry for same symbol
+            else if(deal_type == 1) {
+               int matched_idx = -1;
+               // Find the most recent unpaired BUY for this symbol
+               for(int j = entry_count - 1; j >= 0; j--) {
+                  if(entries[j].symbol == deal_symbol) {
+                     matched_idx = j;
+                     break;
+                  }
+               }
+               
+               if(matched_idx >= 0) {
+                  long entry_time = entries[matched_idx].entry_time_ms;
+                  double entry_price = entries[matched_idx].entry_price;
+                  long duration_ms = deal_time_ms - entry_time;
+                  long duration_sec = duration_ms / 1000;
+                  
+                  if(!first_trade) closed_trades_json += ",";
+                  first_trade = false;
+                  
+                  closed_trades_json += StringFormat(
+                     "{\"symbol\":\"%s\",\"volume\":%.2f,\"entry\":%.5f,\"exit\":%.5f,\"profit\":%.2f,\"entry_time_ms\":%lld,\"exit_time_ms\":%lld,\"duration_sec\":%lld,\"method\":\"paired\"}",
+                     deal_symbol, deal_volume, entry_price, deal_price, deal_profit, entry_time, deal_time_ms, duration_sec
+                  );
+                  
+                  // Remove matched entry from the list
+                  for(int k = matched_idx; k < entry_count - 1; k++) {
+                     entries[k] = entries[k + 1];
+                  }
+                  entry_count--;
+               }
+            }
+         }
+      }
+      closed_trades_json += "]";
+
       double equity       = AccountInfoDouble(ACCOUNT_EQUITY);
       double balance      = AccountInfoDouble(ACCOUNT_BALANCE);
       double margin_used  = AccountInfoDouble(ACCOUNT_MARGIN);
@@ -111,18 +192,18 @@ private:
       );
 
       string payload = StringFormat(
-         "{\"account_number\":\"%s\",\"positions\":%s,\"closed_trades\":[],\"account\":%s,\"sync_id\":\"%lld\",\"ea_latest_closed_time_ms\":%lld,\"ea_latest_closed_deal_id\":\"\",\"open_positions_hash\":\"\"}",
-         account_number, positions_json, account_json, sync_time_ms, sync_time_ms
+         "{\"account_number\":\"%s\",\"positions\":%s,\"closed_trades\":%s,\"account\":%s,\"sync_id\":\"%lld\",\"ea_latest_closed_time_ms\":%lld,\"ea_latest_closed_deal_id\":\"\",\"open_positions_hash\":\"\"}",
+         account_number, positions_json, closed_trades_json, account_json, sync_time_ms, sync_time_ms
       );
 
       if(s_debug_log)
-         Print("[DashboardConnector] Payload: ", StringLen(payload), " bytes");
+         Print("[DashboardConnector] Payload: ", StringLen(payload), " bytes, trades: ", HistoryDealsTotal());
 
       return payload;
    }
 
-   static string CreateSignature(string account_number, ulong timestamp_ms, string psk) {
-      return "dashboard_v2_" + account_number + "_" + IntegerToString((int)timestamp_ms) + "_" + psk;
+   static string CreateSignature(string account_number, long timestamp_ms, string psk) {
+      return "dashboard_v2_" + account_number + "_" + StringFormat("%lld", timestamp_ms) + "_" + psk;
    }
 
    static void PostSync(string payload, string account_number, string signature, long timestamp_ms) {
@@ -149,10 +230,18 @@ private:
             ResetLastError();
          }
       } else {
-         if(s_debug_log)
-            Print("[DashboardConnector] Sync sent for account ", account_number,
-                  " (", StringLen(payload), " bytes, response=", res, ")");
-         s_success_count++;
+         string response_text = CharArrayToString(response_data, 0, WHOLE_ARRAY, CP_UTF8);
+         if(res >= 200 && res < 300) {
+            if(s_debug_log)
+               Print("[DashboardConnector] Sync accepted for account ", account_number,
+                     " (", StringLen(payload), " bytes, status=", res, ")");
+            s_success_count++;
+         } else {
+            s_error_count++;
+            if(s_debug_log)
+               Print("[DashboardConnector] Sync rejected for account ", account_number,
+                     " (status=", res, ", body=", response_text, ")");
+         }
       }
       s_in_flight = false;
    }

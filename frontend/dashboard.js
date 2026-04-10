@@ -18,6 +18,10 @@ function formatMoney(value) {
     return `$ ${Number(value || 0).toFixed(2)}`;
 }
 
+function formatPrice(value, decimals = 5) {
+    return Number(value || 0).toFixed(decimals).replace(/\.?0+$/, '');
+}
+
 function formatPct(value) {
     return `${Number(value || 0).toFixed(1)}%`;
 }
@@ -222,11 +226,11 @@ function updatePositionsTable(positions) {
         <tr>
             <td>${pos.symbol}</td>
             <td>${Number(pos.size || 0).toFixed(2)}</td>
-            <td>${Number(pos.entry_price || 0).toFixed(5)}</td>
-            <td>${pos.current_price !== null ? Number(pos.current_price).toFixed(5) : '-'}</td>
+            <td>${formatPrice(pos.entry_price)}</td>
+            <td>${pos.current_price !== null ? formatPrice(pos.current_price) : '-'}</td>
             <td class="${pnlClass(pos.unrealized_pnl || 0)}">${formatMoney(pos.unrealized_pnl || 0)}</td>
-            <td>${pos.avg_sl !== null ? Number(pos.avg_sl).toFixed(5) : '-'}</td>
-            <td>${pos.avg_tp !== null ? Number(pos.avg_tp).toFixed(5) : '-'}</td>
+            <td>${pos.avg_sl !== null ? formatPrice(pos.avg_sl) : '-'}</td>
+            <td>${pos.avg_tp !== null ? formatPrice(pos.avg_tp) : '-'}</td>
         </tr>
     `).join('');
 }
@@ -234,21 +238,25 @@ function updatePositionsTable(positions) {
 function updateTradesTable(trades) {
     const tbody = document.getElementById('tradesTable');
     if (!trades || trades.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No trades</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No trades</td></tr>';
         return;
     }
 
-    tbody.innerHTML = trades.map((trade) => `
+    tbody.innerHTML = trades.map((trade) => {
+        const entryTime = trade.entry_time_ms ? new Date(trade.entry_time_ms).toLocaleString() : '-';
+        const direction = trade.profit > 0 ? 'SELL' : trade.profit < 0 ? 'BUY' : '-';
+        return `
         <tr>
             <td>${trade.symbol}</td>
-            <td>${Number(trade.entry_price || 0).toFixed(5)}</td>
-            <td>${trade.exit_price !== null ? Number(trade.exit_price).toFixed(5) : '-'}</td>
+            <td>${formatPrice(trade.entry_price)}</td>
+            <td>${trade.exit_price !== null ? formatPrice(trade.exit_price) : '-'}</td>
             <td>${Number(trade.size || 0).toFixed(2)}</td>
             <td class="${pnlClass(trade.profit || 0)}">${formatMoney(trade.profit || 0)}</td>
-            <td class="${pnlClass(trade.profit || 0)}">${trade.result || '-'}</td>
-            <td>${new Date(trade.entry_time_ms).toLocaleString()}</td>
+            <td>${trade.result || '-'}</td>
+            <td>${direction}</td>
+            <td>${entryTime}</td>
         </tr>
-    `).join('');
+    `}).join('');
 }
 
 function destroyChart(chart) {
