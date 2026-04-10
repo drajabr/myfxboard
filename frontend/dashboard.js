@@ -70,6 +70,29 @@ function formatDateShortMs(value) {
     return d.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' });
 }
 
+function formatIsoDateShort(value) {
+    const parts = String(value || '').split('-').map((p) => Number(p));
+    if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
+        return String(value || '');
+    }
+    const [year, month, day] = parts;
+    const d = new Date(year, month - 1, day);
+    return Number.isNaN(d.getTime()) ? String(value || '') : d.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' });
+}
+
+function maxTicksForCount(count) {
+    if (count > 180) {
+        return 6;
+    }
+    if (count > 90) {
+        return 8;
+    }
+    if (count > 45) {
+        return 10;
+    }
+    return 12;
+}
+
 function formatPct(value) {
     return `${Number(value || 0).toFixed(1)}%`;
 }
@@ -539,10 +562,13 @@ function buildBarDataset(label, values, positive, negative, neutral) {
     };
 }
 
-function buildBarChartOptions(text) {
+function buildBarChartOptions(text, labelCount = 0) {
     return {
         responsive: true,
         maintainAspectRatio: false,
+        layout: {
+            padding: { left: 8, right: 12, top: 6, bottom: 4 },
+        },
         plugins: {
             legend: { labels: { color: text } },
         },
@@ -551,9 +577,10 @@ function buildBarChartOptions(text) {
                 ticks: {
                     color: text,
                     autoSkip: true,
-                    maxTicksLimit: 10,
+                    maxTicksLimit: maxTicksForCount(labelCount),
                     maxRotation: 0,
                     minRotation: 0,
+                    padding: 6,
                 },
                 grid: {
                     display: false,
@@ -676,6 +703,9 @@ function updateCharts(data) {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                layout: {
+                    padding: { left: 8, right: 12, top: 6, bottom: 4 },
+                },
                 plugins: {
                     legend: { labels: { color: text } },
                     tooltip: {
@@ -694,10 +724,11 @@ function updateCharts(data) {
                     x: {
                         ticks: {
                             autoSkip: true,
-                            maxTicksLimit: 8,
+                            maxTicksLimit: maxTicksForCount(mainCurveLabels.length),
                             maxRotation: 0,
                             minRotation: 0,
                             color: text,
+                            padding: 6,
                         },
                         grid: { display: false },
                     },
@@ -738,7 +769,8 @@ function updateCharts(data) {
         : ((Array.isArray(data.alltime_daily_pnl) && data.alltime_daily_pnl.length > 0)
             ? data.alltime_daily_pnl
             : (Array.isArray(data.filtered_daily_pnl) ? data.filtered_daily_pnl : []));
-    const dailyLabels = dailyRows.map((r) => r.date || '');
+    const dailyRawLabels = dailyRows.map((r) => r.date || '');
+    const dailyLabels = dailyRawLabels.map((d) => formatIsoDateShort(d));
     const dailyValues = dailyRows.map((r) => toNum(r.pnl));
 
     const dailyTitle = document.getElementById('dailyPnlChartTitle');
@@ -755,7 +787,22 @@ function updateCharts(data) {
                 labels: dailyLabels,
                 datasets: [buildBarDataset('Daily PnL', dailyValues, positive, negative, neutral)],
             },
-            options: buildBarChartOptions(text),
+            options: {
+                ...buildBarChartOptions(text, dailyLabels.length),
+                plugins: {
+                    ...buildBarChartOptions(text, dailyLabels.length).plugins,
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => {
+                                if (!items.length) {
+                                    return '';
+                                }
+                                return dailyRawLabels[items[0].dataIndex] || '';
+                            },
+                        },
+                    },
+                },
+            },
         });
     } else {
         charts.dailyPnl.data.labels = dailyLabels;
@@ -764,6 +811,17 @@ function updateCharts(data) {
         charts.dailyPnl.options.plugins.legend.labels.color = text;
         charts.dailyPnl.options.scales.x.ticks.color = text;
         charts.dailyPnl.options.scales.y.ticks.color = text;
+        charts.dailyPnl.options.scales.x.ticks.maxTicksLimit = maxTicksForCount(dailyLabels.length);
+        charts.dailyPnl.options.plugins.tooltip = {
+            callbacks: {
+                title: (items) => {
+                    if (!items.length) {
+                        return '';
+                    }
+                    return dailyRawLabels[items[0].dataIndex] || '';
+                },
+            },
+        };
         charts.dailyPnl.update();
     }
 
@@ -781,7 +839,7 @@ function updateCharts(data) {
                 labels: dayOfWeekLabels,
                 datasets: [buildBarDataset('PnL', dayOfWeekPnL, positive, negative, neutral)],
             },
-            options: buildBarChartOptions(text),
+            options: buildBarChartOptions(text, dayOfWeekLabels.length),
         });
     } else {
         charts.pnlByDayOfWeek.data.datasets[0].data = dayOfWeekPnL;
@@ -806,7 +864,7 @@ function updateCharts(data) {
                 labels: hourOfDayLabels,
                 datasets: [buildBarDataset('PnL', hourOfDayPnL, positive, negative, neutral)],
             },
-            options: buildBarChartOptions(text),
+            options: buildBarChartOptions(text, hourOfDayLabels.length),
         });
     } else {
         charts.pnlByHourOfDay.data.datasets[0].data = hourOfDayPnL;
@@ -829,8 +887,9 @@ function renderMonthlyCalendar(monthly) {
 
     monthly.days.forEach((d) => {
         const canFilter = toNum(d.trades) > 0;
+        const isMuted = toNum(d.trades) === 0 && toNum(d.pnl) === 0;
         cells.push(`
-            <div class="calendar-cell ${canFilter ? 'filterable' : ''}" ${canFilter ? `data-day="${d.day}" data-month="${monthly.month}" data-year="${monthly.year}"` : ''}>
+            <div class="calendar-cell ${canFilter ? 'filterable' : ''} ${isMuted ? 'muted' : ''}" ${canFilter ? `data-day="${d.day}" data-month="${monthly.month}" data-year="${monthly.year}"` : ''}>
                 <div class="day">${d.day}</div>
                 <div class="${pnlClass(d.pnl)}">${formatMoney(d.pnl)}</div>
                 <div>${d.trades} trades</div>
@@ -846,13 +905,17 @@ function renderYearlyCalendar(yearly) {
     const target = document.getElementById('yearCalendar');
 
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    target.innerHTML = yearly.months.map((m) => `
-        <div class="year-card ${toNum(m.trades) > 0 ? 'filterable' : ''}" ${toNum(m.trades) > 0 ? `data-month="${m.month}" data-year="${yearly.year}"` : ''}>
+    target.innerHTML = yearly.months.map((m) => {
+        const canFilter = toNum(m.trades) > 0;
+        const isMuted = toNum(m.trades) === 0 && toNum(m.pnl) === 0;
+        return `
+        <div class="year-card ${canFilter ? 'filterable' : ''} ${isMuted ? 'muted' : ''}" ${canFilter ? `data-month="${m.month}" data-year="${yearly.year}"` : ''}>
             <div class="month">${monthNames[m.month - 1]}</div>
             <div class="${pnlClass(m.pnl)}">${formatMoney(m.pnl)}</div>
             <div>${m.trades} trades</div>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function setLoadState(loading, errorMessage = '') {

@@ -321,6 +321,7 @@ body {
 .chart-container {
     padding: 1rem;
     height: 320px;
+    overflow: hidden;
 }
 
 .chart-container h3,
@@ -579,6 +580,17 @@ body {
 .calendar-cell.empty {
     background: transparent;
     border: 1px dashed var(--border);
+}
+
+.calendar-cell.muted,
+.year-card.muted {
+    opacity: 0.62;
+    filter: saturate(0.7);
+}
+
+.calendar-cell.muted .day,
+.year-card.muted .month {
+    color: var(--text-muted);
 }
 
 .year-grid {
