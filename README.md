@@ -35,7 +35,7 @@ docker compose up --build -d
 http://localhost:3000
 ```
 
-The server now applies the SQL migrations automatically on startup, including when you reuse an existing Postgres volume.
+The server now bootstraps the database schema automatically on startup, including when you reuse an existing Postgres volume.
 
 ## EA setup
 
@@ -84,7 +84,7 @@ If this URL is not whitelisted, connector requests will be blocked by MT5.
 - Confirm `InpDashboardPSK` exactly matches `CONNECTOR_SHARED_SECRET`.
 - Confirm connector can POST to `/api/ingestion`.
 - Check backend logs: `docker compose logs server`.
-- If you previously started the stack with a schema-less Postgres volume, run `docker compose up --build -d` again so the server can apply the startup migrations to that existing database.
+- If you previously started the stack with a schema-less Postgres volume, run `docker compose up --build -d` again so the server can bootstrap the schema on that existing database.
 
 ## Core commands
 

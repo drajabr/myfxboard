@@ -70,6 +70,88 @@ const dayKey = (ts: number) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+const buildEmptyAnalyticsResponse = (
+  accountIdParam: string,
+  nowMs: number,
+  monthShift: number,
+  yearShift: number
+) => {
+  const monthBase = new Date(nowMs);
+  monthBase.setMonth(monthBase.getMonth() + monthShift);
+  const monthYear = monthBase.getFullYear();
+  const monthIdx = monthBase.getMonth();
+  const daysInMonth = new Date(monthYear, monthIdx + 1, 0).getDate();
+
+  const monthDays = Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => ({
+    day,
+    pnl: 0,
+    trades: 0,
+  }));
+
+  const yearBase = new Date(nowMs);
+  yearBase.setFullYear(yearBase.getFullYear() + yearShift);
+  const targetYear = yearBase.getFullYear();
+  const yearMonths = Array.from({ length: 12 }, (_, i) => i + 1).map((month) => ({
+    month,
+    pnl: 0,
+    trades: 0,
+  }));
+
+  const zeroPeriod = {
+    pnl: 0,
+    trades_count: 0,
+    wins: 0,
+    losses: 0,
+    win_rate_pct: 0,
+  };
+
+  return {
+    scope: 'all',
+    account_id: accountIdParam,
+    summary: {
+      accounts_count: 0,
+      open_positions: 0,
+      equity: 0,
+      balance: 0,
+      floating_pnl: 0,
+      margin_level_pct: 0,
+    },
+    periods: {
+      today: zeroPeriod,
+      last7d: zeroPeriod,
+      last30d: zeroPeriod,
+      ytd: zeroPeriod,
+      all_time: zeroPeriod,
+    },
+    trade_metrics: {
+      win_rate_pct: 0,
+      avg_win: 0,
+      avg_loss: 0,
+      max_win: 0,
+      max_loss: 0,
+      avg_hold_seconds: 0,
+    },
+    positions: [],
+    recent_trades: [],
+    equity_curve: [],
+    symbol_exposure: [],
+    calendars: {
+      monthly: {
+        title: `${monthBase.toLocaleString('default', { month: 'long' })} ${monthYear}`,
+        year: monthYear,
+        month: monthIdx + 1,
+        first_weekday: new Date(monthYear, monthIdx, 1).getDay(),
+        days: monthDays,
+      },
+      yearly: {
+        title: `${targetYear}`,
+        year: targetYear,
+        months: yearMonths,
+      },
+    },
+  };
+};
+
 router.get('/analytics', async (req: Request, res: Response) => {
   try {
     const accountIdParam = (req.query.accountId as string) || 'all';
@@ -84,6 +166,9 @@ router.get('/analytics', async (req: Request, res: Response) => {
       : allAccounts.filter((a) => a.account_id === accountIdParam).map((a) => a.account_id);
 
     if (accountIds.length === 0) {
+      if (accountIdParam === 'all') {
+        return res.json(buildEmptyAnalyticsResponse(accountIdParam, nowMs, monthShift, yearShift));
+      }
       return res.status(404).json({ error: 'No matching accounts found' });
     }
 

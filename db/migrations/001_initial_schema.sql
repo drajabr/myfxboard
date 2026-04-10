@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   updated_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
 );
 
-CREATE INDEX idx_accounts_created ON accounts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_accounts_created ON accounts(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS positions (
   id SERIAL PRIMARY KEY,
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS positions (
   UNIQUE(account_id, symbol, direction, entry_price)
 );
 
-CREATE INDEX idx_positions_account ON positions(account_id, updated_at_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_positions_account ON positions(account_id, updated_at_ms DESC);
 
 CREATE TABLE IF NOT EXISTS trades (
   id SERIAL PRIMARY KEY,
@@ -52,8 +52,8 @@ CREATE TABLE IF NOT EXISTS trades (
   UNIQUE(account_id, symbol, entry_time_ms)
 );
 
-CREATE INDEX idx_trades_account_time ON trades(account_id, entry_time_ms DESC);
-CREATE INDEX idx_trades_result ON trades(account_id, result);
+CREATE INDEX IF NOT EXISTS idx_trades_account_time ON trades(account_id, entry_time_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_trades_result ON trades(account_id, result);
 
 CREATE TABLE IF NOT EXISTS account_settings (
   id SERIAL PRIMARY KEY,
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS daily_snapshots (
   UNIQUE(account_id, date)
 );
 
-CREATE INDEX idx_snapshots_account ON daily_snapshots(account_id, snapshot_time_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_snapshots_account ON daily_snapshots(account_id, snapshot_time_ms DESC);
 
 CREATE TABLE IF NOT EXISTS sync_log (
   id SERIAL PRIMARY KEY,
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS sync_log (
   error_msg TEXT
 );
 
-CREATE INDEX idx_sync_log_account ON sync_log(account_id, sync_timestamp_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_sync_log_account ON sync_log(account_id, sync_timestamp_ms DESC);
 
 CREATE TABLE IF NOT EXISTS unlock_sessions (
   id SERIAL PRIMARY KEY,
@@ -105,5 +105,5 @@ CREATE TABLE IF NOT EXISTS unlock_sessions (
   created_at BIGINT NOT NULL
 );
 
-CREATE INDEX idx_unlock_sessions_token ON unlock_sessions(token);
-CREATE INDEX idx_unlock_sessions_expires ON unlock_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_unlock_sessions_token ON unlock_sessions(token);
+CREATE INDEX IF NOT EXISTS idx_unlock_sessions_expires ON unlock_sessions(expires_at);

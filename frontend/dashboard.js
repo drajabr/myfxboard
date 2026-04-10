@@ -125,7 +125,7 @@ async function loadAccounts() {
 function syncAccountSelector(accounts) {
     const selector = document.getElementById('accountSelector');
     const selected = localStorage.getItem('selectedAccount') || '';
-    selector.innerHTML = '<option value="">All Accounts</option>';
+    selector.innerHTML = '<option value="">Aggregated (All Accounts)</option>';
 
     accounts.forEach((acc) => {
         const option = document.createElement('option');
