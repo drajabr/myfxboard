@@ -38,6 +38,7 @@ private:
    static string   s_last_ack_history_hash;
    static bool     s_startup_health_checked;
    static bool     s_last_sync_ok;
+   static long     s_last_keepalive_attempt_ms;
 
    static uint HashPayload(const string payload) {
       uchar bytes[];
@@ -80,7 +81,8 @@ public:
       s_url              = url;
       s_psk              = psk;
       s_sync_interval_ms = interval_sec * 1000;
-      s_keepalive_ms     = MathMax(0, keepalive_sec) * 1000;
+      // Force keepalive to 60s regardless of input
+      s_keepalive_ms     = 60000;
       s_debug_log        = debug;
       s_last_sync_ms     = 0;
       s_in_flight        = false;
@@ -92,8 +94,9 @@ public:
       s_last_ack_history_hash = "";
       s_startup_health_checked = false;
       s_last_sync_ok            = false;
+      s_last_keepalive_attempt_ms = 0;
       if(s_debug_log)
-         Print("[DashboardConnector] Initialized: url=", s_url, " interval=", interval_sec, "s");
+         Print("[DashboardConnector] Initialized: url=", s_url, " interval=", interval_sec, "s, keepalive=60s");
    }
 
    static bool Sync() {
@@ -253,98 +256,105 @@ private:
       
       // HistorySelect expects datetime seconds, not unix milliseconds.
       if(HistorySelect(0, TimeCurrent())) {
-         int deals_total = HistoryDealsTotal();
+         static bool Sync() {
+            if(s_url == "" || s_psk == "") return false;
 
-         struct PositionEntry {
-            long position_id;
-            string symbol;
-            double avg_entry_price;
-            double open_volume;
-            long first_entry_time_ms;
-            bool active;
-         };
-         PositionEntry entries[2000];
-         int entry_count = 0;
+            ulong now_ms = GetTickCount64();
 
-         for(int i = 0; i < deals_total; i++) {
-            ulong deal_ticket = HistoryDealGetTicket(i);
-            if(deal_ticket == 0) continue;
+            if(s_in_flight) {
+               if(s_debug_log && now_ms - s_last_log_ms > 60000) {
+                  Print("[DashboardConnector] Sync in flight, skipping");
+                  s_last_log_ms = now_ms;
+               }
+               return false;
+            }
 
-            int deal_type = (int)HistoryDealGetInteger(deal_ticket, DEAL_TYPE);
-            if(deal_type != DEAL_TYPE_BUY && deal_type != DEAL_TYPE_SELL)
-               continue;
+            if(s_last_sync_ms > 0 && now_ms < s_last_sync_ms + s_sync_interval_ms)
+               return false;
 
-            int deal_entry = (int)HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
-            long position_id = (long)HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
-            string deal_symbol = HistoryDealGetString(deal_ticket, DEAL_SYMBOL);
-            if(deal_symbol == "")
-               continue;
+            // Backend auth expects unix epoch milliseconds, not terminal uptime milliseconds.
+            long timestamp_ms = (long)TimeGMT() * 1000;
+            string current_account = IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN));
 
-            double deal_volume = HistoryDealGetDouble(deal_ticket, DEAL_VOLUME);
-            double deal_price = HistoryDealGetDouble(deal_ticket, DEAL_PRICE);
-            long deal_time_ms = HistoryDealGetInteger(deal_ticket, DEAL_TIME_MSC);
-            double deal_profit = HistoryDealGetDouble(deal_ticket, DEAL_PROFIT) + HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION) + HistoryDealGetDouble(deal_ticket, DEAL_SWAP);
+            long latest_closed_time_ms = 0;
+            string latest_closed_deal_id = "";
+            string positions_json = BuildPositionsJson();
+            string closed_trades_json = BuildClosedTradesJson(latest_closed_time_ms, latest_closed_deal_id);
+            string account_json = BuildAccountJson();
 
-            if(position_id <= 0)
-               continue;
+            uint live_payload_hash = HashPayload(positions_json + "|" + account_json + "|" + StringFormat("%lld", latest_closed_time_ms));
+            string history_hash = StringFormat("%u", HashPayload(closed_trades_json));
 
-            int pos_idx = -1;
-            for(int idx = 0; idx < entry_count; idx++) {
-               if(entries[idx].active && entries[idx].position_id == position_id) {
-                  pos_idx = idx;
-                  break;
+            if(!s_startup_health_checked) {
+               // One-shot probe: if unavailable/fails, continue with normal sync and avoid retry spam.
+               s_startup_health_checked = true;
+               bool history_sync_required = true;
+               string server_history_hash = "";
+               if(PostHealthCheck(current_account, timestamp_ms, history_hash, history_sync_required, server_history_hash)) {
+                  if(server_history_hash != "")
+                     s_last_ack_history_hash = server_history_hash;
+
+                  if(!history_sync_required) {
+                     s_last_live_payload_hash = live_payload_hash;
+                     s_last_live_payload_sent_ms = timestamp_ms;
+                     s_last_sync_ms = now_ms;
+                     if(s_debug_log)
+                        Print("[DashboardConnector] Startup health check matched server state, skipping initial full sync");
+                     return false;
+                  }
                }
             }
 
-            if(deal_entry == DEAL_ENTRY_IN) {
-               if(pos_idx >= 0) {
-                  double new_total_volume = entries[pos_idx].open_volume + deal_volume;
-                  if(new_total_volume > 0.0) {
-                     entries[pos_idx].avg_entry_price = ((entries[pos_idx].avg_entry_price * entries[pos_idx].open_volume) + (deal_price * deal_volume)) / new_total_volume;
-                     entries[pos_idx].open_volume = new_total_volume;
-                     if(deal_time_ms < entries[pos_idx].first_entry_time_ms)
-                        entries[pos_idx].first_entry_time_ms = deal_time_ms;
+            bool include_history = (history_hash != s_last_ack_history_hash);
+            long keepalive_reference_ms = s_last_live_payload_sent_ms;
+            if(s_last_keepalive_probe_ms > keepalive_reference_ms)
+               keepalive_reference_ms = s_last_keepalive_probe_ms;
+
+            // Only run keepalive every 60s, not every sync tick
+            if(!include_history && live_payload_hash == s_last_live_payload_hash && keepalive_reference_ms > 0) {
+               if(s_keepalive_ms <= 0 || (timestamp_ms - keepalive_reference_ms) < s_keepalive_ms) {
+                  s_last_sync_ms = now_ms;
+                  if(s_debug_log && now_ms - s_last_log_ms > 30000) {
+                     Print("[DashboardConnector] No live payload changes, skipping sync");
+                     s_last_log_ms = now_ms;
                   }
-               } else if(entry_count < 2000) {
-                  entries[entry_count].position_id = position_id;
-                  entries[entry_count].symbol = deal_symbol;
-                  entries[entry_count].avg_entry_price = deal_price;
-                  entries[entry_count].open_volume = deal_volume;
-                  entries[entry_count].first_entry_time_ms = deal_time_ms;
-                  entries[entry_count].active = true;
-                  entry_count++;
+                  return false;
+               }
+
+               // Only attempt keepalive if 60s have passed since last attempt
+               if(timestamp_ms - s_last_keepalive_attempt_ms >= 60000) {
+                  bool history_sync_required = false;
+                  string server_history_hash = "";
+                  s_last_sync_ms = now_ms;
+                  s_last_keepalive_probe_ms = timestamp_ms;
+                  s_last_keepalive_attempt_ms = timestamp_ms;
+                  if(PostHealthCheck(current_account, timestamp_ms, history_hash, history_sync_required, server_history_hash)) {
+                     if(server_history_hash != "")
+                        s_last_ack_history_hash = server_history_hash;
+                     s_success_count++;
+                     s_last_sync_ok = true;
+                     s_last_live_payload_sent_ms = timestamp_ms;
+                     if(!history_sync_required) {
+                        if(s_debug_log)
+                           Print("[DashboardConnector] Keepalive health accepted, no payload needed");
+                        return false;
+                     }
+                     include_history = true;
+                     if(s_debug_log)
+                        Print("[DashboardConnector] Keepalive health requested history sync");
+                  } else {
+                     s_error_count++;
+                     s_last_sync_ok = false;
+                     if(s_debug_log)
+                        Print("[DashboardConnector] Keepalive health failed, will retry in 60s");
+                     return false;
+                  }
+               } else {
+                  // Not time for keepalive yet
+                  s_last_sync_ms = now_ms;
+                  return false;
                }
             }
-
-            if(deal_entry == DEAL_ENTRY_OUT || deal_entry == DEAL_ENTRY_OUT_BY) {
-               long entry_time = deal_time_ms;
-               double entry_price = deal_price;
-
-               if(pos_idx >= 0) {
-                  entry_time = entries[pos_idx].first_entry_time_ms;
-                  entry_price = entries[pos_idx].avg_entry_price;
-
-                  entries[pos_idx].open_volume -= deal_volume;
-                  if(entries[pos_idx].open_volume <= 0.00000001) {
-                     entries[pos_idx].open_volume = 0.0;
-                     entries[pos_idx].active = false;
-                  }
-               }
-
-               long duration_ms = deal_time_ms - entry_time;
-               long duration_sec = duration_ms / 1000;
-               if(duration_sec < 0) duration_sec = 0;
-
-               if(!first_trade) closed_trades_json += ",";
-               first_trade = false;
-
-               closed_trades_json += StringFormat(
-                  "{\"symbol\":\"%s\",\"volume\":%.2f,\"entry\":%.5f,\"exit\":%.5f,\"profit\":%.5f,\"entry_time_ms\":%lld,\"exit_time_ms\":%lld,\"duration_sec\":%lld,\"method\":\"deal_out\"}",
-                  deal_symbol, deal_volume, entry_price, deal_price, deal_profit, entry_time, deal_time_ms, duration_sec
-               );
-
-               if(deal_time_ms > latest_closed_time_ms) {
-                  latest_closed_time_ms = deal_time_ms;
                   latest_closed_deal_id = StringFormat("%llu", deal_ticket);
                }
             }

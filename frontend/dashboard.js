@@ -453,49 +453,76 @@ function updateCharts(data) {
     const text = getChartColorVar('--text');
     const accent = getChartColorVar('--accent');
 
-    const fallbackCurve = Array.from({ length: 30 }, (_, idx) => {
-        const ts = new Date(Date.now() - ((29 - idx) * 24 * 60 * 60 * 1000)).setHours(0, 0, 0, 0);
-        return { ts, value: 0 };
-    });
-    const equityRows = Array.isArray(data.equity_curve) ? data.equity_curve : [];
-    const balanceRows = Array.isArray(data.balance_curve) ? data.balance_curve : [];
-    const equityUsable = hasUsableSeries(equityRows, 'equity');
-    const balanceUsable = hasUsableSeries(balanceRows, 'balance');
 
-    let accountCurveRows = fallbackCurve;
-    let accountCurveValues = fallbackCurve.map((d) => d.value);
-    let accountCurveLabel = 'Balance';
+    // Use trade_pnl_series for main chart if available, else fallback
+    const tradePnlRows = Array.isArray(data.trade_pnl_series) ? data.trade_pnl_series : [];
+    const tradePnlUsable = tradePnlRows.length > 0;
 
-    if (equityUsable) {
-        accountCurveRows = equityRows;
-        accountCurveValues = equityRows.map((d) => toNum(d.equity));
-        accountCurveLabel = 'Equity';
-    } else if (balanceUsable) {
-        accountCurveRows = balanceRows;
-        accountCurveValues = balanceRows.map((d) => toNum(d.balance));
-        accountCurveLabel = 'Balance';
+    let mainCurveRows = tradePnlRows;
+    let mainCurveValues = tradePnlRows.map((d) => toNum(d.pnl));
+    let mainCurveLabel = 'Trade PnL';
+    let mainCurveType = 'scatter';
+    let mainCurveLabels = tradePnlRows.map((d) => formatDateTimeMs(d.ts));
+    let mainCurvePointRadius = 4;
+    let mainCurveFill = false;
+
+    if (!tradePnlUsable) {
+        // fallback to equity or balance
+        const fallbackCurve = Array.from({ length: 30 }, (_, idx) => {
+            const ts = new Date(Date.now() - ((29 - idx) * 24 * 60 * 60 * 1000)).setHours(0, 0, 0, 0);
+            return { ts, value: 0 };
+        });
+        const equityRows = Array.isArray(data.equity_curve) ? data.equity_curve : [];
+        const balanceRows = Array.isArray(data.balance_curve) ? data.balance_curve : [];
+        const equityUsable = hasUsableSeries(equityRows, 'equity');
+        const balanceUsable = hasUsableSeries(balanceRows, 'balance');
+
+        if (equityUsable) {
+            mainCurveRows = equityRows;
+            mainCurveValues = equityRows.map((d) => toNum(d.equity));
+            mainCurveLabel = 'Equity';
+            mainCurveType = 'line';
+            mainCurveLabels = equityRows.map((d) => formatDateMs(d.ts));
+            mainCurvePointRadius = mainCurveValues.every((value) => value === 0) ? 1.5 : 0;
+            mainCurveFill = true;
+        } else if (balanceUsable) {
+            mainCurveRows = balanceRows;
+            mainCurveValues = balanceRows.map((d) => toNum(d.balance));
+            mainCurveLabel = 'Balance';
+            mainCurveType = 'line';
+            mainCurveLabels = balanceRows.map((d) => formatDateMs(d.ts));
+            mainCurvePointRadius = mainCurveValues.every((value) => value === 0) ? 1.5 : 0;
+            mainCurveFill = true;
+        } else {
+            mainCurveRows = fallbackCurve;
+            mainCurveValues = fallbackCurve.map((d) => d.value);
+            mainCurveLabel = 'Balance';
+            mainCurveType = 'line';
+            mainCurveLabels = fallbackCurve.map((d) => formatDateMs(d.ts));
+            mainCurvePointRadius = 1.5;
+            mainCurveFill = true;
+        }
     }
 
     const equityTitle = document.getElementById('accountCurveTitle');
     if (equityTitle) {
-        equityTitle.textContent = accountCurveLabel === 'Equity' ? 'Equity Curve' : 'Balance Curve';
+        equityTitle.textContent = tradePnlUsable ? 'Trade PnL (Closed Trades)' : (mainCurveLabel === 'Equity' ? 'Equity Curve' : 'Balance Curve');
     }
-
-    const equityLabels = accountCurveRows.map((d) => formatDateMs(d.ts));
 
     if (!charts.equityCurve) {
         charts.equityCurve = new Chart(document.getElementById('equityCurveChart'), {
-            type: 'line',
+            type: mainCurveType,
             data: {
-                labels: equityLabels,
+                labels: mainCurveLabels,
                 datasets: [{
-                    label: accountCurveLabel,
-                    data: accountCurveValues,
+                    label: mainCurveLabel,
+                    data: mainCurveValues,
                     borderColor: accent,
                     backgroundColor: 'rgba(31, 111, 235, 0.12)',
                     tension: 0.25,
-                    pointRadius: accountCurveValues.every((value) => value === 0) ? 1.5 : 0,
-                    fill: true,
+                    pointRadius: mainCurvePointRadius,
+                    fill: mainCurveFill,
+                    showLine: mainCurveType !== 'scatter',
                 }],
             },
             options: {
@@ -505,11 +532,14 @@ function updateCharts(data) {
             },
         });
     } else {
-        charts.equityCurve.data.labels = equityLabels;
-        charts.equityCurve.data.datasets[0].label = accountCurveLabel;
-        charts.equityCurve.data.datasets[0].data = accountCurveValues;
+        charts.equityCurve.config.type = mainCurveType;
+        charts.equityCurve.data.labels = mainCurveLabels;
+        charts.equityCurve.data.datasets[0].label = mainCurveLabel;
+        charts.equityCurve.data.datasets[0].data = mainCurveValues;
         charts.equityCurve.data.datasets[0].borderColor = accent;
-        charts.equityCurve.data.datasets[0].pointRadius = accountCurveValues.every((value) => value === 0) ? 1.5 : 0;
+        charts.equityCurve.data.datasets[0].pointRadius = mainCurvePointRadius;
+        charts.equityCurve.data.datasets[0].fill = mainCurveFill;
+        charts.equityCurve.data.datasets[0].showLine = mainCurveType !== 'scatter';
         charts.equityCurve.options.plugins.legend.labels.color = text;
         charts.equityCurve.update();
     }

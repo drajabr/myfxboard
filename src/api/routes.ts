@@ -65,53 +65,6 @@ const getRangeStart = (label: 'today' | 'last7d' | 'last30d' | 'ytd' | 'all_time
   return 0;
 };
 
-const calcPeriodStats = (
-  trades: Array<{ profit: number | null; exit_time_ms: number | null }>,
-  fromMs: number,
-  toMs: number
-) => {
-  const inRange = trades.filter((t) => {
-    if (t.exit_time_ms === null) {
-      return false;
-    }
-    return t.exit_time_ms >= fromMs && t.exit_time_ms <= toMs;
-  });
-  const pnl = inRange.reduce((sum, t) => sum + (t.profit || 0), 0);
-  const wins = inRange.filter((t) => (t.profit || 0) > 0).length;
-  const losses = inRange.filter((t) => (t.profit || 0) < 0).length;
-  const tradesCount = inRange.length;
-  return {
-    pnl,
-    trades_count: tradesCount,
-    wins,
-    losses,
-    win_rate_pct: tradesCount > 0 ? (wins / tradesCount) * 100 : 0,
-  };
-};
-
-const calcTradeMetrics = (
-  trades: Array<{ profit: number | null; duration_sec: number | null }>
-) => {
-  const closed = trades.filter((t) => t.profit !== null);
-  const wins = closed.filter((t) => (t.profit || 0) > 0).map((t) => t.profit || 0);
-  const losses = closed.filter((t) => (t.profit || 0) < 0).map((t) => t.profit || 0);
-  const durations = closed.map((t) => t.duration_sec || 0).filter((d) => d > 0);
-  const tradesCount = closed.length;
-  const winsCount = wins.length;
-
-  return {
-    win_rate_pct: tradesCount > 0 ? (winsCount / tradesCount) * 100 : 0,
-    avg_win: wins.length > 0 ? wins.reduce((a, b) => a + b, 0) / wins.length : 0,
-    avg_loss: losses.length > 0 ? losses.reduce((a, b) => a + b, 0) / losses.length : 0,
-    max_win: wins.length > 0 ? Math.max(...wins) : 0,
-    max_loss: losses.length > 0 ? Math.min(...losses) : 0,
-    expectancy: tradesCount > 0 ? closed.reduce((sum, t) => sum + (t.profit || 0), 0) / tradesCount : 0,
-    profit_factor: losses.length > 0
-      ? (wins.reduce((sum, p) => sum + p, 0) / Math.abs(losses.reduce((sum, p) => sum + p, 0)))
-      : (wins.length > 0 ? 999 : 0),
-    avg_hold_seconds: durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0,
-  };
-};
 
 const dayKey = (ts: number) => {
   const d = new Date(ts);
@@ -301,7 +254,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
       hold_count: 0,
     };
     let filteredTradesTotal = 0;
-    let distribution = { wins: 0, losses: 0, neutral: 0 };
+    const distribution = { wins: 0, losses: 0, neutral: 0 };
 
     const monthBase = new Date();
     monthBase.setMonth(monthBase.getMonth() + monthShift);
@@ -530,6 +483,11 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const balanceCurveRaw = Array.from(balanceByDay.values()).sort((a, b) => a.ts - b.ts);
     const balanceCurve = balanceCurveRaw.length > 0 ? balanceCurveRaw : buildFlatZeroBalanceCurve(curveDays, nowMs);
 
+    // Build closed trade PnL time series for charting
+    const tradePnlSeries = recentTradesPool
+      .filter(t => t.exit_time_ms)
+      .map(t => ({ ts: t.exit_time_ms, pnl: t.profit }));
+
     res.json({
       scope: accountIdParam === 'all' ? 'all' : 'single',
       account_id: accountIdParam,
@@ -548,6 +506,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
       trades_returned: recentTrades.length,
       filtered_distribution: distribution,
       filtered_daily_pnl: filteredDailyPnl,
+      trade_pnl_series: tradePnlSeries,
       equity_curve: equityCurve,
       balance_curve: balanceCurve,
       symbol_exposure: symbolExposure,
