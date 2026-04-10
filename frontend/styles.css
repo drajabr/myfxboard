@@ -85,6 +85,31 @@ body {
     align-items: center;
     gap: 0.75rem;
     flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.header-status {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.status-pill {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface-alt);
+    color: var(--text-muted);
+    padding: 0.38rem 0.65rem;
+    font-size: 0.78rem;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.status-pill.status-error {
+    color: var(--pnl-negative);
+    border-color: rgba(224, 72, 72, 0.45);
 }
 
 .icon-btn,
@@ -123,26 +148,6 @@ body {
     max-width: 1500px;
     margin: 0 auto;
     width: 100%;
-}
-
-.status-strip {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 0.75rem;
-    margin-bottom: 1rem;
-}
-
-.status-strip > div {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 0.7rem 0.9rem;
-    color: var(--text-muted);
-}
-
-.status-strip > div.status-error {
-    color: var(--pnl-negative);
-    border-color: rgba(224, 72, 72, 0.45);
 }
 
 .kpi-cards {
@@ -417,6 +422,10 @@ body {
     .header-left,
     .header-right {
         justify-content: space-between;
+    }
+
+    .header-status {
+        justify-content: flex-start;
     }
 
     .charts-row {

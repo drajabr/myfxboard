@@ -128,6 +128,16 @@ const buildFlatZeroCurve = (days: number, nowMs: number) => {
   return points;
 };
 
+const buildFlatZeroBalanceCurve = (days: number, nowMs: number) => {
+  const totalDays = Math.min(Math.max(days, 2), 3650);
+  const points: Array<{ ts: number; balance: number }> = [];
+  for (let offset = totalDays - 1; offset >= 0; offset -= 1) {
+    const ts = new Date(nowMs - (offset * 24 * 60 * 60 * 1000)).setHours(0, 0, 0, 0);
+    points.push({ ts, balance: 0 });
+  }
+  return points;
+};
+
 const buildEmptyAnalyticsResponse = (
   accountIdParam: string,
   nowMs: number,
@@ -198,6 +208,7 @@ const buildEmptyAnalyticsResponse = (
     filtered_distribution: { wins: 0, losses: 0, neutral: 0 },
     filtered_daily_pnl: [],
     equity_curve: buildFlatZeroCurve(curveDays, nowMs),
+    balance_curve: buildFlatZeroBalanceCurve(curveDays, nowMs),
     symbol_exposure: [],
     calendars: {
       monthly: {
@@ -228,10 +239,14 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const hasTradeFilter = Number.isFinite(tradeFromMs) || Number.isFinite(tradeToMs);
     const nowMs = Date.now();
 
-    const allAccounts = await accountQueries.list();
-    const accountIds = accountIdParam === 'all'
-      ? allAccounts.map((a) => a.account_id)
-      : allAccounts.filter((a) => a.account_id === accountIdParam).map((a) => a.account_id);
+    let accountIds: string[] = [];
+    if (accountIdParam === 'all') {
+      const allAccounts = await accountQueries.list();
+      accountIds = allAccounts.map((a) => a.account_id);
+    } else {
+      const account = await accountQueries.findById(accountIdParam);
+      accountIds = account ? [account.account_id] : [];
+    }
 
     if (accountIds.length === 0) {
       if (accountIdParam === 'all') {
@@ -241,37 +256,180 @@ router.get('/analytics', async (req: Request, res: Response) => {
     }
 
     let positions: any[] = [];
-    let trades: any[] = [];
+    let recentTradesPool: any[] = [];
     let equity = 0;
     let balance = 0;
 
     const toMs = nowMs;
     const fromMs = toMs - (curveDays * 24 * 60 * 60 * 1000);
     const curveByDay = new Map<string, { ts: number; equity: number }>();
+    const balanceByDay = new Map<string, { ts: number; balance: number }>();
+    const filteredDailyMap = new Map<string, number>();
+    const monthDayMap = new Map<number, { pnl: number; trades: number }>();
+    const yearMonthMap = new Map<number, { pnl: number; trades: number }>();
+
+    const filterStartMs = Number.isFinite(tradeFromMs) ? tradeFromMs : 0;
+    const filterEndMs = Number.isFinite(tradeToMs) ? tradeToMs : nowMs;
+    const dailyPnlStartMs = hasTradeFilter ? filterStartMs : Math.max(nowMs - (30 * 24 * 60 * 60 * 1000), 0);
+    const dailyPnlEndMs = hasTradeFilter ? filterEndMs : nowMs;
+    const todayStartMs = getRangeStart('today', nowMs);
+    const last7dStartMs = getRangeStart('last7d', nowMs);
+    const last30dStartMs = getRangeStart('last30d', nowMs);
+    const ytdStartMs = getRangeStart('ytd', nowMs);
+
+    const periodBuckets = {
+      today: { pnl: 0, trades_count: 0, wins: 0, losses: 0 },
+      last7d: { pnl: 0, trades_count: 0, wins: 0, losses: 0 },
+      last30d: { pnl: 0, trades_count: 0, wins: 0, losses: 0 },
+      ytd: { pnl: 0, trades_count: 0, wins: 0, losses: 0 },
+      all_time: { pnl: 0, trades_count: 0, wins: 0, losses: 0 },
+    };
+    const metricsTotals = {
+      trade_count: 0,
+      win_count: 0,
+      loss_count: 0,
+      avg_win_sum: 0,
+      avg_win_count: 0,
+      avg_loss_sum: 0,
+      avg_loss_count: 0,
+      max_win: 0,
+      max_loss: 0,
+      expectancy_sum: 0,
+      gross_profit: 0,
+      gross_loss: 0,
+      hold_sum: 0,
+      hold_count: 0,
+    };
+    let filteredTradesTotal = 0;
+    let distribution = { wins: 0, losses: 0, neutral: 0 };
+
+    const monthBase = new Date();
+    monthBase.setMonth(monthBase.getMonth() + monthShift);
+    const monthYear = monthBase.getFullYear();
+    const monthIdx = monthBase.getMonth();
+    const monthStart = new Date(monthYear, monthIdx, 1).getTime();
+    const monthEnd = new Date(monthYear, monthIdx + 1, 0, 23, 59, 59, 999).getTime();
+    const daysInMonth = new Date(monthYear, monthIdx + 1, 0).getDate();
+
+    const yearBase = new Date();
+    yearBase.setFullYear(yearBase.getFullYear() + yearShift);
+    const targetYear = yearBase.getFullYear();
 
     for (const accountId of accountIds) {
-      const [accPositionsRaw, accTradesRaw, latestSnapshotRaw, snapshotsRaw] = await Promise.all([
+      const [
+        accPositionsRaw,
+        latestSnapshotRaw,
+        snapshotsRaw,
+        recentTradesRaw,
+        filteredCount,
+        filteredSummary,
+        filteredDailyRows,
+        monthRows,
+        yearRows,
+        metricsRow,
+        todayStats,
+        last7dStats,
+        last30dStats,
+        ytdStats,
+        allTimeStats,
+      ] = await Promise.all([
         positionQueries.findByAccount(accountId),
-        tradeQueries.findAllByAccount(accountId),
         snapshotQueries.findLatestByAccount(accountId),
         snapshotQueries.findByAccountAndRange(accountId, fromMs, toMs),
+        tradeQueries.findWindowedByEventTime(accountId, filterStartMs, filterEndMs, recentTradesLimit),
+        tradeQueries.countByEventTimeRange(accountId, filterStartMs, filterEndMs),
+        tradeQueries.summarizeByEventTimeRange(accountId, filterStartMs, filterEndMs),
+        tradeQueries.summarizeDailyPnlByEventTimeRange(accountId, dailyPnlStartMs, dailyPnlEndMs),
+        tradeQueries.summarizeMonthCalendar(accountId, monthStart, monthEnd),
+        tradeQueries.summarizeYearCalendar(accountId, targetYear),
+        tradeQueries.summarizeMetrics(accountId),
+        tradeQueries.summarizeByEventTimeRange(accountId, todayStartMs, nowMs),
+        tradeQueries.summarizeByEventTimeRange(accountId, last7dStartMs, nowMs),
+        tradeQueries.summarizeByEventTimeRange(accountId, last30dStartMs, nowMs),
+        tradeQueries.summarizeByEventTimeRange(accountId, ytdStartMs, nowMs),
+        tradeQueries.summarizeByEventTimeRange(accountId, 0, nowMs),
       ]);
 
       const accPositions = accPositionsRaw.map(normalizePosition);
-      const accTrades = accTradesRaw.map(normalizeTrade);
+      const accRecentTrades = recentTradesRaw.map(normalizeTrade);
       const latestSnapshot = latestSnapshotRaw ? normalizeSnapshot(latestSnapshotRaw) : null;
       const snapshots = snapshotsRaw.map(normalizeSnapshot);
 
       positions = positions.concat(accPositions);
-      trades = trades.concat(accTrades);
+      recentTradesPool = recentTradesPool.concat(accRecentTrades);
       equity += latestSnapshot?.equity || latestSnapshot?.balance || 0;
       balance += latestSnapshot?.balance || 0;
+      filteredTradesTotal += filteredCount;
+      distribution.wins += filteredSummary.wins || 0;
+      distribution.losses += filteredSummary.losses || 0;
+      distribution.neutral += filteredSummary.neutral || 0;
+
+      metricsTotals.trade_count += metricsRow.trade_count || 0;
+      metricsTotals.win_count += metricsRow.win_count || 0;
+      metricsTotals.loss_count += metricsRow.loss_count || 0;
+      metricsTotals.avg_win_sum += (metricsRow.avg_win || 0) * (metricsRow.win_count || 0);
+      metricsTotals.avg_win_count += metricsRow.win_count || 0;
+      metricsTotals.avg_loss_sum += (metricsRow.avg_loss || 0) * (metricsRow.loss_count || 0);
+      metricsTotals.avg_loss_count += metricsRow.loss_count || 0;
+      metricsTotals.max_win = Math.max(metricsTotals.max_win, metricsRow.max_win || 0);
+      metricsTotals.max_loss = metricsTotals.trade_count === (metricsRow.trade_count || 0)
+        ? (metricsRow.max_loss || 0)
+        : Math.min(metricsTotals.max_loss, metricsRow.max_loss || 0);
+      metricsTotals.expectancy_sum += (metricsRow.expectancy || 0) * (metricsRow.trade_count || 0);
+      metricsTotals.gross_profit += metricsRow.gross_profit || 0;
+      metricsTotals.gross_loss += metricsRow.gross_loss || 0;
+      metricsTotals.hold_sum += (metricsRow.avg_hold_seconds || 0) * (metricsRow.trade_count || 0);
+      metricsTotals.hold_count += metricsRow.trade_count || 0;
+
+      periodBuckets.today.pnl += todayStats.pnl || 0;
+      periodBuckets.today.trades_count += todayStats.trades_count || 0;
+      periodBuckets.today.wins += todayStats.wins || 0;
+      periodBuckets.today.losses += todayStats.losses || 0;
+
+      periodBuckets.last7d.pnl += last7dStats.pnl || 0;
+      periodBuckets.last7d.trades_count += last7dStats.trades_count || 0;
+      periodBuckets.last7d.wins += last7dStats.wins || 0;
+      periodBuckets.last7d.losses += last7dStats.losses || 0;
+
+      periodBuckets.last30d.pnl += last30dStats.pnl || 0;
+      periodBuckets.last30d.trades_count += last30dStats.trades_count || 0;
+      periodBuckets.last30d.wins += last30dStats.wins || 0;
+      periodBuckets.last30d.losses += last30dStats.losses || 0;
+
+      periodBuckets.ytd.pnl += ytdStats.pnl || 0;
+      periodBuckets.ytd.trades_count += ytdStats.trades_count || 0;
+      periodBuckets.ytd.wins += ytdStats.wins || 0;
+      periodBuckets.ytd.losses += ytdStats.losses || 0;
+
+      periodBuckets.all_time.pnl += allTimeStats.pnl || 0;
+      periodBuckets.all_time.trades_count += allTimeStats.trades_count || 0;
+      periodBuckets.all_time.wins += allTimeStats.wins || 0;
+      periodBuckets.all_time.losses += allTimeStats.losses || 0;
+
+      filteredDailyRows.forEach((row) => {
+        filteredDailyMap.set(row.date, (filteredDailyMap.get(row.date) || 0) + toNum(row.pnl));
+      });
+
+      monthRows.forEach((row) => {
+        const existing = monthDayMap.get(row.day) || { pnl: 0, trades: 0 };
+        existing.pnl += toNum(row.pnl);
+        existing.trades += toNum(row.trades);
+        monthDayMap.set(row.day, existing);
+      });
+
+      yearRows.forEach((row) => {
+        const existing = yearMonthMap.get(row.month) || { pnl: 0, trades: 0 };
+        existing.pnl += toNum(row.pnl);
+        existing.trades += toNum(row.trades);
+        yearMonthMap.set(row.month, existing);
+      });
 
       snapshots.forEach((s) => {
         if (!s.snapshot_time_ms) {
           return;
         }
         const equityValue = toNum(s.equity, 0);
+        const balanceValue = toNum(s.balance, 0);
         const key = dayKey(s.snapshot_time_ms);
         const existing = curveByDay.get(key);
         if (!existing) {
@@ -282,60 +440,70 @@ router.get('/analytics', async (req: Request, res: Response) => {
             existing.ts = s.snapshot_time_ms;
           }
         }
+
+        const existingBalance = balanceByDay.get(key);
+        if (!existingBalance) {
+          balanceByDay.set(key, { ts: s.snapshot_time_ms, balance: balanceValue });
+        } else {
+          existingBalance.balance += balanceValue;
+          if (s.snapshot_time_ms > existingBalance.ts) {
+            existingBalance.ts = s.snapshot_time_ms;
+          }
+        }
       });
     }
 
     const floatingPnl = positions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
-    const sortedTrades = trades
+    const recentTrades = recentTradesPool
       .slice()
-      .sort((a, b) => (b.exit_time_ms || b.entry_time_ms) - (a.exit_time_ms || a.entry_time_ms));
-
-    const filteredTrades = sortedTrades.filter((t) => {
-      const ts = t.exit_time_ms || t.entry_time_ms || 0;
-      if (Number.isFinite(tradeFromMs) && ts < tradeFromMs) {
-        return false;
-      }
-      if (Number.isFinite(tradeToMs) && ts > tradeToMs) {
-        return false;
-      }
-      return true;
-    });
-    const recentTrades = filteredTrades.slice(0, recentTradesLimit);
-    const distribution = {
-      wins: filteredTrades.filter((t) => (t.profit || 0) > 0).length,
-      losses: filteredTrades.filter((t) => (t.profit || 0) < 0).length,
-      neutral: filteredTrades.filter((t) => (t.profit || 0) === 0).length,
-    };
-
-    const dailySource = hasTradeFilter
-      ? filteredTrades
-      : filteredTrades.filter((t) => {
-          const ts = t.exit_time_ms || t.entry_time_ms || 0;
-          return ts >= (nowMs - (30 * 24 * 60 * 60 * 1000));
-        });
-
-    const filteredDailyMap = new Map<string, number>();
-    dailySource.forEach((t) => {
-      const ts = t.exit_time_ms || t.entry_time_ms || 0;
-      if (!ts) {
-        return;
-      }
-      const key = dayKey(ts);
-      filteredDailyMap.set(key, (filteredDailyMap.get(key) || 0) + (t.profit || 0));
-    });
+      .sort((a, b) => (b.exit_time_ms || b.entry_time_ms) - (a.exit_time_ms || a.entry_time_ms))
+      .slice(0, recentTradesLimit);
     const filteredDailyPnl = Array.from(filteredDailyMap.entries())
       .map(([date, pnl]) => ({ date, pnl }))
       .sort((a, b) => a.date.localeCompare(b.date));
 
     const periods = {
-      today: calcPeriodStats(trades, getRangeStart('today', nowMs), nowMs),
-      last7d: calcPeriodStats(trades, getRangeStart('last7d', nowMs), nowMs),
-      last30d: calcPeriodStats(trades, getRangeStart('last30d', nowMs), nowMs),
-      ytd: calcPeriodStats(trades, getRangeStart('ytd', nowMs), nowMs),
-      all_time: calcPeriodStats(trades, getRangeStart('all_time', nowMs), nowMs),
+      today: {
+        ...periodBuckets.today,
+        win_rate_pct: periodBuckets.today.trades_count > 0 ? (periodBuckets.today.wins / periodBuckets.today.trades_count) * 100 : 0,
+      },
+      last7d: {
+        ...periodBuckets.last7d,
+        win_rate_pct: periodBuckets.last7d.trades_count > 0 ? (periodBuckets.last7d.wins / periodBuckets.last7d.trades_count) * 100 : 0,
+      },
+      last30d: {
+        ...periodBuckets.last30d,
+        win_rate_pct: periodBuckets.last30d.trades_count > 0 ? (periodBuckets.last30d.wins / periodBuckets.last30d.trades_count) * 100 : 0,
+      },
+      ytd: {
+        ...periodBuckets.ytd,
+        win_rate_pct: periodBuckets.ytd.trades_count > 0 ? (periodBuckets.ytd.wins / periodBuckets.ytd.trades_count) * 100 : 0,
+      },
+      all_time: {
+        ...periodBuckets.all_time,
+        win_rate_pct: periodBuckets.all_time.trades_count > 0 ? (periodBuckets.all_time.wins / periodBuckets.all_time.trades_count) * 100 : 0,
+      },
     };
 
-    const tradeMetrics = calcTradeMetrics(trades);
+    const tradeMetrics = metricsTotals.trade_count > 0 ? {
+      win_rate_pct: (metricsTotals.win_count / metricsTotals.trade_count) * 100,
+      avg_win: metricsTotals.avg_win_count > 0 ? metricsTotals.avg_win_sum / metricsTotals.avg_win_count : 0,
+      avg_loss: metricsTotals.avg_loss_count > 0 ? metricsTotals.avg_loss_sum / metricsTotals.avg_loss_count : 0,
+      max_win: metricsTotals.max_win,
+      max_loss: metricsTotals.max_loss,
+      expectancy: metricsTotals.expectancy_sum / metricsTotals.trade_count,
+      profit_factor: metricsTotals.gross_loss > 0 ? metricsTotals.gross_profit / metricsTotals.gross_loss : (metricsTotals.gross_profit > 0 ? 999 : 0),
+      avg_hold_seconds: metricsTotals.hold_count > 0 ? metricsTotals.hold_sum / metricsTotals.hold_count : 0,
+    } : {
+      win_rate_pct: 0,
+      avg_win: 0,
+      avg_loss: 0,
+      max_win: 0,
+      max_loss: 0,
+      expectancy: 0,
+      profit_factor: 0,
+      avg_hold_seconds: 0,
+    };
 
     const exposureMap = new Map<string, number>();
     positions.forEach((p) => {
@@ -345,52 +513,11 @@ router.get('/analytics', async (req: Request, res: Response) => {
       .map(([symbol, size]) => ({ symbol, size }))
       .sort((a, b) => b.size - a.size);
 
-    const monthBase = new Date();
-    monthBase.setMonth(monthBase.getMonth() + monthShift);
-    const monthYear = monthBase.getFullYear();
-    const monthIdx = monthBase.getMonth();
-    const monthStart = new Date(monthYear, monthIdx, 1).getTime();
-    const monthEnd = new Date(monthYear, monthIdx + 1, 0, 23, 59, 59, 999).getTime();
-    const daysInMonth = new Date(monthYear, monthIdx + 1, 0).getDate();
-
-    const monthDayMap = new Map<number, { pnl: number; trades: number }>();
-    trades.forEach((t) => {
-      const ts = t.exit_time_ms;
-      if (!ts || ts < monthStart || ts > monthEnd) {
-        return;
-      }
-      const d = new Date(ts).getDate();
-      const existing = monthDayMap.get(d) || { pnl: 0, trades: 0 };
-      existing.pnl += t.profit || 0;
-      existing.trades += 1;
-      monthDayMap.set(d, existing);
-    });
-
     const monthDays = Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => ({
       day,
       pnl: monthDayMap.get(day)?.pnl || 0,
       trades: monthDayMap.get(day)?.trades || 0,
     }));
-
-    const yearBase = new Date();
-    yearBase.setFullYear(yearBase.getFullYear() + yearShift);
-    const targetYear = yearBase.getFullYear();
-    const yearMonthMap = new Map<number, { pnl: number; trades: number }>();
-    trades.forEach((t) => {
-      const ts = t.exit_time_ms;
-      if (!ts) {
-        return;
-      }
-      const d = new Date(ts);
-      if (d.getFullYear() !== targetYear) {
-        return;
-      }
-      const m = d.getMonth() + 1;
-      const existing = yearMonthMap.get(m) || { pnl: 0, trades: 0 };
-      existing.pnl += t.profit || 0;
-      existing.trades += 1;
-      yearMonthMap.set(m, existing);
-    });
 
     const yearMonths = Array.from({ length: 12 }, (_, i) => i + 1).map((month) => ({
       month,
@@ -400,6 +527,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
 
     const equityCurveRaw = Array.from(curveByDay.values()).sort((a, b) => a.ts - b.ts);
     const equityCurve = equityCurveRaw.length > 0 ? equityCurveRaw : buildFlatZeroCurve(curveDays, nowMs);
+    const balanceCurveRaw = Array.from(balanceByDay.values()).sort((a, b) => a.ts - b.ts);
+    const balanceCurve = balanceCurveRaw.length > 0 ? balanceCurveRaw : buildFlatZeroBalanceCurve(curveDays, nowMs);
 
     res.json({
       scope: accountIdParam === 'all' ? 'all' : 'single',
@@ -415,11 +544,12 @@ router.get('/analytics', async (req: Request, res: Response) => {
       trade_metrics: tradeMetrics,
       positions,
       recent_trades: recentTrades,
-      trades_total_matching: filteredTrades.length,
+      trades_total_matching: filteredTradesTotal,
       trades_returned: recentTrades.length,
       filtered_distribution: distribution,
       filtered_daily_pnl: filteredDailyPnl,
       equity_curve: equityCurve,
+      balance_curve: balanceCurve,
       symbol_exposure: symbolExposure,
       calendars: {
         monthly: {

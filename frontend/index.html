@@ -17,20 +17,19 @@
                 </select>
             </div>
             <div class="header-right">
+                <div class="header-status">
+                    <div id="lastRefresh" class="status-pill">Last refresh: --</div>
+                    <div id="accountsCount" class="status-pill">Accounts: 0</div>
+                    <div id="positionsCount" class="status-pill">Open positions: 0</div>
+                    <div id="loadStatus" class="status-pill">Sync: idle</div>
+                    <div id="errorStatus" class="status-pill">Error: none</div>
+                </div>
                 <button id="resetTradesFilterBtn" class="icon-btn" type="button">Reset Filter</button>
                 <button id="themeToggleBtn" class="icon-btn" aria-label="Toggle theme">Theme</button>
             </div>
         </header>
 
         <main class="main-content">
-            <section class="status-strip">
-                <div id="lastRefresh">Last refresh: --</div>
-                <div id="accountsCount">Accounts: 0</div>
-                <div id="positionsCount">Open positions: 0</div>
-                <div id="loadStatus">Sync: idle</div>
-                <div id="errorStatus">Error: none</div>
-            </section>
-
             <section class="kpi-cards">
                 <div class="card">
                     <label>Equity</label>
@@ -62,7 +61,7 @@
 
             <section class="charts-row">
                 <div class="chart-container">
-                    <h3>Equity Curve</h3>
+                    <h3 id="accountCurveTitle">Equity Curve</h3>
                     <canvas id="equityCurveChart"></canvas>
                 </div>
                 <div class="table-section table-section--exposure">
@@ -128,6 +127,17 @@
                 </div>
             </section>
 
+            <section class="charts-row">
+                <div class="chart-container">
+                    <h3>Win/Loss Distribution</h3>
+                    <canvas id="winLossChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3 id="dailyPnlChartTitle">Daily PnL (Last 30 Days)</h3>
+                    <canvas id="dailyPnlChart"></canvas>
+                </div>
+            </section>
+
             <section class="table-section">
                 <div class="trades-head">
                     <h3 id="tradesSectionTitle">Historic Trades</h3>
@@ -155,17 +165,6 @@
                     </tbody>
                 </table>
                 <div id="tradesCountInfo" class="trades-count-info">Showing 0 of 0 trades</div>
-            </section>
-
-            <section class="charts-row">
-                <div class="chart-container">
-                    <h3>Win/Loss Distribution</h3>
-                    <canvas id="winLossChart"></canvas>
-                </div>
-                <div class="chart-container">
-                    <h3 id="dailyPnlChartTitle">Daily PnL (Last 30 Days)</h3>
-                    <canvas id="dailyPnlChart"></canvas>
-                </div>
             </section>
         </main>
     </div>

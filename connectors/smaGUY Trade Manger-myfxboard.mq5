@@ -388,6 +388,64 @@ private:
       return out;
    }
 
+   static bool Sha256(const uchar &payload_bytes[], uchar &digest[]) {
+      uchar no_key[];
+      ArrayResize(no_key, 0, 0);
+      return CryptEncode(CRYPT_HASH_SHA256, payload_bytes, no_key, digest) > 0;
+   }
+
+   static bool BuildHmacSha256(const uchar &key[], const uchar &message[], uchar &out_digest[]) {
+      const int BLOCK_SIZE = 64;
+      uchar normalized_key[];
+      ArrayCopy(normalized_key, key);
+
+      if(ArraySize(normalized_key) > BLOCK_SIZE) {
+         uchar key_hash[];
+         if(!Sha256(normalized_key, key_hash))
+            return false;
+         ArrayFree(normalized_key);
+         ArrayCopy(normalized_key, key_hash);
+      }
+
+      if(ArraySize(normalized_key) < BLOCK_SIZE) {
+         int old_size = ArraySize(normalized_key);
+         ArrayResize(normalized_key, BLOCK_SIZE, 0);
+         for(int i = old_size; i < BLOCK_SIZE; i++)
+            normalized_key[i] = 0;
+      }
+
+      uchar ipad[];
+      uchar opad[];
+      ArrayResize(ipad, BLOCK_SIZE, 0);
+      ArrayResize(opad, BLOCK_SIZE, 0);
+      for(int i = 0; i < BLOCK_SIZE; i++) {
+         ipad[i] = normalized_key[i] ^ 0x36;
+         opad[i] = normalized_key[i] ^ 0x5c;
+      }
+
+      uchar inner_data[];
+      int message_size = ArraySize(message);
+      ArrayResize(inner_data, BLOCK_SIZE + message_size, 0);
+      for(int i = 0; i < BLOCK_SIZE; i++)
+         inner_data[i] = ipad[i];
+      for(int i = 0; i < message_size; i++)
+         inner_data[BLOCK_SIZE + i] = message[i];
+
+      uchar inner_hash[];
+      if(!Sha256(inner_data, inner_hash))
+         return false;
+
+      uchar outer_data[];
+      int inner_size = ArraySize(inner_hash);
+      ArrayResize(outer_data, BLOCK_SIZE + inner_size, 0);
+      for(int i = 0; i < BLOCK_SIZE; i++)
+         outer_data[i] = opad[i];
+      for(int i = 0; i < inner_size; i++)
+         outer_data[BLOCK_SIZE + i] = inner_hash[i];
+
+      return Sha256(outer_data, out_digest);
+   }
+
    static string CreateSignature(string account_number, long timestamp_ms, string psk) {
       string message = account_number + ":" + StringFormat("%lld", timestamp_ms);
       uchar message_bytes[];
@@ -402,9 +460,9 @@ private:
       if(key_len > 0)
          ArrayResize(key_bytes, key_len - 1, 0);
 
-      if(!CryptEncode(CRYPT_HASH_SHA256, message_bytes, key_bytes, digest)) {
+      if(!BuildHmacSha256(key_bytes, message_bytes, digest)) {
          if(s_debug_log)
-            Print("[DashboardConnector] Failed to build signature hash");
+            Print("[DashboardConnector] Failed to build HMAC signature");
          return "";
       }
 
@@ -564,9 +622,9 @@ void UpdateStatusDot() {
       ObjectCreate(chart_id, MFXB_DOT_OBJ, OBJ_RECTANGLE_LABEL, 0, 0, 0);
       ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_CORNER,      CORNER_RIGHT_UPPER);
       ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_XDISTANCE,   18);
-      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_YDISTANCE,   6);
-      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_XSIZE,       12);
-      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_YSIZE,       12);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_YDISTANCE,   5);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_XSIZE,       13);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_YSIZE,       13);
       ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_SELECTABLE,  false);
       ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_HIDDEN,      true);
@@ -574,7 +632,9 @@ void UpdateStatusDot() {
    }
    ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_CORNER,    CORNER_RIGHT_UPPER);
    ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_XDISTANCE, 18);
-   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_YDISTANCE, 6);
+   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_YDISTANCE, 5);
+   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_XSIZE,     13);
+   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_YSIZE,     13);
    ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_BGCOLOR, dot_color);
    ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_COLOR,   dot_color);
    ChartRedraw(chart_id);

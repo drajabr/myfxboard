@@ -177,6 +177,35 @@ export const tradeQueries = {
     return result.rows;
   },
 
+  async findWindowedByEventTime(
+    account_id: string,
+    from_time_ms: number,
+    to_time_ms: number,
+    limit: number
+  ): Promise<Trade[]> {
+    const result = await query(
+      `SELECT *
+         FROM trades
+        WHERE account_id = $1
+          AND COALESCE(exit_time_ms, entry_time_ms) BETWEEN $2 AND $3
+        ORDER BY COALESCE(exit_time_ms, entry_time_ms) DESC
+        LIMIT $4`,
+      [account_id, from_time_ms, to_time_ms, limit]
+    );
+    return result.rows;
+  },
+
+  async countByEventTimeRange(account_id: string, from_time_ms: number, to_time_ms: number): Promise<number> {
+    const result = await query(
+      `SELECT COUNT(*)::int AS total
+         FROM trades
+        WHERE account_id = $1
+          AND COALESCE(exit_time_ms, entry_time_ms) BETWEEN $2 AND $3`,
+      [account_id, from_time_ms, to_time_ms]
+    );
+    return result.rows[0]?.total || 0;
+  },
+
   async findByExitRange(account_id: string, from_time_ms: number, to_time_ms: number): Promise<Trade[]> {
     const result = await query(
       `SELECT *
@@ -209,6 +238,132 @@ export const tradeQueries = {
       [account_id, from_time_ms, to_time_ms]
     );
     return result.rows[0] || { trades_count: 0, wins: 0, losses: 0 };
+  },
+
+  async summarizeByEventTimeRange(
+    account_id: string,
+    from_time_ms: number,
+    to_time_ms: number
+  ): Promise<{ pnl: number; trades_count: number; wins: number; losses: number; neutral: number }> {
+    const result = await query(
+      `SELECT
+          COALESCE(SUM(profit), 0)::float8 AS pnl,
+          COUNT(*)::int AS trades_count,
+          COUNT(*) FILTER (WHERE profit > 0)::int AS wins,
+          COUNT(*) FILTER (WHERE profit < 0)::int AS losses,
+          COUNT(*) FILTER (WHERE profit = 0)::int AS neutral
+         FROM trades
+        WHERE account_id = $1
+          AND COALESCE(exit_time_ms, entry_time_ms) BETWEEN $2 AND $3`,
+      [account_id, from_time_ms, to_time_ms]
+    );
+    return result.rows[0] || { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0 };
+  },
+
+  async summarizeMetrics(account_id: string): Promise<{
+    trade_count: number;
+    win_count: number;
+    loss_count: number;
+    avg_win: number;
+    avg_loss: number;
+    max_win: number;
+    max_loss: number;
+    expectancy: number;
+    gross_profit: number;
+    gross_loss: number;
+    avg_hold_seconds: number;
+  }> {
+    const result = await query(
+      `SELECT
+          COUNT(*)::int AS trade_count,
+          COUNT(*) FILTER (WHERE profit > 0)::int AS win_count,
+          COUNT(*) FILTER (WHERE profit < 0)::int AS loss_count,
+          COALESCE(AVG(profit) FILTER (WHERE profit > 0), 0)::float8 AS avg_win,
+          COALESCE(AVG(profit) FILTER (WHERE profit < 0), 0)::float8 AS avg_loss,
+          COALESCE(MAX(profit), 0)::float8 AS max_win,
+          COALESCE(MIN(profit), 0)::float8 AS max_loss,
+          COALESCE(AVG(profit), 0)::float8 AS expectancy,
+          COALESCE(SUM(profit) FILTER (WHERE profit > 0), 0)::float8 AS gross_profit,
+          COALESCE(ABS(SUM(profit) FILTER (WHERE profit < 0)), 0)::float8 AS gross_loss,
+          COALESCE(AVG(duration_sec) FILTER (WHERE duration_sec > 0), 0)::float8 AS avg_hold_seconds
+         FROM trades
+        WHERE account_id = $1
+          AND profit IS NOT NULL`,
+      [account_id]
+    );
+    return result.rows[0] || {
+      trade_count: 0,
+      win_count: 0,
+      loss_count: 0,
+      avg_win: 0,
+      avg_loss: 0,
+      max_win: 0,
+      max_loss: 0,
+      expectancy: 0,
+      gross_profit: 0,
+      gross_loss: 0,
+      avg_hold_seconds: 0,
+    };
+  },
+
+  async summarizeDailyPnlByEventTimeRange(
+    account_id: string,
+    from_time_ms: number,
+    to_time_ms: number
+  ): Promise<Array<{ date: string; pnl: number }>> {
+    const result = await query(
+      `SELECT
+          TO_CHAR(TO_TIMESTAMP(COALESCE(exit_time_ms, entry_time_ms) / 1000.0), 'YYYY-MM-DD') AS date,
+          COALESCE(SUM(profit), 0)::float8 AS pnl
+         FROM trades
+        WHERE account_id = $1
+          AND COALESCE(exit_time_ms, entry_time_ms) BETWEEN $2 AND $3
+        GROUP BY 1
+        ORDER BY 1 ASC`,
+      [account_id, from_time_ms, to_time_ms]
+    );
+    return result.rows;
+  },
+
+  async summarizeMonthCalendar(
+    account_id: string,
+    from_time_ms: number,
+    to_time_ms: number
+  ): Promise<Array<{ day: number; pnl: number; trades: number }>> {
+    const result = await query(
+      `SELECT
+          EXTRACT(DAY FROM TO_TIMESTAMP(exit_time_ms / 1000.0))::int AS day,
+          COALESCE(SUM(profit), 0)::float8 AS pnl,
+          COUNT(*)::int AS trades
+         FROM trades
+        WHERE account_id = $1
+          AND exit_time_ms IS NOT NULL
+          AND exit_time_ms BETWEEN $2 AND $3
+        GROUP BY 1
+        ORDER BY 1 ASC`,
+      [account_id, from_time_ms, to_time_ms]
+    );
+    return result.rows;
+  },
+
+  async summarizeYearCalendar(
+    account_id: string,
+    year: number
+  ): Promise<Array<{ month: number; pnl: number; trades: number }>> {
+    const result = await query(
+      `SELECT
+          EXTRACT(MONTH FROM TO_TIMESTAMP(exit_time_ms / 1000.0))::int AS month,
+          COALESCE(SUM(profit), 0)::float8 AS pnl,
+          COUNT(*)::int AS trades
+         FROM trades
+        WHERE account_id = $1
+          AND exit_time_ms IS NOT NULL
+          AND EXTRACT(YEAR FROM TO_TIMESTAMP(exit_time_ms / 1000.0)) = $2
+        GROUP BY 1
+        ORDER BY 1 ASC`,
+      [account_id, year]
+    );
+    return result.rows;
   },
 };
 

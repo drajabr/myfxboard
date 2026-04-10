@@ -437,21 +437,49 @@ function getChartColorVar(name) {
     return getComputedStyle(document.body).getPropertyValue(name).trim();
 }
 
+function hasUsableSeries(rows, valueKey) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return false;
+    }
+    return rows.some((row) => toNum(row?.[valueKey], 0) !== 0);
+}
+
 function updateCharts(data) {
     const positive = getChartColorVar('--pnl-positive');
     const negative = getChartColorVar('--pnl-negative');
     const neutral = getChartColorVar('--pnl-neutral');
     const text = getChartColorVar('--text');
+    const accent = getChartColorVar('--accent');
 
     const fallbackCurve = Array.from({ length: 30 }, (_, idx) => {
         const ts = new Date(Date.now() - ((29 - idx) * 24 * 60 * 60 * 1000)).setHours(0, 0, 0, 0);
-        return { ts, equity: 0 };
+        return { ts, value: 0 };
     });
-    const equityRows = Array.isArray(data.equity_curve) && data.equity_curve.length > 0
-        ? data.equity_curve
-        : fallbackCurve;
-    const equityLabels = equityRows.map((d) => formatDateMs(d.ts));
-    const equityValues = equityRows.map((d) => toNum(d.equity));
+    const equityRows = Array.isArray(data.equity_curve) ? data.equity_curve : [];
+    const balanceRows = Array.isArray(data.balance_curve) ? data.balance_curve : [];
+    const equityUsable = hasUsableSeries(equityRows, 'equity');
+    const balanceUsable = hasUsableSeries(balanceRows, 'balance');
+
+    let accountCurveRows = fallbackCurve;
+    let accountCurveValues = fallbackCurve.map((d) => d.value);
+    let accountCurveLabel = 'Balance';
+
+    if (equityUsable) {
+        accountCurveRows = equityRows;
+        accountCurveValues = equityRows.map((d) => toNum(d.equity));
+        accountCurveLabel = 'Equity';
+    } else if (balanceUsable) {
+        accountCurveRows = balanceRows;
+        accountCurveValues = balanceRows.map((d) => toNum(d.balance));
+        accountCurveLabel = 'Balance';
+    }
+
+    const equityTitle = document.getElementById('accountCurveTitle');
+    if (equityTitle) {
+        equityTitle.textContent = accountCurveLabel === 'Equity' ? 'Equity Curve' : 'Balance Curve';
+    }
+
+    const equityLabels = accountCurveRows.map((d) => formatDateMs(d.ts));
 
     if (!charts.equityCurve) {
         charts.equityCurve = new Chart(document.getElementById('equityCurveChart'), {
@@ -459,12 +487,12 @@ function updateCharts(data) {
             data: {
                 labels: equityLabels,
                 datasets: [{
-                    label: 'Equity',
-                    data: equityValues,
-                    borderColor: positive,
+                    label: accountCurveLabel,
+                    data: accountCurveValues,
+                    borderColor: accent,
                     backgroundColor: 'rgba(31, 111, 235, 0.12)',
                     tension: 0.25,
-                    pointRadius: 0,
+                    pointRadius: accountCurveValues.every((value) => value === 0) ? 1.5 : 0,
                     fill: true,
                 }],
             },
@@ -476,8 +504,10 @@ function updateCharts(data) {
         });
     } else {
         charts.equityCurve.data.labels = equityLabels;
-        charts.equityCurve.data.datasets[0].data = equityValues;
-        charts.equityCurve.data.datasets[0].borderColor = positive;
+        charts.equityCurve.data.datasets[0].label = accountCurveLabel;
+        charts.equityCurve.data.datasets[0].data = accountCurveValues;
+        charts.equityCurve.data.datasets[0].borderColor = accent;
+        charts.equityCurve.data.datasets[0].pointRadius = accountCurveValues.every((value) => value === 0) ? 1.5 : 0;
         charts.equityCurve.options.plugins.legend.labels.color = text;
         charts.equityCurve.update();
     }

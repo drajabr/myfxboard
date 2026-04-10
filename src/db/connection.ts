@@ -4,6 +4,7 @@ import { config } from 'dotenv';
 config();
 
 const { Pool } = pg;
+const LOG_SQL_QUERIES = process.env.LOG_SQL_QUERIES === 'true';
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://dashboard:dashboard_pass@localhost:5432/myfxboard',
@@ -22,7 +23,9 @@ export const query = async (text: string, params?: any[]) => {
   try {
     const result = await pool.query(text, params);
     const duration = Date.now() - start;
-    console.log('Executed query', { text, duration, rows: result.rowCount });
+    if (LOG_SQL_QUERIES) {
+      console.log('Executed query', { text, duration, rows: result.rowCount });
+    }
     return result;
   } catch (error) {
     console.error('Database query error', { text, error });
