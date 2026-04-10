@@ -6,7 +6,7 @@ import { transaction } from '../db/connection.js';
 import { Trade } from '../types/index.js';
 
 const router = Router();
-const DEFAULT_MIN_INGEST_INTERVAL_MS = 3000;
+const DEFAULT_MIN_INGEST_INTERVAL_MS = 500;
 
 const resolveAccountId = (req: Request) => String(req.accountId || req.body?.account_number || '').trim();
 
