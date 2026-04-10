@@ -10,7 +10,7 @@ RUN apk add --no-cache python3 make g++
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci
+RUN npm install
 
 # Copy source
 COPY . .
@@ -34,7 +34,7 @@ COPY --from=builder --chown=nodejs:nodejs /app/package*.json ./
 
 # Install production dependencies only
 ENV NODE_ENV=production
-RUN npm ci --only=production
+RUN npm install --omit=dev
 
 # Copy compiled code from builder
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
