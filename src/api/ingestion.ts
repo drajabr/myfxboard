@@ -10,6 +10,12 @@ const DEFAULT_MIN_INGEST_INTERVAL_MS = 3000;
 
 const resolveAccountId = (req: Request) => String(req.accountId || req.body?.account_number || '').trim();
 
+const resolveSourceIp = (req: Request) => {
+  const forwardedForHeader = req.headers['x-forwarded-for'];
+  const forwardedFor = Array.isArray(forwardedForHeader) ? forwardedForHeader[0] : forwardedForHeader;
+  return String(forwardedFor || req.ip || req.socket?.remoteAddress || '-').trim();
+};
+
 const requireSharedSecret = () => {
   const sharedSecret = process.env.CONNECTOR_SHARED_SECRET;
   if (!sharedSecret) {
@@ -85,7 +91,12 @@ router.post(
       const serverHistoryHash = String(account.last_history_hash || '');
       const clientHistoryHash = String(req.body.history_hash || '').trim();
 
+      const sourceIp = resolveSourceIp(req);
+
       if (sinceLastIngestMs < minIngestIntervalMs) {
+        console.log(
+          `[INGEST] throttled account=${accountId} ip=${sourceIp} retry_after_ms=${minIngestIntervalMs - sinceLastIngestMs}`
+        );
         return res.status(200).json({
           status: 'throttled',
           sync_id: req.body.sync_id,
@@ -97,7 +108,9 @@ router.post(
         });
       }
 
-      console.log(`[INGEST] Account: ${accountId}, positions: ${req.body.positions?.length || 0}, closed_trades: ${req.body.closed_trades?.length || 0}`);
+      console.log(
+        `[INGEST] account=${accountId} sync_id=${req.body.sync_id || '-'} ip=${sourceIp} positions=${req.body.positions?.length || 0} closed_trades=${req.body.closed_trades?.length || 0}`
+      );
 
       const {
         positions,
@@ -201,7 +214,10 @@ router.post(
       if ((error as any)?.code === 'ACCOUNT_SECRET_MISMATCH') {
         return res.status(403).json({ status: 'error', error: 'Account secret mismatch' });
       }
-      console.error('Ingestion endpoint error:', error);
+      console.error(
+        `[INGEST] endpoint_error account=${resolveAccountId(req)} sync_id=${req.body?.sync_id || '-'} ip=${resolveSourceIp(req)}`,
+        error
+      );
       res.status(500).json({ status: 'error', error: 'Ingestion failed' });
     }
   }
@@ -250,7 +266,10 @@ router.post(
       if ((error as any)?.code === 'ACCOUNT_SECRET_MISMATCH') {
         return res.status(403).json({ status: 'error', error: 'Account secret mismatch' });
       }
-      console.error('Backfill endpoint error:', error);
+      console.error(
+        `[INGEST] backfill_error account=${resolveAccountId(req)} sync_id=${req.body?.sync_id || '-'} ip=${resolveSourceIp(req)}`,
+        error
+      );
       res.status(500).json({ status: 'error', error: 'Backfill failed' });
     }
   }

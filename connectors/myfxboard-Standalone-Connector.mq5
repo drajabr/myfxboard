@@ -36,6 +36,7 @@ private:
    static long     s_last_live_payload_sent_ms;
    static string   s_last_ack_history_hash;
    static bool     s_startup_health_checked;
+   static bool     s_last_sync_ok;
 
    static uint HashPayload(const string payload) {
       uchar bytes[];
@@ -88,6 +89,7 @@ public:
       s_last_live_payload_sent_ms = 0;
       s_last_ack_history_hash = "";
       s_startup_health_checked = false;
+      s_last_sync_ok            = false;
       if(s_debug_log)
          Print("[DashboardConnector] Initialized: url=", s_url, " interval=", interval_sec, "s");
    }
@@ -177,6 +179,7 @@ public:
 
    static int  GetSuccessCount()          { return s_success_count; }
    static int  GetErrorCount()            { return s_error_count; }
+   static bool GetLastSyncOk()            { return s_last_sync_ok; }
    static void SetDebugLog(bool enabled)  { s_debug_log = enabled; }
 
 private:
@@ -424,6 +427,7 @@ private:
 
       if(res == -1) {
          s_error_count++;
+         s_last_sync_ok = false;
          if(!include_history && live_payload_hash == s_last_live_payload_hash && s_keepalive_ms > 0)
             s_last_live_payload_sent_ms = timestamp_ms;
          if(s_debug_log) {
@@ -444,12 +448,14 @@ private:
                Print("[DashboardConnector] Sync accepted for account ", account_number,
                      " (", StringLen(payload), " bytes, status=", res, ")");
             s_success_count++;
+            s_last_sync_ok = true;
             s_last_live_payload_hash = live_payload_hash;
             s_last_live_payload_sent_ms = timestamp_ms;
             if(history_sync_required && s_debug_log)
                Print("[DashboardConnector] Server requested history resend (hash mismatch)");
          } else {
             s_error_count++;
+            s_last_sync_ok = false;
             if(!include_history && live_payload_hash == s_last_live_payload_hash && s_keepalive_ms > 0)
                s_last_live_payload_sent_ms = timestamp_ms;
             if(s_debug_log)
@@ -515,6 +521,64 @@ uint   DashboardConnector::s_last_live_payload_hash = 0;
 long   DashboardConnector::s_last_live_payload_sent_ms = 0;
 string DashboardConnector::s_last_ack_history_hash = "";
 bool   DashboardConnector::s_startup_health_checked = false;
+bool   DashboardConnector::s_last_sync_ok            = false;
+
+//+------------------------------------------------------------------+
+//| Status dot                                                       |
+//+------------------------------------------------------------------+
+#define MFXB_DOT_OBJ "myfxboard_status_dot"
+int   g_dot_seen_success = -1;
+int   g_dot_seen_error   = -1;
+ulong g_dot_blink_until_ms = 0;
+
+void UpdateStatusDot() {
+   ulong now_ms = GetTickCount64();
+
+   int success_count = DashboardConnector::GetSuccessCount();
+   int error_count   = DashboardConnector::GetErrorCount();
+
+   if(g_dot_seen_success < 0 || g_dot_seen_error < 0) {
+      g_dot_seen_success = success_count;
+      g_dot_seen_error   = error_count;
+   }
+
+   bool has_event = (success_count != g_dot_seen_success || error_count != g_dot_seen_error);
+   if(has_event) {
+      g_dot_seen_success = success_count;
+      g_dot_seen_error   = error_count;
+      g_dot_blink_until_ms = now_ms + 220;
+   }
+
+   color dot_color;
+   if(success_count == 0 && error_count == 0)
+      dot_color = clrRed;
+   else {
+      bool is_positive = DashboardConnector::GetLastSyncOk();
+      color settled_color = is_positive ? clrLime : clrRed;
+      color pulse_color   = is_positive ? C'0,160,0' : C'120,0,0';
+      dot_color = (now_ms < g_dot_blink_until_ms) ? pulse_color : settled_color;
+   }
+
+   long chart_id = 0;
+   if(ObjectFind(chart_id, MFXB_DOT_OBJ) < 0) {
+      ObjectCreate(chart_id, MFXB_DOT_OBJ, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_CORNER,      CORNER_RIGHT_UPPER);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_XDISTANCE,   18);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_YDISTANCE,   6);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_XSIZE,       12);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_YSIZE,       12);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_SELECTABLE,  false);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_HIDDEN,      true);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_BACK,        false);
+   }
+   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_CORNER,    CORNER_RIGHT_UPPER);
+   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_XDISTANCE, 18);
+   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_YDISTANCE, 6);
+   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_BGCOLOR, dot_color);
+   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_COLOR,   dot_color);
+   ChartRedraw(chart_id);
+}
 
 //+------------------------------------------------------------------+
 //| EA lifecycle                                                     |
@@ -532,12 +596,14 @@ int OnInit() {
 
 void OnDeinit(const int reason) {
    EventKillTimer();
+   ObjectDelete(0, MFXB_DOT_OBJ);
    Print("[myfxboard] Connector stopped. Success=", DashboardConnector::GetSuccessCount(),
          " Errors=", DashboardConnector::GetErrorCount());
 }
 
 void OnTimer() {
    DashboardConnector::Sync();
+   UpdateStatusDot();
 }
 
 void OnTick() {

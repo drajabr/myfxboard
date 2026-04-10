@@ -14,12 +14,14 @@ config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
+const TRUST_PROXY = String(process.env.TRUST_PROXY || 'true').toLowerCase() === 'true';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const frontendDir = path.resolve(__dirname, '../../frontend');
 const frontendIndexPath = path.join(frontendDir, 'index.html');
 
 // Middleware
+app.set('trust proxy', TRUST_PROXY);
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
@@ -27,7 +29,10 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use((req, _res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  // Ingestion routes emit their own structured log lines — skip noisy duplication here.
+  if (!req.path.startsWith('/api/ingestion')) {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  }
   next();
 });
 

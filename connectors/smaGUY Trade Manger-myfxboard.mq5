@@ -30,6 +30,7 @@ private:
    static long     s_last_live_payload_sent_ms;
    static string   s_last_ack_history_hash;
    static bool     s_startup_health_checked;
+   static bool     s_last_sync_ok;
 
    static uint HashPayload(const string payload) {
       uchar bytes[];
@@ -82,6 +83,7 @@ public:
       s_last_live_payload_sent_ms = 0;
       s_last_ack_history_hash = "";
       s_startup_health_checked = false;
+      s_last_sync_ok            = false;
       if(s_debug_log)
          Print("[DashboardConnector] Initialized: url=", s_url, " interval=", interval_sec, "s");
    }
@@ -109,7 +111,9 @@ public:
       string closed_trades_json = BuildClosedTradesJson(latest_closed_time_ms, latest_closed_deal_id);
       string account_json = BuildAccountJson();
 
-      uint live_payload_hash = HashPayload(positions_json + "|" + account_json + "|" + StringFormat("%lld", latest_closed_time_ms));
+      // Hash only structural/stable fields — intentionally excludes tick-volatile values
+      // (position pnl, equity, margin) so the skip guard is not defeated on every tick.
+      uint live_payload_hash = HashPayload(BuildStructuralHashKey(latest_closed_time_ms));
       string history_hash = StringFormat("%u", HashPayload(closed_trades_json));
 
       if(!s_startup_health_checked) {
@@ -168,9 +172,35 @@ public:
 
    static int  GetSuccessCount()         { return s_success_count; }
    static int  GetErrorCount()           { return s_error_count; }
+   static bool GetLastSyncOk()           { return s_last_sync_ok; }
    static void SetDebugLog(bool enabled) { s_debug_log = enabled; }
 
 private:
+   // Returns a compact key over fields that only change when something structural happens
+   // (position opened/closed, SL/TP modified, balance changed). Excludes floating pnl,
+   // equity, and margin which change on every tick and would defeat the skip guard.
+   static string BuildStructuralHashKey(long latest_closed_time_ms) {
+      string key = "";
+      for(int i = 0; i < PositionsTotal(); i++) {
+         if(!PositionSelectByTicket(PositionGetTicket(i))) continue;
+         ENUM_POSITION_TYPE dir = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+         key += StringFormat("|%s:%.2f:%s:%.5f:%.5f:%.5f:%lld",
+            PositionGetString(POSITION_SYMBOL),
+            PositionGetDouble(POSITION_VOLUME),
+            dir == POSITION_TYPE_BUY ? "B" : "S",
+            PositionGetDouble(POSITION_PRICE_OPEN),
+            PositionGetDouble(POSITION_SL),
+            PositionGetDouble(POSITION_TP),
+            (long)PositionGetInteger(POSITION_TIME_MSC)
+         );
+      }
+      key += StringFormat("|bal:%.2f|ct:%lld",
+         AccountInfoDouble(ACCOUNT_BALANCE),
+         latest_closed_time_ms
+      );
+      return key;
+   }
+
    static string BuildPositionsJson() {
       string positions_json = "[";
       bool first_pos = true;
@@ -403,6 +433,7 @@ private:
       int res = WebRequest("POST", url, headers, 5000, request_data, response_data, response_headers);
       if(res == -1) {
          s_error_count++;
+         s_last_sync_ok = false;
          if(!include_history && live_payload_hash == s_last_live_payload_hash && s_keepalive_ms > 0)
             s_last_live_payload_sent_ms = timestamp_ms;
          if(s_debug_log) { Print("[DashboardConnector] Error: ", GetLastError()); ResetLastError(); }
@@ -420,12 +451,14 @@ private:
                Print("[DashboardConnector] Sync accepted for account ", account_number,
                      " (", StringLen(payload), " bytes, status=", res, ")");
             s_success_count++;
+            s_last_sync_ok = true;
             s_last_live_payload_hash = live_payload_hash;
             s_last_live_payload_sent_ms = timestamp_ms;
             if(history_sync_required && s_debug_log)
                Print("[DashboardConnector] Server requested history resend (hash mismatch)");
          } else {
             s_error_count++;
+            s_last_sync_ok = false;
             if(!include_history && live_payload_hash == s_last_live_payload_hash && s_keepalive_ms > 0)
                s_last_live_payload_sent_ms = timestamp_ms;
             if(s_debug_log)
@@ -491,6 +524,61 @@ uint   DashboardConnector::s_last_live_payload_hash = 0;
 long   DashboardConnector::s_last_live_payload_sent_ms = 0;
 string DashboardConnector::s_last_ack_history_hash = "";
 bool   DashboardConnector::s_startup_health_checked = false;
+bool   DashboardConnector::s_last_sync_ok            = false;
+
+#define MFXB_DOT_OBJ "myfxboard_status_dot"
+int   g_dot_seen_success = -1;
+int   g_dot_seen_error   = -1;
+ulong g_dot_blink_until_ms = 0;
+
+void UpdateStatusDot() {
+   ulong now_ms = GetTickCount64();
+
+   int success_count = DashboardConnector::GetSuccessCount();
+   int error_count   = DashboardConnector::GetErrorCount();
+
+   if(g_dot_seen_success < 0 || g_dot_seen_error < 0) {
+      g_dot_seen_success = success_count;
+      g_dot_seen_error   = error_count;
+   }
+
+   bool has_event = (success_count != g_dot_seen_success || error_count != g_dot_seen_error);
+   if(has_event) {
+      g_dot_seen_success = success_count;
+      g_dot_seen_error   = error_count;
+      g_dot_blink_until_ms = now_ms + 220;
+   }
+
+   color dot_color;
+   if(success_count == 0 && error_count == 0)
+      dot_color = clrRed;
+   else {
+      bool is_positive = DashboardConnector::GetLastSyncOk();
+      color settled_color = is_positive ? clrLime : clrRed;
+      color pulse_color   = is_positive ? C'0,160,0' : C'120,0,0';
+      dot_color = (now_ms < g_dot_blink_until_ms) ? pulse_color : settled_color;
+   }
+
+   long chart_id = 0;
+   if(ObjectFind(chart_id, MFXB_DOT_OBJ) < 0) {
+      ObjectCreate(chart_id, MFXB_DOT_OBJ, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_CORNER,      CORNER_RIGHT_UPPER);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_XDISTANCE,   18);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_YDISTANCE,   6);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_XSIZE,       12);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_YSIZE,       12);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_SELECTABLE,  false);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_HIDDEN,      true);
+      ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_BACK,        false);
+   }
+   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_CORNER,    CORNER_RIGHT_UPPER);
+   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_XDISTANCE, 18);
+   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_YDISTANCE, 6);
+   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_BGCOLOR, dot_color);
+   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_COLOR,   dot_color);
+   ChartRedraw(chart_id);
+}
 
 #define PARTIAL_MAGIC 999999
 #define DEFAULT_TIMER_BASE_INTERVAL_MS 50
@@ -2864,6 +2952,7 @@ if(state.exists) {
    // Dashboard sync
    if(InpEnableDashboardSync) {
       DashboardConnector::Sync();
+      UpdateStatusDot();
    }
 }
 
@@ -3046,6 +3135,11 @@ void OnDeinit(const int reason) {
       SavePartialState();
    }
    
+   // Cleanup sync dot
+   if(InpEnableDashboardSync) {
+      ObjectDelete(0, MFXB_DOT_OBJ);
+   }
+
    // Cleanup dashboard
    if(InpEnableDashboard) {
       ObjectDelete(0, "TM_Pos"); ObjectDelete(0, "TM_PnL"); ObjectDelete(0, "TM_SL"); ObjectDelete(0, "TM_TP");
