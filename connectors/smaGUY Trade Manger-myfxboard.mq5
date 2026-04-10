@@ -28,6 +28,7 @@ private:
    static ulong    s_last_log_ms;
    static uint     s_last_live_payload_hash;
    static long     s_last_live_payload_sent_ms;
+   static long     s_last_keepalive_probe_ms;
    static string   s_last_ack_history_hash;
    static bool     s_startup_health_checked;
    static bool     s_last_sync_ok;
@@ -81,6 +82,7 @@ public:
       s_error_count      = 0;
       s_last_live_payload_hash = 0;
       s_last_live_payload_sent_ms = 0;
+      s_last_keepalive_probe_ms = 0;
       s_last_ack_history_hash = "";
       s_startup_health_checked = false;
       s_last_sync_ok            = false;
@@ -137,11 +139,14 @@ public:
       }
 
       bool include_history = (history_hash != s_last_ack_history_hash);
+      long keepalive_reference_ms = s_last_live_payload_sent_ms;
+      if(s_last_keepalive_probe_ms > keepalive_reference_ms)
+         keepalive_reference_ms = s_last_keepalive_probe_ms;
 
       if(!include_history
          && live_payload_hash == s_last_live_payload_hash
-         && s_last_live_payload_sent_ms > 0) {
-         if(s_keepalive_ms <= 0 || (timestamp_ms - s_last_live_payload_sent_ms) < s_keepalive_ms) {
+         && keepalive_reference_ms > 0) {
+         if(s_keepalive_ms <= 0 || (timestamp_ms - keepalive_reference_ms) < s_keepalive_ms) {
             s_last_sync_ms = now_ms;
             if(s_debug_log && now_ms - s_last_log_ms > 30000) {
                Print("[DashboardConnector] No live payload changes, skipping sync");
@@ -153,6 +158,7 @@ public:
          bool history_sync_required = false;
          string server_history_hash = "";
          s_last_sync_ms = now_ms;
+         s_last_keepalive_probe_ms = timestamp_ms;
          if(PostHealthCheck(current_account, timestamp_ms, history_hash, history_sync_required, server_history_hash)) {
             if(server_history_hash != "")
                s_last_ack_history_hash = server_history_hash;
@@ -606,6 +612,7 @@ bool   DashboardConnector::s_debug_log        = false;
 ulong  DashboardConnector::s_last_log_ms      = 0;
 uint   DashboardConnector::s_last_live_payload_hash = 0;
 long   DashboardConnector::s_last_live_payload_sent_ms = 0;
+long   DashboardConnector::s_last_keepalive_probe_ms = 0;
 string DashboardConnector::s_last_ack_history_hash = "";
 bool   DashboardConnector::s_startup_health_checked = false;
 bool   DashboardConnector::s_last_sync_ok            = false;

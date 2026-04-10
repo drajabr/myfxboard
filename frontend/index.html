@@ -12,73 +12,49 @@
         <header class="header">
             <div class="header-left">
                 <h1>myfxboard</h1>
-                <select id="accountSelector" class="account-selector">
-                    <option value="">All Accounts</option>
-                </select>
-            </div>
-            <div class="header-right">
                 <div class="header-status">
                     <div id="lastRefresh" class="status-pill">Last refresh: --</div>
                     <div id="accountsCount" class="status-pill">Accounts: 0</div>
                     <div id="positionsCount" class="status-pill">Open positions: 0</div>
-                    <div id="loadStatus" class="status-pill">Sync: idle</div>
-                    <div id="errorStatus" class="status-pill">Error: none</div>
+                    <div id="systemStatus" class="status-pill status-pill--system" aria-live="polite">
+                        <span id="systemStatusDot" class="status-dot status-dot--idle" aria-hidden="true"></span>
+                        <span id="systemStatusText">Idle</span>
+                    </div>
                 </div>
+            </div>
+            <div class="header-right">
+                <select id="accountSelector" class="account-selector">
+                    <option value="">All Accounts</option>
+                </select>
                 <button id="resetTradesFilterBtn" class="icon-btn" type="button">Reset Filter</button>
                 <button id="themeToggleBtn" class="icon-btn" aria-label="Toggle theme">Theme</button>
             </div>
         </header>
 
         <main class="main-content">
-            <section class="kpi-cards">
-                <div class="card">
-                    <label>Equity</label>
-                    <div class="value" id="equity">$ 0.00</div>
+            <section class="table-section section-performance-windows">
+                <h3>Performance Windows</h3>
+                <div class="summary-spotlight">
+                    <div class="card spotlight-card spotlight-card--floating">
+                        <label>Floating PnL</label>
+                        <div class="value" id="floatingPnl">$ 0.00</div>
+                    </div>
+                    <div class="card spotlight-card spotlight-card--equity">
+                        <label>Equity</label>
+                        <div class="value" id="equity">$ 0.00</div>
+                    </div>
                 </div>
-                <div class="card">
-                    <label>Floating PnL</label>
-                    <div class="value" id="floatingPnl">$ 0.00</div>
-                </div>
-                <div class="card">
-                    <label>Today PnL</label>
-                    <div class="value" id="dailyPnl">$ 0.00</div>
-                </div>
-                <div class="card">
-                    <label>Win Rate</label>
-                    <div class="value" id="winRate">0%</div>
-                </div>
-            </section>
-
-            <section class="table-section">
-                <h3>Historical PnL Windows</h3>
                 <div class="metric-grid" id="periodStatsGrid"></div>
             </section>
 
-            <section class="table-section">
-                <h3>Trade Metrics</h3>
-                <div class="metric-grid" id="tradeMetricsGrid"></div>
-            </section>
-
             <section class="charts-row">
+                <div class="table-section">
+                    <h3>Trade Metrics</h3>
+                    <div class="metric-grid" id="tradeMetricsGrid"></div>
+                </div>
                 <div class="chart-container">
                     <h3 id="accountCurveTitle">Equity Curve</h3>
                     <canvas id="equityCurveChart"></canvas>
-                </div>
-                <div class="table-section table-section--exposure">
-                    <div class="exposure-head">
-                        <h3>Symbol Exposure</h3>
-                    </div>
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th><button class="sort-btn" type="button" data-exposure-sort="symbol">Symbol</button></th>
-                                <th><button class="sort-btn" type="button" data-exposure-sort="size">Exposure</button></th>
-                            </tr>
-                        </thead>
-                        <tbody id="exposureTable">
-                            <tr><td colspan="2" style="text-align:center;">No exposure</td></tr>
-                        </tbody>
-                    </table>
                 </div>
             </section>
 
@@ -99,6 +75,22 @@
                         </thead>
                         <tbody id="positionsTable">
                             <tr><td colspan="7" style="text-align:center;">No open positions</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-section table-section--exposure table-section--with-table-head">
+                    <div class="exposure-head">
+                        <h3>Symbol Exposure</h3>
+                    </div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th><button class="sort-btn" type="button" data-exposure-sort="symbol">Symbol</button></th>
+                                <th><button class="sort-btn" type="button" data-exposure-sort="size">Exposure</button></th>
+                            </tr>
+                        </thead>
+                        <tbody id="exposureTable">
+                            <tr><td colspan="2" style="text-align:center;">No exposure</td></tr>
                         </tbody>
                     </table>
                 </div>

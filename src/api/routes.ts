@@ -705,6 +705,8 @@ router.get('', async (_req: Request, res: Response) => {
       account_name: a.account_name,
       created_at: a.created_at,
       last_sync_at: a.last_sync_at,
+      last_ingest_received_at: a.last_ingest_received_at,
+      history_in_sync: a.history_in_sync,
     }));
     res.json(safe);
   } catch (error) {

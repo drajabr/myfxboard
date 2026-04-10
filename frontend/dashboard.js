@@ -231,10 +231,17 @@ function syncAccountSelector(accounts) {
     const selected = localStorage.getItem('selectedAccount') || '';
     selector.innerHTML = '<option value="">Aggregated (All Accounts)</option>';
 
+    const now = Date.now();
+    const healthThresholdMs = 5 * 60 * 1000;
+
     accounts.forEach((acc) => {
         const option = document.createElement('option');
         option.value = acc.account_id;
-        option.textContent = acc.account_name || acc.account_id;
+        const lastHealthMs = toNum(acc.last_ingest_received_at, 0) || toNum(acc.last_sync_at, 0);
+        const healthy = lastHealthMs > 0 && (now - lastHealthMs) <= healthThresholdMs;
+        const healthDot = healthy ? '🟢' : '🔴';
+        const name = acc.account_name || acc.account_id;
+        option.textContent = `${healthDot} ${name} (${acc.account_id})`;
         selector.appendChild(option);
     });
 
@@ -271,16 +278,11 @@ function updateStatusStrip(summary) {
 function updateKpis(summary, periods, tradeMetrics) {
     const equityEl = document.getElementById('equity');
     const floatingEl = document.getElementById('floatingPnl');
-    const dailyEl = document.getElementById('dailyPnl');
-    const winRateEl = document.getElementById('winRate');
 
     equityEl.textContent = formatMoney(summary.equity);
     floatingEl.textContent = formatMoney(summary.floating_pnl);
-    dailyEl.textContent = formatMoney(periods.today.pnl);
-    winRateEl.textContent = formatPct(tradeMetrics.win_rate_pct);
 
     applyPnlClass(floatingEl, summary.floating_pnl);
-    applyPnlClass(dailyEl, periods.today.pnl);
 }
 
 function renderPeriodStats(periods) {
@@ -606,15 +608,31 @@ function renderYearlyCalendar(yearly) {
 }
 
 function setLoadState(loading, errorMessage = '') {
-    const loadStatus = document.getElementById('loadStatus');
-    const errorStatus = document.getElementById('errorStatus');
-    if (loadStatus) {
-        loadStatus.textContent = loading ? 'Sync: loading...' : 'Sync: idle';
+    const systemStatus = document.getElementById('systemStatus');
+    const systemStatusDot = document.getElementById('systemStatusDot');
+    const systemStatusText = document.getElementById('systemStatusText');
+    if (!systemStatus || !systemStatusDot || !systemStatusText) {
+        return;
     }
-    if (errorStatus) {
-        errorStatus.textContent = errorMessage ? `Error: ${errorMessage}` : 'Error: none';
-        errorStatus.classList.toggle('status-error', Boolean(errorMessage));
+
+    systemStatus.classList.remove('status-error');
+    systemStatusDot.classList.remove('status-dot--idle', 'status-dot--loading', 'status-dot--ok', 'status-dot--error');
+
+    if (errorMessage) {
+        systemStatus.classList.add('status-error');
+        systemStatusDot.classList.add('status-dot--error');
+        systemStatusText.textContent = `Error: ${errorMessage}`;
+        return;
     }
+
+    if (loading) {
+        systemStatusDot.classList.add('status-dot--loading');
+        systemStatusText.textContent = 'Syncing...';
+        return;
+    }
+
+    systemStatusDot.classList.add('status-dot--ok');
+    systemStatusText.textContent = 'Healthy';
 }
 
 function renderDashboard(data) {
