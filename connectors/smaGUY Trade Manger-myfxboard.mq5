@@ -3,7 +3,7 @@
 //|                    Rebuilt with Unified State Architecture      |
 //+------------------------------------------------------------------+
 #property copyright "smaGUY Trade Manger myfxboard edition v17"
-#property version   "17.00"
+#property version   "17.01"
 #property strict
 
 #include <Trade\Trade.mqh>
