@@ -39,6 +39,9 @@ RUN npm install --omit=dev
 # Copy compiled code from builder
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
 
+# Copy frontend assets
+COPY --from=builder --chown=nodejs:nodejs /app/frontend ./frontend
+
 # Copy database migrations
 COPY --chown=nodejs:nodejs db ./db
 

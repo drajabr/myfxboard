@@ -151,7 +151,7 @@ void OnStart() {
 - [ ] Update PSK from production dashboard
 - [ ] Disable debug logging: Set 5th param to `false`
 - [ ] Test with small position first
-- [ ] Monitor logs for errors: `docker-compose logs api`
+- [ ] Monitor logs for errors: `docker compose logs server`
 - [ ] Ready to trade!
 
 ---

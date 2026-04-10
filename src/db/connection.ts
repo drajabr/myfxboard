@@ -6,7 +6,7 @@ config();
 const { Pool } = pg;
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://dashboard:dashboard_pass@localhost:5432/mt5_dashboard',
+  connectionString: process.env.DATABASE_URL || 'postgresql://dashboard:dashboard_pass@localhost:5432/myfxboard',
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,

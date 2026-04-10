@@ -87,7 +87,7 @@ db/
 ### Infrastructure ✅
 ```
 ├── Dockerfile             ← Multi-stage production build
-├── docker-compose.yml     ← Stack: postgres + api + nginx
+├── docker-compose.yml     ← Stack: postgres + server
 ├── docker/nginx.conf      ← Reverse proxy config
 └── .github/workflows/docker-build.yml ← CI/CD pipeline
 ```
@@ -125,7 +125,7 @@ It will guide you through:
 ```
 MT5 (EA runs every 3 sec)
   ↓ JSON HTTP POST
-Docker Stack (postgres + api + nginx)
+Docker Stack (postgres + server)
   ↓ HMAC-SHA256 auth + validation
 API stores in PostgreSQL
   ↓
@@ -226,7 +226,7 @@ Your guides are:
 - **Local testing**: Use http://localhost for testing
 - **Production**: Use https://your-domain.com after deployment
 - **Debug logs**: Enable `Debug Logging` input in EA to see sync logs
-- **Error tracking**: Check `docker compose logs api` for backend errors
+- **Error tracking**: Check `docker compose logs server` for backend errors
 
 ---
 
@@ -259,5 +259,5 @@ Everything is built, tested, and ready to use.
 
 *Built on April 10, 2026*  
 *~4200 lines of code*  
-*MT5 dashboard with 3-second
-*Fully integrated MT5 dashboard with real-time sync*
+*myfxboard with 3-second sync*
+*Fully integrated myfxboard with real-time sync*

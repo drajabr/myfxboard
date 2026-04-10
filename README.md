@@ -42,8 +42,8 @@ See `connectors/README.md` for full documentation.
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/mt5-dashboard.git
-cd mt5-dashboard
+git clone https://github.com/drajabr/myfxboard.git
+cd myfxboard
 ```
 
 2. Copy environment file:
@@ -55,16 +55,18 @@ cp .env.example .env
 
 4. Start the stack:
 ```bash
-docker-compose up -d
+docker compose pull
+docker compose up -d
 ```
 
 5. Access the dashboard:
-- **Dashboard**: http://localhost
-- **API**: http://localhost:3000
+- **Server**: http://localhost:3000
+- **Dashboard UI**: http://localhost:3000
+- **API**: http://localhost:3000/api
 
 6. Run migrations (first time only):
 ```bash
-docker-compose exec api npm run db:migrate
+docker compose exec server npm run db:migrate
 ```
 
 ### Local Development
@@ -77,7 +79,7 @@ npm install
 2. Setup PostgreSQL:
 ```bash
 psql -U postgres -c "CREATE USER dashboard WITH PASSWORD 'dashboard_pass';"
-psql -U postgres -c "CREATE DATABASE mt5_dashboard OWNER dashboard;"
+psql -U postgres -c "CREATE DATABASE myfxboard OWNER dashboard;"
 ```
 
 3. Run migrations:
@@ -186,11 +188,11 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-3. GitHub Actions automatically builds and pushes image to Docker Hub
+3. GitHub Actions automatically builds and publishes image to GHCR
 
 4. Pull production image:
 ```bash
-docker pull {username}/mt5-dashboard:v0.1.0
+docker pull ghcr.io/drajabr/myfxboard:latest
 ```
 
 ## Project Structure
@@ -199,6 +201,7 @@ docker pull {username}/mt5-dashboard:v0.1.0
 .
 ├── .github/workflows/          # GitHub Actions
 │   └── docker-build.yml        # Build & push Docker image
+│                                # Publishes ghcr.io/drajabr/myfxboard
 ├── src/
 │   ├── api/                    # Express routes
 │   │   ├── routes.ts           # Dashboard endpoints
@@ -274,17 +277,17 @@ docker-compose logs -f nginx
 
 ### Database Connection Errors
 ```bash
-docker-compose exec postgres psql -U dashboard -d mt5_dashboard -c "SELECT 1"
+docker compose exec postgres psql -U dashboard -d myfxboard -c "SELECT 1"
 ```
 
 ### Migrations Failed
 ```bash
-docker-compose exec api npm run db:migrate
+docker compose exec server npm run db:migrate
 ```
 
 ### API Not Responding
 ```bash
-docker-compose logs api
+docker compose logs server
 ```
 
 ## Roadmap

@@ -49,7 +49,7 @@ myfxboard/
 │   └── docker-build.yml                     # GitHub Actions CI/CD
 │
 ├── Dockerfile                               # Multi-stage build
-├── docker-compose.yml                       # Stack: postgres + api + nginx
+├── docker-compose.yml                       # Stack: postgres + server
 ├── .env.example                             # Environment template
 ├── .env.production                          # Production secrets template
 ├── .gitignore                               # Git exclude patterns
@@ -102,8 +102,8 @@ In MetaTrader 5, open your EA inputs:
 ## 📦 Connector Module (Reusable)
 ### Services
 - **postgres:16** (Alpine) - Data layer with 8 normalized tables
-- **api** (Node.js 20 Alpine) - Express.js backend with TypeScript
-- **nginx** - Reverse proxy (security headers, gzip, static frontend)
+- **server** (Node.js 20 Alpine) - Express.js server serving API and frontend
+- **nginx** - Optional reverse proxy in front of the server
 
 ### Authentication & Security
 - HMAC-SHA256 with timestamp window (5 seconds)
@@ -148,28 +148,23 @@ In MetaTrader 5, open your EA inputs:
 ✅ **GitHub Actions CI/CD** (100% Complete)
 - Automated Docker build on push
 - Test matrix (node runtime)
-- Push to Docker Hub on tag
+- Publish image to `ghcr.io/drajabr/myfxboard`
 
 ## 🚀 Deployment Options
 
 ### Local Development
 ```bash
-docker-compose up -d
-# Dashboard: http://localhost
+docker compose pull
+docker compose up -d
+# Dashboard: http://localhost:3000
 # API: http://localhost:3000/api
 ```
 
 ### Production (Cloud Server)
 ```bash
-# Build image
-docker build -t youraccount/myfxboard:latest .
-
-# Push to Docker Hub
-docker push youraccount/myfxboard:latest
-
 # Deploy on server
-docker-compose -f docker-compose.yml pull
-docker-compose -f docker-compose.yml up -d
+docker compose pull
+docker compose up -d
 ```
 
 ### With HTTPS (Let's Encrypt)
@@ -211,7 +206,7 @@ EA (every 3 sec) → Build Payload (positions + account)
 ### Environment Variables (.env)
 ```ini
 # Database
-DATABASE_URL=postgresql://dashboard:password@postgres:5432/mt5_dashboard
+DATABASE_URL=postgresql://dashboard:password@postgres:5432/myfxboard
 
 # Server
 NODE_ENV=development|production
@@ -320,7 +315,7 @@ docker-compose logs -f api
 ## 🤝 Support
 
 For issues:
-1. Check logs: `docker-compose logs api`
+1. Check logs: `docker compose logs server`
 2. Review docs in `docs/` folder
 3. Enable `InpDashboardDebugLog = true` in EA
 4. Test connectivity: `curl http://localhost/health`

@@ -25,8 +25,8 @@ Your myfxboard repository now contains **everything needed** to run a production
 
 ### Infrastructure & DevOps ✅
 - **Multi-stage Dockerfile** (optimized for size and security)
-- **Docker Compose Stack**: postgres + api + nginx
-- **Nginx Reverse Proxy**: Security headers, gzip compression
+- **Docker Compose Stack**: postgres + server
+- **External Reverse Proxy Ready**: Point HTTPS traffic to server port 3000
 - **GitHub Actions CI/CD**: Automated Docker build & push
 - **Health Checks**: All services monitored
 
@@ -65,6 +65,7 @@ docker compose version
 ### Step 2: Start Dashboard Server
 ```powershell
 cd c:\Users\Ahmed\git\myfxboard
+docker compose pull
 docker compose up -d
 ```
 
@@ -77,16 +78,15 @@ Should show:
 ```
 STATUS
 Up (healthy)  postgres
-Up (healthy)  api
-Up (healthy)  nginx
+Up (healthy)  server
 ```
 
 ### Step 3: Access Dashboard
 ```
-http://localhost
+http://localhost:3000
 ```
 
-You should see the dashboard home page.
+The server now serves both the frontend and API directly. API endpoints remain under `http://localhost:3000/api`.
 
 ### Step 4: Create Test Account
 1. Click **Settings** button (🔓 in top right)
@@ -235,7 +235,7 @@ myfxboard/
 
 ### .env (for local testing)
 ```ini
-DATABASE_URL=postgresql://dashboard:CHANGE_ME@postgres:5432/mt5_dashboard
+DATABASE_URL=postgresql://dashboard:CHANGE_ME@postgres:5432/myfxboard
 NODE_ENV=development
 PORT=3000
 JWT_SECRET=your-random-secret
@@ -244,7 +244,7 @@ MASTER_TOKEN=test-master-token-12345
 
 ### .env.production (for cloud deployment)
 ```ini
-DATABASE_URL=postgresql://dashboard:STRONG_PASSWORD@postgres:5432/mt5_dashboard
+DATABASE_URL=postgresql://dashboard:STRONG_PASSWORD@postgres:5432/myfxboard
 NODE_ENV=production
 MASTER_TOKEN=YOUR_SECURE_TOKEN_HERE
 ALLOWED_ORIGINS=https://your-domain.com
@@ -286,7 +286,7 @@ Result: Live position sync with ~1 second latency
 ### Docker containers won't start
 ```powershell
 # Check logs
-docker compose logs api
+docker compose logs server
 docker compose logs postgres
 
 # Restart everything
@@ -296,13 +296,13 @@ docker compose up -d
 
 ### "Connection refused" when accessing http://localhost
 ```powershell
-# Verify Nginx is running
+# Verify server is running
 docker compose ps
 
-# Check Nginx logs
-docker compose logs nginx
+# Check server logs
+docker compose logs server
 
-# Try direct API
+# Check health endpoint
 curl http://localhost:3000/health
 ```
 
@@ -321,13 +321,13 @@ curl http://localhost:3000/health
 ```powershell
 # Restart database and API
 docker compose restart postgres
-docker compose restart api
+docker compose restart server
 ```
 
 ### Data not appearing in dashboard
 1. Refresh browser (Ctrl+F5 to bypass cache)
 2. Verify API returns data: `curl http://localhost/api/account/EURUSD_001/dashboard`
-3. Check logs: `docker compose logs api | grep -i error`
+3. Check logs: `docker compose logs server | grep -i error`
 4. Verify account name: dropdown should show your account
 
 ---
@@ -358,7 +358,7 @@ server {
     ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
     
     location / {
-        proxy_pass http://api:3000;
+        proxy_pass http://server:3000;
     }
 }
 ```
@@ -413,7 +413,7 @@ Change `Server URL` from `http://localhost:3000` to `https://your-domain.com`
 
 **After Deployment**:
 1. Monitor logs: `docker compose logs -f api`
-2. Check database: `docker compose exec postgres psql -U dashboard -d mt5_dashboard`
+2. Check database: `docker compose exec postgres psql -U dashboard -d myfxboard`
 3. Test API health: `curl http://localhost/health`
 
 ---

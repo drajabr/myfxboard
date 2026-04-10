@@ -314,7 +314,7 @@ void OnDeinit(const int reason) {
 **High error count:**
 - Check network connectivity
 - Verify server is running: `docker-compose ps`
-- Check server logs: `docker-compose logs api`
+- Check server logs: `docker compose logs server`
 
 ## Security Notes
 

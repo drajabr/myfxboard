@@ -225,7 +225,7 @@ Debug Logging: TRUE (helps troubleshoot)
 
 - Start dashboard: `docker-compose up -d`
 - Wait 30 seconds for services to initialize
-- Verify API is running: `docker-compose logs api`
+- Verify server is running: `docker compose logs server`
 
 ---
 
@@ -279,7 +279,7 @@ For issues:
 1. Enable debug logging: `DashboardConnector::SetDebugLog(true)`
 2. Check MT5 Journal for `[DashboardConnector]` messages
 3. Review [../../SETUP.md](../../SETUP.md) for deployment guide
-4. Check logs: `docker-compose logs api`
+4. Check logs: `docker compose logs server`
 
 ---
 

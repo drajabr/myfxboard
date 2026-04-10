@@ -2,6 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { config } from 'dotenv';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import dashboardRoutes from './api/routes.js';
 import ingestionRoutes from './api/ingestion.js';
 import { validateUnlockToken, requireUnlocked } from './middleware/auth.js';
@@ -15,6 +18,10 @@ config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const frontendDir = path.resolve(__dirname, '../../frontend');
+const frontendIndexPath = path.join(frontendDir, 'index.html');
 
 // Middleware
 app.use(helmet());
@@ -38,6 +45,15 @@ app.use('/api/account', dashboardRoutes);
 
 // Ingestion routes
 app.use('/api/ingestion', ingestionRoutes);
+
+// Serve frontend directly from the Node server.
+if (fs.existsSync(frontendIndexPath)) {
+  app.use(express.static(frontendDir));
+
+  app.get(/^(?!\/api\/|\/health$).*/, (_req, res) => {
+    res.sendFile(frontendIndexPath);
+  });
+}
 
 /**
  * POST /api/account/create
@@ -134,7 +150,7 @@ app.use((err: any, _req: any, res: any, _next: any) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`MT5 Dashboard API running on port ${PORT} (${NODE_ENV})`);
+  console.log(`myfxboard server running on port ${PORT} (${NODE_ENV})`);
 });
 
 export default app;

@@ -1,6 +1,6 @@
 # 🎉 Dashboard Integration Complete - EA Ready
 
-Your smaGUY Trade Manager EA has been fully migrated into the connectors folder and integrated with the MT5 Dashboard connector module.
+Your smaGUY Trade Manager EA has been fully migrated into the connectors folder and integrated with the myfxboard connector module.
 
 ## ✅ What Was Integrated
 
@@ -141,7 +141,7 @@ Example log output:
 - Ensure network connectivity: `ping localhost`
 
 ### Sync says error count increasing
-- Check server logs: `docker-compose logs api`
+- Check server logs: `docker compose logs server`
 - Verify PSK is correct (copy-paste from Dashboard)
 - Check timestamps are synchronized between EA and server
 
@@ -168,7 +168,7 @@ Your EA is now ready to:
 ## 📞 Support
 
 For issues:
-1. Check logs: `docker-compose logs api`
+1. Check logs: `docker compose logs server`
 2. Test with curl: `curl http://localhost/api/accounts`
 3. Review integration docs: [docs/integration-patch-smaguey.md](../docs/integration-patch-smaguey.md)
 4. Enable Debug Logging for detailed EA output

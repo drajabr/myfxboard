@@ -4,11 +4,11 @@ services:
   # PostgreSQL database
   postgres:
     image: postgres:16-alpine
-    container_name: mt5-dashboard-db
+    container_name: myfxboard-db
     environment:
       POSTGRES_USER: dashboard
       POSTGRES_PASSWORD: dashboard_pass
-      POSTGRES_DB: mt5_dashboard
+      POSTGRES_DB: myfxboard
       POSTGRES_INITDB_ARGS: "--encoding=UTF8"
     ports:
       - "5432:5432"
@@ -16,25 +16,24 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./db/migrations:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dashboard -d mt5_dashboard"]
+      test: ["CMD-SHELL", "pg_isready -U dashboard -d myfxboard"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - mt5-dashboard-net
+      - myfxboard-net
 
-  # Node.js API backend
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: mt5-dashboard-api
+  # Node.js server (API + frontend)
+  server:
+    image: ghcr.io/drajabr/myfxboard:latest
+    pull_policy: always
+    container_name: myfxboard-server
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://dashboard:dashboard_pass@postgres:5432/mt5_dashboard
+      DATABASE_URL: postgresql://dashboard:dashboard_pass@postgres:5432/myfxboard
       PORT: 3000
       LOG_LEVEL: info
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
@@ -55,24 +54,7 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - mt5-dashboard-net
-    restart: unless-stopped
-
-  # Nginx reverse proxy and static frontend
-  nginx:
-    image: nginx:alpine
-    container_name: mt5-dashboard-nginx
-    depends_on:
-      - api
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./frontend:/usr/share/nginx/html:ro
-      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./docker/ssl:/etc/nginx/ssl:ro
-    networks:
-      - mt5-dashboard-net
+      - myfxboard-net
     restart: unless-stopped
 
 volumes:
@@ -80,5 +62,5 @@ volumes:
     driver: local
 
 networks:
-  mt5-dashboard-net:
+  myfxboard-net:
     driver: bridge

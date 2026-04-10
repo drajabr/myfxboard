@@ -1,4 +1,4 @@
-name: Build Docker Image and Test
+name: Publish Image and Test
 
 on:
   push:
@@ -17,6 +17,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: write
+
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: drajabr/myfxboard
 
     steps:
       - name: Checkout code
@@ -25,12 +30,32 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker image (no push)
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha
+
+      - name: Build and publish Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: false
-          tags: myfxboard:ci
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -42,7 +67,7 @@ jobs:
         env:
           POSTGRES_USER: dashboard
           POSTGRES_PASSWORD: dashboard_pass
-          POSTGRES_DB: mt5_dashboard
+          POSTGRES_DB: myfxboard
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -71,7 +96,7 @@ jobs:
 
       - name: Run tests
         env:
-          DATABASE_URL: postgresql://dashboard:dashboard_pass@localhost:5432/mt5_dashboard
+          DATABASE_URL: postgresql://dashboard:dashboard_pass@localhost:5432/myfxboard
         run: npm run test:ci
 
       - name: Upload coverage
