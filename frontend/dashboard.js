@@ -240,10 +240,10 @@ function getThemeMode() {
 function applyAccentTheme(accentKey) {
     const preset = getAccentPreset(accentKey);
     const modePalette = getThemeMode() === 'dark' ? preset.dark : preset.light;
-    document.documentElement.style.setProperty('--accent', modePalette.accent);
-    document.documentElement.style.setProperty('--accent-strong', modePalette.accentStrong);
-    document.documentElement.style.setProperty('--pnl-positive', modePalette.pnlPositive);
-    document.documentElement.style.setProperty('--accent-rgb', modePalette.accentRgb);
+    document.body.style.setProperty('--accent', modePalette.accent);
+    document.body.style.setProperty('--accent-strong', modePalette.accentStrong);
+    document.body.style.setProperty('--pnl-positive', modePalette.pnlPositive);
+    document.body.style.setProperty('--accent-rgb', modePalette.accentRgb);
 
     const accentBtn = document.getElementById('accentCycleBtn');
     if (accentBtn) {
@@ -279,7 +279,8 @@ function setQuickControlsCollapsed(collapsed) {
         return;
     }
     controls.classList.toggle('is-collapsed', collapsed);
-    toggleBtn.textContent = collapsed ? '◧' : '▣';
+    toggleBtn.textContent = collapsed ? '⚙' : '→';
+    toggleBtn.title = collapsed ? 'Show quick controls' : 'Collapse quick controls';
 }
 
 function cycleAccentTheme() {

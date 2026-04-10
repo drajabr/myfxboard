@@ -216,6 +216,9 @@ body {
 
 .icon-btn--theme-dot {
     color: var(--accent);
+    font-size: 1.2rem;
+    background: color-mix(in srgb, var(--accent) 16%, var(--surface-alt));
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
 }
 
 .ui-quick-controls {
