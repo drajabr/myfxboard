@@ -1,7 +1,35 @@
 const API_URL = '/api';
 const THEME_KEY = 'themePreference';
+const ACCENT_KEY = 'accentPreference';
+const FONT_KEY = 'fontPreference';
+const QUICK_CONTROLS_COLLAPSED_KEY = 'quickControlsCollapsed';
 const DASHBOARD_REFRESH_MS = 5000;
 const ACCOUNTS_REFRESH_MS = 60000;
+
+const ACCENT_PRESETS = [
+    {
+        key: 'green',
+        light: { accent: '#2f8f62', accentStrong: '#25754f', pnlPositive: '#2f8f62', accentRgb: '47, 143, 98' },
+        dark: { accent: '#59bd87', accentStrong: '#86d5a9', pnlPositive: '#59bd87', accentRgb: '89, 189, 135' },
+    },
+    {
+        key: 'teal',
+        light: { accent: '#2b8f8e', accentStrong: '#1f6f6e', pnlPositive: '#2b8f8e', accentRgb: '43, 143, 142' },
+        dark: { accent: '#58c8c7', accentStrong: '#7fdddc', pnlPositive: '#58c8c7', accentRgb: '88, 200, 199' },
+    },
+    {
+        key: 'amber',
+        light: { accent: '#a56f1f', accentStrong: '#835715', pnlPositive: '#a56f1f', accentRgb: '165, 111, 31' },
+        dark: { accent: '#e0ad5c', accentStrong: '#efc984', pnlPositive: '#e0ad5c', accentRgb: '224, 173, 92' },
+    },
+];
+
+const FONT_PRESETS = [
+    { key: 'bahnschrift', label: 'B', fontFamily: "'Bahnschrift', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" },
+    { key: 'sans', label: 'S', fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" },
+    { key: 'courier', label: 'C', fontFamily: "'Courier New', Courier, monospace" },
+    { key: 'serif', label: 'R', fontFamily: "Georgia, 'Times New Roman', serif" },
+];
 
 const state = {
     autoRefreshInterval: null,
@@ -145,14 +173,106 @@ function getPreferredTheme() {
     return themeMedia.matches ? 'dark' : 'light';
 }
 
+function getPreferredAccent() {
+    const saved = localStorage.getItem(ACCENT_KEY);
+    return ACCENT_PRESETS.some((preset) => preset.key === saved) ? saved : ACCENT_PRESETS[0].key;
+}
+
+function getPreferredFont() {
+    const saved = localStorage.getItem(FONT_KEY);
+    return FONT_PRESETS.some((preset) => preset.key === saved) ? saved : FONT_PRESETS[0].key;
+}
+
+function getAccentPreset(key) {
+    return ACCENT_PRESETS.find((preset) => preset.key === key) || ACCENT_PRESETS[0];
+}
+
+function getFontPreset(key) {
+    return FONT_PRESETS.find((preset) => preset.key === key) || FONT_PRESETS[0];
+}
+
+function getThemeMode() {
+    return document.body.getAttribute('data-theme') || 'light';
+}
+
+function applyAccentTheme(accentKey) {
+    const preset = getAccentPreset(accentKey);
+    const modePalette = getThemeMode() === 'dark' ? preset.dark : preset.light;
+    document.documentElement.style.setProperty('--accent', modePalette.accent);
+    document.documentElement.style.setProperty('--accent-strong', modePalette.accentStrong);
+    document.documentElement.style.setProperty('--pnl-positive', modePalette.pnlPositive);
+    document.documentElement.style.setProperty('--accent-rgb', modePalette.accentRgb);
+
+    const accentBtn = document.getElementById('accentCycleBtn');
+    if (accentBtn) {
+        accentBtn.style.color = modePalette.accent;
+        accentBtn.title = `Accent: ${preset.key}`;
+    }
+}
+
+function applyFont(fontKey) {
+    const preset = getFontPreset(fontKey);
+    document.documentElement.style.setProperty('--app-font', preset.fontFamily);
+    const fontBtn = document.getElementById('fontCycleBtn');
+    if (fontBtn) {
+        fontBtn.textContent = preset.label;
+        fontBtn.title = `Font: ${preset.key}`;
+    }
+}
+
+function setQuickControlsCollapsed(collapsed) {
+    const controls = document.getElementById('uiQuickControls');
+    const toggleBtn = document.getElementById('uiControlsToggleBtn');
+    if (!controls || !toggleBtn) {
+        return;
+    }
+    controls.classList.toggle('is-collapsed', collapsed);
+    toggleBtn.textContent = collapsed ? '◧' : '▣';
+}
+
+function cycleAccentTheme() {
+    const current = getPreferredAccent();
+    const currentIndex = ACCENT_PRESETS.findIndex((preset) => preset.key === current);
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % ACCENT_PRESETS.length : 0;
+    const next = ACCENT_PRESETS[nextIndex].key;
+    localStorage.setItem(ACCENT_KEY, next);
+    applyAccentTheme(next);
+    if (state.lastData) {
+        renderDashboard(state.lastData);
+    }
+}
+
+function cycleFontPreset() {
+    const current = getPreferredFont();
+    const currentIndex = FONT_PRESETS.findIndex((preset) => preset.key === current);
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % FONT_PRESETS.length : 0;
+    const next = FONT_PRESETS[nextIndex].key;
+    localStorage.setItem(FONT_KEY, next);
+    applyFont(next);
+}
+
+function toggleQuickControls() {
+    const controls = document.getElementById('uiQuickControls');
+    if (!controls) {
+        return;
+    }
+    const collapsed = !controls.classList.contains('is-collapsed');
+    localStorage.setItem(QUICK_CONTROLS_COLLAPSED_KEY, collapsed ? '1' : '0');
+    setQuickControlsCollapsed(collapsed);
+}
+
 function applyTheme(theme) {
     document.body.setAttribute('data-theme', theme);
     const btn = document.getElementById('themeToggleBtn');
-    btn.textContent = theme === 'dark' ? 'Light' : 'Dark';
+    if (btn) {
+        btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+        btn.title = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+    }
     const themeSelect = document.getElementById('theme');
     if (themeSelect) {
         themeSelect.value = theme;
     }
+    applyAccentTheme(getPreferredAccent());
 }
 
 function toggleTheme() {
@@ -173,6 +293,9 @@ function applyThemeFromSystemIfNeeded() {
 
 function setupEventListeners() {
     document.getElementById('themeToggleBtn').addEventListener('click', toggleTheme);
+    document.getElementById('accentCycleBtn').addEventListener('click', cycleAccentTheme);
+    document.getElementById('fontCycleBtn').addEventListener('click', cycleFontPreset);
+    document.getElementById('uiControlsToggleBtn').addEventListener('click', toggleQuickControls);
 
     document.getElementById('accountSelector').addEventListener('change', (e) => {
         localStorage.setItem('selectedAccount', e.target.value);
@@ -691,6 +814,7 @@ function updateCharts(data) {
     const neutral = getChartColorVar('--pnl-neutral');
     const text = getChartColorVar('--text');
     const accent = getChartColorVar('--accent');
+    const accentRgb = getChartColorVar('--accent-rgb') || '47, 143, 98';
     const floatingPointColor = '#ff8a00';
 
     const tradePnlCurveRows = Array.isArray(data.trade_pnl_curve) ? data.trade_pnl_curve : [];
@@ -735,7 +859,7 @@ function updateCharts(data) {
                     label: mainCurveLabel,
                     data: mainCurveValues,
                     borderColor: accent,
-                    backgroundColor: 'rgba(31, 111, 235, 0.12)',
+                    backgroundColor: `rgba(${accentRgb}, 0.12)`,
                     tension: 0.25,
                     pointRadius: mainCurvePointRadiusByIndex,
                     pointHoverRadius: mainCurvePointRadiusByIndex.map((r) => r + 1),
@@ -789,6 +913,7 @@ function updateCharts(data) {
         charts.pnlCurve.data.datasets[0].label = mainCurveLabel;
         charts.pnlCurve.data.datasets[0].data = mainCurveValues;
         charts.pnlCurve.data.datasets[0].borderColor = accent;
+        charts.pnlCurve.data.datasets[0].backgroundColor = `rgba(${accentRgb}, 0.12)`;
         charts.pnlCurve.data.datasets[0].pointRadius = mainCurvePointRadiusByIndex;
         charts.pnlCurve.data.datasets[0].pointHoverRadius = mainCurvePointRadiusByIndex.map((r) => r + 1);
         charts.pnlCurve.data.datasets[0].pointBackgroundColor = mainCurvePointBackgroundColor;
@@ -1059,6 +1184,9 @@ function startAutoRefresh(interval) {
 
 document.addEventListener('DOMContentLoaded', () => {
     applyTheme(getPreferredTheme());
+    applyAccentTheme(getPreferredAccent());
+    applyFont(getPreferredFont());
+    setQuickControlsCollapsed(localStorage.getItem(QUICK_CONTROLS_COLLAPSED_KEY) === '1');
     setupEventListeners();
     loadAccountsIfNeeded(true).catch((error) => {
         console.error('Error loading accounts:', error);

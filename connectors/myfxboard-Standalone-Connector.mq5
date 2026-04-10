@@ -120,7 +120,7 @@ public:
 
       // Backend auth expects unix epoch milliseconds, not terminal uptime milliseconds.
       long timestamp_ms = (long)TimeGMT() * 1000;
-      string current_account = IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN));
+      string current_account = LongToString((long)AccountInfoInteger(ACCOUNT_LOGIN));
 
       long latest_closed_time_ms = 0;
       string latest_closed_deal_id = "";
@@ -193,8 +193,8 @@ public:
             s_error_count++;
             s_last_sync_ok = false;
             if(s_debug_log)
-               Print("[DashboardConnector] Keepalive health failed, skipping full sync");
-            return false;
+               Print("[DashboardConnector] Keepalive health failed, falling back to full sync");
+            include_history = true;
          }
       }
 
