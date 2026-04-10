@@ -2,15 +2,21 @@ const API_URL = '/api';
 const THEME_KEY = 'themePreference';
 const ACCENT_KEY = 'accentPreference';
 const FONT_KEY = 'fontPreference';
+const FONT_SIZE_KEY = 'fontSizePreference';
 const QUICK_CONTROLS_COLLAPSED_KEY = 'quickControlsCollapsed';
 const DASHBOARD_REFRESH_MS = 5000;
 const ACCOUNTS_REFRESH_MS = 60000;
 
 const ACCENT_PRESETS = [
     {
-        key: 'green',
+        key: 'emerald',
         light: { accent: '#2f8f62', accentStrong: '#25754f', pnlPositive: '#2f8f62', accentRgb: '47, 143, 98' },
         dark: { accent: '#59bd87', accentStrong: '#86d5a9', pnlPositive: '#59bd87', accentRgb: '89, 189, 135' },
+    },
+    {
+        key: 'blue',
+        light: { accent: '#2f72d6', accentStrong: '#2358a7', pnlPositive: '#2f72d6', accentRgb: '47, 114, 214' },
+        dark: { accent: '#6ea9ff', accentStrong: '#9bc3ff', pnlPositive: '#6ea9ff', accentRgb: '110, 169, 255' },
     },
     {
         key: 'teal',
@@ -18,17 +24,44 @@ const ACCENT_PRESETS = [
         dark: { accent: '#58c8c7', accentStrong: '#7fdddc', pnlPositive: '#58c8c7', accentRgb: '88, 200, 199' },
     },
     {
-        key: 'amber',
+        key: 'orange',
         light: { accent: '#a56f1f', accentStrong: '#835715', pnlPositive: '#a56f1f', accentRgb: '165, 111, 31' },
         dark: { accent: '#e0ad5c', accentStrong: '#efc984', pnlPositive: '#e0ad5c', accentRgb: '224, 173, 92' },
+    },
+    {
+        key: 'indigo',
+        light: { accent: '#5b63d6', accentStrong: '#454caa', pnlPositive: '#5b63d6', accentRgb: '91, 99, 214' },
+        dark: { accent: '#8f95ff', accentStrong: '#b1b5ff', pnlPositive: '#8f95ff', accentRgb: '143, 149, 255' },
+    },
+    {
+        key: 'mint',
+        light: { accent: '#2ea680', accentStrong: '#1f8162', pnlPositive: '#2ea680', accentRgb: '46, 166, 128' },
+        dark: { accent: '#66d9b3', accentStrong: '#8be8c8', pnlPositive: '#66d9b3', accentRgb: '102, 217, 179' },
+    },
+    {
+        key: 'gold',
+        light: { accent: '#b0882a', accentStrong: '#8f6d1f', pnlPositive: '#b0882a', accentRgb: '176, 136, 42' },
+        dark: { accent: '#e5bd5d', accentStrong: '#f0d08a', pnlPositive: '#e5bd5d', accentRgb: '229, 189, 93' },
     },
 ];
 
 const FONT_PRESETS = [
     { key: 'bahnschrift', label: 'B', fontFamily: "'Bahnschrift', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" },
     { key: 'sans', label: 'S', fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" },
+    { key: 'arial', label: 'A', fontFamily: "Arial, 'Segoe UI', Tahoma, sans-serif" },
+    { key: 'verdana', label: 'V', fontFamily: "Verdana, 'Segoe UI', Tahoma, sans-serif" },
     { key: 'courier', label: 'C', fontFamily: "'Courier New', Courier, monospace" },
-    { key: 'serif', label: 'R', fontFamily: "Georgia, 'Times New Roman', serif" },
+    { key: 'consolas', label: 'N', fontFamily: "Consolas, 'Courier New', monospace" },
+    { key: 'georgia', label: 'G', fontFamily: "Georgia, 'Times New Roman', serif" },
+    { key: 'times', label: 'T', fontFamily: "'Times New Roman', Times, serif" },
+];
+
+const FONT_SIZE_PRESETS = [
+    { key: '1', label: '1', size: '14px' },
+    { key: '2', label: '2', size: '15px' },
+    { key: '3', label: '3', size: '16px' },
+    { key: '4', label: '4', size: '17px' },
+    { key: '5', label: '5', size: '18px' },
 ];
 
 const state = {
@@ -183,12 +216,21 @@ function getPreferredFont() {
     return FONT_PRESETS.some((preset) => preset.key === saved) ? saved : FONT_PRESETS[0].key;
 }
 
+function getPreferredFontSize() {
+    const saved = localStorage.getItem(FONT_SIZE_KEY);
+    return FONT_SIZE_PRESETS.some((preset) => preset.key === saved) ? saved : '3';
+}
+
 function getAccentPreset(key) {
     return ACCENT_PRESETS.find((preset) => preset.key === key) || ACCENT_PRESETS[0];
 }
 
 function getFontPreset(key) {
     return FONT_PRESETS.find((preset) => preset.key === key) || FONT_PRESETS[0];
+}
+
+function getFontSizePreset(key) {
+    return FONT_SIZE_PRESETS.find((preset) => preset.key === key) || FONT_SIZE_PRESETS[2];
 }
 
 function getThemeMode() {
@@ -217,6 +259,16 @@ function applyFont(fontKey) {
     if (fontBtn) {
         fontBtn.textContent = preset.label;
         fontBtn.title = `Font: ${preset.key}`;
+    }
+}
+
+function applyFontSize(fontSizeKey) {
+    const preset = getFontSizePreset(fontSizeKey);
+    document.documentElement.style.setProperty('--app-font-size', preset.size);
+    const sizeBtn = document.getElementById('fontSizeCycleBtn');
+    if (sizeBtn) {
+        sizeBtn.textContent = preset.label;
+        sizeBtn.title = `Font size level: ${preset.label} (${preset.size})`;
     }
 }
 
@@ -249,6 +301,15 @@ function cycleFontPreset() {
     const next = FONT_PRESETS[nextIndex].key;
     localStorage.setItem(FONT_KEY, next);
     applyFont(next);
+}
+
+function cycleFontSizePreset() {
+    const current = getPreferredFontSize();
+    const currentIndex = FONT_SIZE_PRESETS.findIndex((preset) => preset.key === current);
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % FONT_SIZE_PRESETS.length : 0;
+    const next = FONT_SIZE_PRESETS[nextIndex].key;
+    localStorage.setItem(FONT_SIZE_KEY, next);
+    applyFontSize(next);
 }
 
 function toggleQuickControls() {
@@ -295,6 +356,7 @@ function setupEventListeners() {
     document.getElementById('themeToggleBtn').addEventListener('click', toggleTheme);
     document.getElementById('accentCycleBtn').addEventListener('click', cycleAccentTheme);
     document.getElementById('fontCycleBtn').addEventListener('click', cycleFontPreset);
+    document.getElementById('fontSizeCycleBtn').addEventListener('click', cycleFontSizePreset);
     document.getElementById('uiControlsToggleBtn').addEventListener('click', toggleQuickControls);
 
     document.getElementById('accountSelector').addEventListener('change', (e) => {
@@ -1186,6 +1248,7 @@ document.addEventListener('DOMContentLoaded', () => {
     applyTheme(getPreferredTheme());
     applyAccentTheme(getPreferredAccent());
     applyFont(getPreferredFont());
+    applyFontSize(getPreferredFontSize());
     setQuickControlsCollapsed(localStorage.getItem(QUICK_CONTROLS_COLLAPSED_KEY) === '1');
     setupEventListeners();
     loadAccountsIfNeeded(true).catch((error) => {
