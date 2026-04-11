@@ -567,7 +567,12 @@ body[data-layout='dense'] .summary-spotlight .metric-card {
 
 #periodStatsGrid .metric-card {
     flex: 1 1 0;
-    min-width: 120px;
+    min-width: 72px;
+    width: min-content;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 #tradeMetricsGrid .metric-card {
@@ -607,6 +612,12 @@ body[data-layout='dense'] .dense-hide {
     border-radius: 10px;
     border: 1px solid var(--border);
     background: var(--surface-alt);
+    min-width: 72px;
+    width: min-content;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .metric-card .label {

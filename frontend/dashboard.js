@@ -888,8 +888,7 @@ function renderDenseOverview(data) {
     const histogramStats = data?.pnl_histogram?.stats || {};
 
     const items = [
-        ['Accounts', String(toNum(summary.accounts_count))],
-        ['Open Positions', String(toNum(summary.open_positions))],
+        ['Accounts / Open', `${toNum(summary.accounts_count)} / ${toNum(summary.open_positions)}`],
         ['Equity', formatMoney(summary.equity)],
         ['Balance', formatMoney(summary.balance)],
         ['Floating PnL', formatMoney(summary.floating_pnl)],
@@ -904,8 +903,6 @@ function renderDenseOverview(data) {
         ['Wins / Losses / BE', `${toNum(distribution.wins)} / ${toNum(distribution.losses)} / ${toNum(distribution.breakeven || distribution.neutral)}`],
         ['Long / Short / Unk', `${toNum(directions.longs)} / ${toNum(directions.shorts)} / ${toNum(directions.unknown)}`],
         ['Mean / StdDev', `${formatSignedRounded(histogramStats.mean)} / ${toNum(histogramStats.std_dev).toFixed(1)}`],
-        ['Avg Win', formatMoney(metrics.avg_win)],
-        ['Avg Loss', formatMoney(metrics.avg_loss)],
     ];
 
     const cols = 3;
@@ -1333,38 +1330,43 @@ function positionDistLabels(trackEl, segments) {
         const measured = entries.map((e) => ({ ...e, labelW: e.el.getBoundingClientRect().width }));
         const GAP = 4;
 
+        // Initial ideal positions
         const idealPositions = measured.map((m) => {
             const startPx = (m.startPct / 100) * containerW;
             return { left: startPx, width: m.labelW };
         });
 
+        // Place each label at its ideal position
         const positions = idealPositions.map((p) => ({ left: p.left }));
 
+        // Clamp all labels to container, and pack left-to-right
         for (let i = 0; i < positions.length; i++) {
+            // Clamp right edge
             const maxLeft = containerW - measured[i].labelW;
             if (positions[i].left > maxLeft) positions[i].left = maxLeft;
             if (positions[i].left < 0) positions[i].left = 0;
-        }
-
-        for (let pass = 0; pass < 3; pass++) {
-            for (let i = 1; i < positions.length; i++) {
+            // Prevent overlap with previous
+            if (i > 0) {
                 const prevRight = positions[i - 1].left + measured[i - 1].labelW + GAP;
                 if (positions[i].left < prevRight) {
                     positions[i].left = prevRight;
                 }
             }
-            for (let i = positions.length - 1; i >= 0; i--) {
-                const maxLeft = containerW - measured[i].labelW;
-                if (positions[i].left > maxLeft) positions[i].left = maxLeft;
-                if (i > 0) {
-                    const prevMax = positions[i].left - GAP - measured[i - 1].labelW;
-                    if (positions[i - 1].left > prevMax) {
-                        positions[i - 1].left = Math.max(0, prevMax);
-                    }
+        }
+        // Now pack right-to-left to ensure last label never overflows
+        for (let i = positions.length - 1; i >= 0; i--) {
+            const maxLeft = containerW - measured[i].labelW;
+            if (positions[i].left > maxLeft) positions[i].left = maxLeft;
+            if (positions[i].left < 0) positions[i].left = 0;
+            if (i < positions.length - 1) {
+                const nextLeft = positions[i + 1].left - GAP - measured[i].labelW;
+                if (positions[i].left > nextLeft) {
+                    positions[i].left = Math.max(0, nextLeft);
                 }
             }
         }
 
+        // Apply positions
         for (let i = 0; i < measured.length; i++) {
             measured[i].el.style.left = `${positions[i].left}px`;
         }
