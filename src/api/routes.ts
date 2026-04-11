@@ -650,16 +650,35 @@ router.get('/analytics', async (req: Request, res: Response) => {
       },
     };
 
-    const tradeMetrics = metricsTotals.trade_count > 0 ? {
-      win_rate_pct: (metricsTotals.win_count / metricsTotals.trade_count) * 100,
-      avg_win: metricsTotals.avg_win_count > 0 ? metricsTotals.avg_win_sum / metricsTotals.avg_win_count : 0,
-      avg_loss: metricsTotals.avg_loss_count > 0 ? metricsTotals.avg_loss_sum / metricsTotals.avg_loss_count : 0,
-      max_win: metricsTotals.max_win,
-      max_loss: metricsTotals.max_loss,
-      expectancy: metricsTotals.expectancy_sum / metricsTotals.trade_count,
-      profit_factor: metricsTotals.gross_loss > 0 ? metricsTotals.gross_profit / metricsTotals.gross_loss : (metricsTotals.gross_profit > 0 ? 999 : 0),
-      avg_hold_seconds: metricsTotals.hold_count > 0 ? metricsTotals.hold_sum / metricsTotals.hold_count : 0,
-    } : {
+    const tradeMetrics = metricsTotals.trade_count > 0 ? (() => {
+      const avgWin = metricsTotals.avg_win_count > 0 ? metricsTotals.avg_win_sum / metricsTotals.avg_win_count : 0;
+      const avgLoss = metricsTotals.avg_loss_count > 0 ? metricsTotals.avg_loss_sum / metricsTotals.avg_loss_count : 0;
+      const avgRr = avgLoss !== 0 ? Math.abs(avgWin / avgLoss) : (avgWin > 0 ? 999 : 0);
+
+      let peak = 0;
+      let maxDrawdown = 0;
+      let cumPnl = 0;
+      const sortedForDD = allFilteredTrades.slice().sort((a: any, b: any) => toNum(a.exit_time_ms || a.entry_time_ms) - toNum(b.exit_time_ms || b.entry_time_ms));
+      for (const t of sortedForDD) {
+        cumPnl += toNum(t.profit);
+        if (cumPnl > peak) peak = cumPnl;
+        const dd = peak - cumPnl;
+        if (dd > maxDrawdown) maxDrawdown = dd;
+      }
+
+      return {
+        win_rate_pct: (metricsTotals.win_count / metricsTotals.trade_count) * 100,
+        avg_win: avgWin,
+        avg_loss: avgLoss,
+        max_win: metricsTotals.max_win,
+        max_loss: metricsTotals.max_loss,
+        expectancy: metricsTotals.expectancy_sum / metricsTotals.trade_count,
+        profit_factor: metricsTotals.gross_loss > 0 ? metricsTotals.gross_profit / metricsTotals.gross_loss : (metricsTotals.gross_profit > 0 ? 999 : 0),
+        avg_hold_seconds: metricsTotals.hold_count > 0 ? metricsTotals.hold_sum / metricsTotals.hold_count : 0,
+        avg_rr: avgRr,
+        max_drawdown: maxDrawdown,
+      };
+    })() : {
       win_rate_pct: 0,
       avg_win: 0,
       avg_loss: 0,
@@ -668,6 +687,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
       expectancy: 0,
       profit_factor: 0,
       avg_hold_seconds: 0,
+      avg_rr: 0,
+      max_drawdown: 0,
     };
 
     const exposureMap = new Map<string, number>();

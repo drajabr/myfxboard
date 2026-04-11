@@ -827,7 +827,6 @@ function updateKpis(summary, periods, tradeMetrics, filteredSummary) {
 
 function renderPeriodStats(periods) {
     const grid = document.getElementById('periodStatsGrid');
-    const isDense = getPreferredLayout() === 'dense';
     const labels = [
         ['today', 'Today'],
         ['last7d', 'Last 7 Days'],
@@ -835,36 +834,6 @@ function renderPeriodStats(periods) {
         ['ytd', 'YTD'],
         ['all_time', 'All Time'],
     ];
-
-    if (isDense) {
-        grid.classList.add('metric-grid--dense-table');
-        grid.innerHTML = `
-            <table class="data-table metric-table-dense">
-                <thead>
-                    <tr>
-                        <th>Window</th>
-                        <th>PnL</th>
-                        <th>Trades</th>
-                        <th>Win Rate</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${labels.map(([key, title]) => {
-                        const p = periods[key];
-                        return `
-                            <tr>
-                                <td>${title}</td>
-                                <td class="${pnlClass(p.pnl)}">${formatMoney(p.pnl)}</td>
-                                <td>${toNum(p.trades_count)}</td>
-                                <td>${formatPct(p.win_rate_pct)}</td>
-                            </tr>
-                        `;
-                    }).join('')}
-                </tbody>
-            </table>
-        `;
-        return;
-    }
 
     grid.classList.remove('metric-grid--dense-table');
 
@@ -882,47 +851,25 @@ function renderPeriodStats(periods) {
 
 function renderTradeMetrics(metrics) {
     const grid = document.getElementById('tradeMetricsGrid');
-    const isDense = getPreferredLayout() === 'dense';
     const cards = [
         ['Win Rate', formatPct(metrics.win_rate_pct), metrics.win_rate_pct],
         ['Profit Factor', Number(toNum(metrics.profit_factor)).toFixed(2), 0],
         ['Expectancy', formatMoney(metrics.expectancy), toNum(metrics.expectancy)],
+        ['Average RR', Number(toNum(metrics.avg_rr)).toFixed(2), 0],
         ['Average Win', formatMoney(metrics.avg_win), metrics.avg_win],
         ['Average Loss', formatMoney(metrics.avg_loss), metrics.avg_loss],
         ['Max Win', formatMoney(metrics.max_win), metrics.max_win],
         ['Max Loss', formatMoney(metrics.max_loss), metrics.max_loss],
+        ['Max Drawdown', formatMoney(metrics.max_drawdown), toNum(metrics.max_drawdown)],
         ['Avg Hold Time', durationLabel(metrics.avg_hold_seconds), 0],
     ];
-
-    if (isDense) {
-        grid.classList.add('metric-grid--dense-table');
-        grid.innerHTML = `
-            <table class="data-table metric-table-dense">
-                <thead>
-                    <tr>
-                        <th>Metric</th>
-                        <th>Value</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${cards.map(([label, value, pnl]) => `
-                        <tr>
-                            <td>${label}</td>
-                            <td class="${label.includes('Hold') || label.includes('Rate') ? '' : pnlClass(pnl)}">${value}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        `;
-        return;
-    }
 
     grid.classList.remove('metric-grid--dense-table');
 
     grid.innerHTML = cards.map(([label, value, pnl]) => `
         <div class="metric-card">
             <div class="label">${label}</div>
-            <div class="value ${label.includes('Hold') || label.includes('Rate') ? '' : pnlClass(pnl)}">${value}</div>
+            <div class="value ${label.includes('Hold') || label.includes('Rate') || label.includes('RR') ? '' : pnlClass(pnl)}">${value}</div>
         </div>
     `).join('');
 }
@@ -940,7 +887,7 @@ function renderDenseOverview(data) {
     const directions = data?.filtered_direction_distribution || {};
     const histogramStats = data?.pnl_histogram?.stats || {};
 
-    const rows = [
+    const items = [
         ['Accounts', String(toNum(summary.accounts_count))],
         ['Open Positions', String(toNum(summary.open_positions))],
         ['Equity', formatMoney(summary.equity)],
@@ -948,21 +895,35 @@ function renderDenseOverview(data) {
         ['Floating PnL', formatMoney(summary.floating_pnl)],
         ['All Time PnL', formatMoney(allTime.pnl)],
         ['All Time Trades', String(toNum(allTime.trades_count))],
-        ['All Time Win Rate', formatPct(allTime.win_rate_pct)],
+        ['Win Rate', formatPct(allTime.win_rate_pct)],
         ['Expectancy', formatMoney(metrics.expectancy)],
         ['Profit Factor', Number(toNum(metrics.profit_factor)).toFixed(2)],
-        ['Filtered Wins/Losses/BE', `${toNum(distribution.wins)} / ${toNum(distribution.losses)} / ${toNum(distribution.breakeven || distribution.neutral)}`],
-        ['Directional Mix L/S/U', `${toNum(directions.longs)} / ${toNum(directions.shorts)} / ${toNum(directions.unknown)}`],
-        ['PnL Dist Mean / StdDev', `${formatSignedRounded(histogramStats.mean)} / ${toNum(histogramStats.std_dev).toFixed(1)}`],
-        ['Histogram Trades', String(toNum(histogramStats.total_trades))],
+        ['Average RR', Number(toNum(metrics.avg_rr)).toFixed(2)],
+        ['Max Drawdown', formatMoney(metrics.max_drawdown)],
+        ['Avg Hold', durationLabel(metrics.avg_hold_seconds)],
+        ['Wins / Losses / BE', `${toNum(distribution.wins)} / ${toNum(distribution.losses)} / ${toNum(distribution.breakeven || distribution.neutral)}`],
+        ['Long / Short / Unk', `${toNum(directions.longs)} / ${toNum(directions.shorts)} / ${toNum(directions.unknown)}`],
+        ['Mean / StdDev', `${formatSignedRounded(histogramStats.mean)} / ${toNum(histogramStats.std_dev).toFixed(1)}`],
+        ['Avg Win', formatMoney(metrics.avg_win)],
+        ['Avg Loss', formatMoney(metrics.avg_loss)],
     ];
 
-    tbody.innerHTML = rows.map(([label, value]) => `
-        <tr>
-            <td>${label}</td>
-            <td>${value}</td>
-        </tr>
-    `).join('');
+    const cols = 3;
+    const rowCount = Math.ceil(items.length / cols);
+    let html = '';
+    for (let r = 0; r < rowCount; r++) {
+        html += '<tr>';
+        for (let c = 0; c < cols; c++) {
+            const item = items[r + c * rowCount];
+            if (item) {
+                html += `<td>${item[0]}</td><td>${item[1]}</td>`;
+            } else {
+                html += '<td></td><td></td>';
+            }
+        }
+        html += '</tr>';
+    }
+    tbody.innerHTML = html;
 }
 
 function updatePositionsTable(positions) {
@@ -986,17 +947,57 @@ function updatePositionsTable(positions) {
 }
 
 const SYMBOL_ALIASES = {
-    'GOLD': 'XAUUSD', 'SILVER': 'XAGUSD',
-    'US30': 'DJ30', 'USTEC': 'NAS100', 'US500': 'SP500',
-    'WTI': 'USOIL', 'BRENT': 'UKOIL',
-    'BTC': 'BTCUSD', 'ETH': 'ETHUSD',
+    // Precious Metals
+    'GOLD': 'XAUUSD', 'GLD': 'XAUUSD', 'GC': 'XAUUSD',
+    'SILVER': 'XAGUSD', 'SLV': 'XAGUSD', 'SI': 'XAGUSD',
+    'PLATINUM': 'XPTUSD', 'PL': 'XPTUSD',
+    'PALLADIUM': 'XPDUSD', 'PA': 'XPDUSD',
+    'COPPER': 'XCUUSD', 'HG': 'XCUUSD',
+    // US Indices
+    'DJ30': 'US30', 'DJI30': 'US30', 'DOWJONES30': 'US30', 'DJIA': 'US30', 'WS30': 'US30', 'YM': 'US30', 'DOW30': 'US30', 'USA30': 'US30',
+    'USTEC': 'NAS100', 'US100': 'NAS100', 'NDX100': 'NAS100', 'USTECH': 'NAS100', 'NQ100': 'NAS100', 'NSDQ100': 'NAS100', 'NQ': 'NAS100', 'NASDAQ100': 'NAS100', 'NDX': 'NAS100', 'USTEC100': 'NAS100', 'USTECH100': 'NAS100', 'NDAQ': 'NAS100',
+    'SP500': 'SPX500', 'US500': 'SPX500', 'ES': 'SPX500', 'SPX': 'SPX500', 'USA500': 'SPX500',
+    'RUSS2000': 'US2000', 'RUSSELL2000': 'US2000', 'RTY': 'US2000',
+    // EU Indices
+    'DE30': 'DE40', 'DAX40': 'DE40', 'DAX30': 'DE40', 'GER40': 'DE40', 'GER30': 'DE40', 'GDAXI': 'DE40', 'GERMANY40': 'DE40', 'GRXEUR': 'DE40',
+    'FTSE100': 'UK100', 'FTSE': 'UK100', 'UKX': 'UK100',
+    'FRA40': 'FR40', 'CAC40': 'FR40', 'FCHI40': 'FR40', 'FRANCE40': 'FR40',
+    'EUSTX50': 'EU50', 'STOX50': 'EU50', 'STOXX50E': 'EU50', 'EURO50': 'EU50', 'SX5E': 'EU50', 'EUROSTOXX50': 'EU50',
+    'SPN35': 'ES35', 'IBEX35': 'ES35', 'ESP35': 'ES35', 'SPAIN35': 'ES35',
+    'FTMIB': 'IT40', 'ITA40': 'IT40', 'ITALY40': 'IT40',
+    // Asia-Pac
+    'NI225': 'JP225', 'NIKKEI225': 'JP225', 'NIKKEI': 'JP225', 'NK225': 'JP225', 'JPN225': 'JP225', 'NKD': 'JP225', 'JAPAN225': 'JP225',
+    'HSI50': 'HK50', 'HSI': 'HK50', 'HANGSENG': 'HK50', 'HKG33': 'HK50', 'HONGKONG50': 'HK50',
+    'AU200': 'AUS200', 'ASX200': 'AUS200', 'AUSTRALIA200': 'AUS200',
+    'CN50': 'CHINA50', 'CHINAA50': 'CHINA50', 'FTXIN9': 'CHINA50',
+    'NIFTY50': 'INDIA50',
+    // Energy
+    'WTI': 'USOIL', 'CRUDEOIL': 'USOIL', 'CLOIL': 'USOIL', 'CL': 'USOIL', 'XTIUSD': 'USOIL', 'USCRUDE': 'USOIL', 'WTIUSD': 'USOIL', 'OILUSD': 'USOIL', 'OIL': 'USOIL', 'OILWTI': 'USOIL', 'USOUSD': 'USOIL', 'EXTRALIGHT': 'USOIL',
+    'BRENT': 'UKOIL', 'BRN': 'UKOIL', 'XBRUSD': 'UKOIL', 'UKCRUDE': 'UKOIL', 'BRENTOIL': 'UKOIL', 'BRT': 'UKOIL', 'OILBRENT': 'UKOIL', 'BRENTUSD': 'UKOIL',
+    'NGAS': 'NATGAS', 'XNGUSD': 'NATGAS', 'NATURALGAS': 'NATGAS', 'NG': 'NATGAS',
+    // Crypto
+    'BITCOIN': 'BTCUSD', 'BTC': 'BTCUSD', 'XBT': 'BTCUSD', 'XBTUSD': 'BTCUSD',
+    'ETHEREUM': 'ETHUSD', 'ETH': 'ETHUSD',
+    'LITECOIN': 'LTCUSD', 'LTC': 'LTCUSD',
+    'RIPPLE': 'XRPUSD', 'XRP': 'XRPUSD',
+    'BITCOINCASH': 'BCHUSD', 'BCH': 'BCHUSD', 'BAB': 'BCHUSD',
+    'DOGECOIN': 'DOGEUSD', 'DOGUSD': 'DOGEUSD', 'DOGE': 'DOGEUSD',
+    'CARDANO': 'ADAUSD', 'ADA': 'ADAUSD',
+    'SOLANA': 'SOLUSD', 'SOL': 'SOLUSD',
+    'POLKADOT': 'DOTUSD', 'DOT': 'DOTUSD',
 };
+
+const SYMBOL_PREFIX_RE = /^(?:#|!|\.|m\.|c\.|e\.|s\.|FX[_:]|CFD[_:]|IDX[_:])/i;
+const SYMBOL_SUFFIX_RE = /(?:\.cash|Cash|_SB|_sb|\.ecn|\.raw|\.stp|\.pro|\.prime|\.ndd|\.std|\.stnd|micro|_micro|_mini|\.fx|\.fs|-OTC|mini|cent|eco|pro|raw|\.[a-z]{1,2}|[+!#.\-_]m$|[+!#.\-_]$|_[mMiz]$)/;
 
 function normalizeSymbol(sym) {
     if (!sym) return '';
-    let s = sym.toUpperCase().replace(/[.#_!\-]+$/g, '').replace(/^[.#]+/, '');
-    if (SYMBOL_ALIASES[s]) s = SYMBOL_ALIASES[s];
-    return s;
+    let s = sym.trim();
+    s = s.replace(SYMBOL_PREFIX_RE, '');
+    s = s.replace(SYMBOL_SUFFIX_RE, '');
+    s = s.replace(SYMBOL_SUFFIX_RE, '');
+    s = s.replace(/[\/._\-\s]/g, '').toUpperCase();
+    return SYMBOL_ALIASES[s] || s;
 }
 
 function deriveDirection(trade) {
@@ -1330,33 +1331,42 @@ function positionDistLabels(trackEl, segments) {
         if (containerW <= 0) return;
 
         const measured = entries.map((e) => ({ ...e, labelW: e.el.getBoundingClientRect().width }));
-        const placed = [];
-        const GAP = 6;
+        const GAP = 4;
 
-        for (let i = 0; i < measured.length; i++) {
-            const m = measured[i];
+        const idealPositions = measured.map((m) => {
             const startPx = (m.startPct / 100) * containerW;
-            const endPx = ((m.startPct + m.widthPct) / 100) * containerW;
-            const labelW = m.labelW;
+            return { left: startPx, width: m.labelW };
+        });
 
-            const sL = startPx;
-            const sR = startPx + labelW;
-            const startOk = !placed.some(p => sL < p.right + GAP && sR > p.left - GAP) && sR <= containerW + 2;
+        const positions = idealPositions.map((p) => ({ left: p.left }));
 
-            if (startOk) {
-                placed.push({ left: sL, right: sR });
-            } else {
-                const eR = endPx;
-                const eL = endPx - labelW;
-                const endOk = !placed.some(p => eL < p.right + GAP && eR > p.left - GAP) && eL >= -2;
-                if (endOk) {
-                    m.el.style.left = `${m.startPct + m.widthPct}%`;
-                    m.el.classList.add('dist-label--end');
-                    placed.push({ left: eL, right: eR });
-                } else {
-                    m.el.style.display = 'none';
+        for (let i = 0; i < positions.length; i++) {
+            const maxLeft = containerW - measured[i].labelW;
+            if (positions[i].left > maxLeft) positions[i].left = maxLeft;
+            if (positions[i].left < 0) positions[i].left = 0;
+        }
+
+        for (let pass = 0; pass < 3; pass++) {
+            for (let i = 1; i < positions.length; i++) {
+                const prevRight = positions[i - 1].left + measured[i - 1].labelW + GAP;
+                if (positions[i].left < prevRight) {
+                    positions[i].left = prevRight;
                 }
             }
+            for (let i = positions.length - 1; i >= 0; i--) {
+                const maxLeft = containerW - measured[i].labelW;
+                if (positions[i].left > maxLeft) positions[i].left = maxLeft;
+                if (i > 0) {
+                    const prevMax = positions[i].left - GAP - measured[i - 1].labelW;
+                    if (positions[i - 1].left > prevMax) {
+                        positions[i - 1].left = Math.max(0, prevMax);
+                    }
+                }
+            }
+        }
+
+        for (let i = 0; i < measured.length; i++) {
+            measured[i].el.style.left = `${positions[i].left}px`;
         }
     });
 }
@@ -1795,24 +1805,45 @@ function updateCharts(data) {
         charts.durationWinRate.update();
     }
 
-    const scatterPnls = Array.isArray(data.trade_duration_scatter) ? data.trade_duration_scatter : [];
-    const sortedPnls = scatterPnls.map((t) => toNum(t.profit)).sort((a, b) => a - b);
+    const histogram = data.pnl_histogram || {};
+    const bins = histogram.bins || [];
+    const normalCurve = histogram.normal_curve || [];
+    const histogramStats = histogram.stats || {};
     const histogramTitle = document.getElementById('pnlHistogramTitle');
-    const histogramStats = data.pnl_histogram?.stats || {};
     if (histogramTitle) {
-        histogramTitle.textContent = `PnL Distribution (${sortedPnls.length} trades)`;
+        histogramTitle.textContent = `PnL Distribution (${toNum(histogramStats.total_trades)} trades)`;
     }
 
+    const binLabels = bins.map((b) => {
+        const center = (b.from + b.to) / 2;
+        return `$${center.toFixed(0)}`;
+    });
+    const barColors = bins.map((b) => ((b.from + b.to) / 2) >= 0 ? positive : negative);
+
     const histogramChartData = {
+        labels: binLabels,
         datasets: [
             {
-                label: 'Trade PnL',
-                data: sortedPnls.map((pnl, i) => ({ x: i + 1, y: pnl })),
-                pointRadius: sortedPnls.length > 200 ? 2 : sortedPnls.length > 80 ? 3 : 4,
-                pointHoverRadius: 6,
-                backgroundColor: sortedPnls.map((v) => v >= 0 ? positive : negative),
-                borderColor: sortedPnls.map((v) => v >= 0 ? positive : negative),
+                type: 'bar',
+                label: 'Trades',
+                data: bins.map((b) => b.count),
+                backgroundColor: barColors,
+                borderColor: barColors,
                 borderWidth: 0,
+                barPercentage: 1.0,
+                categoryPercentage: 1.0,
+                order: 2,
+            },
+            {
+                type: 'line',
+                label: 'Normal Curve',
+                data: normalCurve.map((p) => p.expected_count),
+                borderColor: text,
+                borderWidth: 1.5,
+                pointRadius: 0,
+                fill: false,
+                tension: 0.4,
+                order: 1,
             },
         ],
     };
@@ -1827,21 +1858,30 @@ function updateCharts(data) {
             legend: { display: false },
             tooltip: {
                 callbacks: {
-                    title: () => '',
-                    label: (ctx) => `PnL: $${toNum(ctx.parsed.y).toFixed(2)}`,
+                    title: (items) => items[0]?.label || '',
+                    label: (ctx) => {
+                        if (ctx.datasetIndex === 0) return `Trades: ${ctx.parsed.y}`;
+                        return `Expected: ${ctx.parsed.y.toFixed(1)}`;
+                    },
                 },
             },
         },
         scales: {
             x: {
-                type: 'linear',
-                display: false,
+                ticks: {
+                    color: text,
+                    font: chartFont,
+                    maxRotation: 45,
+                    autoSkip: true,
+                    maxTicksLimit: 12,
+                },
+                grid: { display: false },
             },
             y: {
                 ticks: {
                     color: text,
                     font: chartFont,
-                    callback: (v) => `$${v}`,
+                    precision: 0,
                 },
                 grid: {
                     color: 'rgba(125, 138, 159, 0.2)',
@@ -1853,7 +1893,7 @@ function updateCharts(data) {
 
     if (!charts.pnlHistogram) {
         charts.pnlHistogram = new Chart(document.getElementById('pnlHistogramChart'), {
-            type: 'scatter',
+            type: 'bar',
             data: histogramChartData,
             options: histogramOptions,
         });

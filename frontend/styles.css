@@ -559,17 +559,15 @@ body[data-layout='dense'] .summary-spotlight .metric-card {
     gap: var(--layout-gap);
 }
 
+#periodStatsGrid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--layout-gap);
+}
+
 #periodStatsGrid .metric-card {
-    grid-column: span 2;
-}
-
-#periodStatsGrid .metric-card:nth-child(1),
-#periodStatsGrid .metric-card:nth-child(5) {
-    grid-column: span 3;
-}
-
-body[data-layout='dense'] #periodStatsGrid .metric-card {
-    grid-column: span 4;
+    flex: 1 1 0;
+    min-width: 120px;
 }
 
 #tradeMetricsGrid .metric-card {
@@ -640,6 +638,13 @@ body[data-layout='dense'] .metric-card .value {
 
 .charts-row > * {
     grid-column: span 6;
+    display: flex;
+    flex-direction: column;
+}
+
+.charts-row > * > .metric-grid {
+    flex: 1 1 0;
+    align-content: start;
 }
 
 body[data-layout='dense'] .charts-row > * {
@@ -1107,9 +1112,6 @@ body[data-layout='dense'] .calendar-cell {
 }
 
 @media (min-width: 761px) and (max-width: 1180px) {
-    #periodStatsGrid .metric-card,
-    #periodStatsGrid .metric-card:nth-child(1),
-    #periodStatsGrid .metric-card:nth-child(5),
     #tradeMetricsGrid .metric-card {
         grid-column: span 4;
     }
@@ -1154,9 +1156,6 @@ body[data-layout='dense'] .calendar-cell {
     }
 
     .summary-spotlight .metric-card,
-    #periodStatsGrid .metric-card,
-    #periodStatsGrid .metric-card:nth-child(1),
-    #periodStatsGrid .metric-card:nth-child(5),
     #tradeMetricsGrid .metric-card {
         grid-column: auto;
     }
