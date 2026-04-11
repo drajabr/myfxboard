@@ -127,7 +127,7 @@ public:
       string closed_trades_json = BuildClosedTradesJson(latest_closed_time_ms, latest_closed_deal_id);
       string account_json = BuildAccountJson();
 
-      uint live_payload_hash = HashPayload(positions_json + "|" + account_json + "|" + StringFormat("%lld", latest_closed_time_ms));
+      uint live_payload_hash = HashPayload(BuildStructuralHashKey(latest_closed_time_ms));
       string history_hash = StringFormat("%u", HashPayload(closed_trades_json));
 
       if(!s_startup_health_checked) {
@@ -207,6 +207,33 @@ public:
    static void SetDebugLog(bool enabled)  { s_debug_log = enabled; }
 
 private:
+   static string BuildStructuralHashKey(long latest_closed_time_ms) {
+      string key = "";
+
+      for(int i = 0; i < PositionsTotal(); i++) {
+         if(!PositionSelectByTicket(PositionGetTicket(i)))
+            continue;
+
+         ENUM_POSITION_TYPE dir = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+         key += StringFormat("|%s:%.2f:%s:%.5f:%.5f:%.5f:%lld",
+            PositionGetString(POSITION_SYMBOL),
+            PositionGetDouble(POSITION_VOLUME),
+            dir == POSITION_TYPE_BUY ? "B" : "S",
+            PositionGetDouble(POSITION_PRICE_OPEN),
+            PositionGetDouble(POSITION_SL),
+            PositionGetDouble(POSITION_TP),
+            (long)PositionGetInteger(POSITION_TIME_MSC)
+         );
+      }
+
+      key += StringFormat("|bal:%.2f|ct:%lld",
+         AccountInfoDouble(ACCOUNT_BALANCE),
+         latest_closed_time_ms
+      );
+
+      return key;
+   }
+
    static string BuildPositionsJson() {
       string positions_json = "[";
       bool first_pos = true;

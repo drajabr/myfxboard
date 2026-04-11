@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>myfxboard</title>
+    <meta name="theme-color" content="#2f8f62">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
+    <link rel="manifest" href="/manifest.webmanifest">
     <link rel="stylesheet" href="./styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -25,6 +31,14 @@
                 <select id="accountSelector" class="account-selector">
                     <option value="">All Accounts</option>
                 </select>
+                <div class="layout-switch" role="group" aria-label="Dashboard layout">
+                    <button class="layout-btn is-active" type="button" data-layout-mode="comfy" title="Comfy layout">Comfy</button>
+                    <button class="layout-btn" type="button" data-layout-mode="compact" title="Compact layout">Compact</button>
+                    <button class="layout-btn" type="button" data-layout-mode="dense" title="Dense layout">Dense</button>
+                </div>
+                <button id="refreshNowBtn" class="icon-btn" type="button" title="Refresh now">Refresh</button>
+                <button id="installAppBtn" class="icon-btn is-hidden" type="button" title="Install app">Install App</button>
+                <div id="lastUpdatedLabel" class="status-pill status-pill--sync" aria-live="polite">Updated: -</div>
                 <button id="resetTradesFilterBtn" class="icon-btn" type="button">Reset Filter</button>
                 <div class="ui-controls-wrap" aria-label="Quick style controls group">
                     <button id="uiControlsToggleBtn" class="icon-btn icon-btn--square" type="button" aria-label="Toggle quick controls" title="Toggle quick controls">⚙</button>

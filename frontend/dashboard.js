@@ -5,8 +5,10 @@ const BACKGROUND_KEY = 'backgroundPreference';
 const FONT_KEY = 'fontPreference';
 const FONT_SIZE_KEY = 'fontSizePreference';
 const QUICK_CONTROLS_COLLAPSED_KEY = 'quickControlsCollapsed';
+const LAYOUT_KEY = 'layoutPreference';
 const DASHBOARD_REFRESH_MS = 5000;
 const ACCOUNTS_REFRESH_MS = 60000;
+const LAYOUT_MODES = ['comfy', 'compact', 'dense'];
 
 const ACCENT_PRESETS = [
     {
@@ -125,6 +127,7 @@ const charts = {
 };
 
 const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
+let deferredInstallPrompt = null;
 
 function formatMoney(value) {
     return `$ ${Number(value || 0).toFixed(2)}`;
@@ -260,6 +263,11 @@ function getPreferredFontSize() {
     return FONT_SIZE_PRESETS.some((preset) => preset.key === saved) ? saved : '3';
 }
 
+function getPreferredLayout() {
+    const saved = localStorage.getItem(LAYOUT_KEY);
+    return LAYOUT_MODES.includes(saved) ? saved : 'comfy';
+}
+
 function getAccentPreset(key) {
     return ACCENT_PRESETS.find((preset) => preset.key === key) || ACCENT_PRESETS[0];
 }
@@ -287,6 +295,10 @@ function applyAccentTheme(accentKey) {
     document.body.style.setProperty('--accent-strong', modePalette.accentStrong);
     document.body.style.setProperty('--pnl-positive', modePalette.pnlPositive);
     document.body.style.setProperty('--accent-rgb', modePalette.accentRgb);
+    const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeColorMeta) {
+        themeColorMeta.setAttribute('content', modePalette.accent);
+    }
 
     const accentBtn = document.getElementById('accentCycleBtn');
     if (accentBtn) {
@@ -416,6 +428,30 @@ function applyTheme(theme) {
     applyAccentTheme(getPreferredAccent());
 }
 
+function applyLayout(layoutMode) {
+    const mode = LAYOUT_MODES.includes(layoutMode) ? layoutMode : 'comfy';
+    document.body.setAttribute('data-layout', mode);
+    document.querySelectorAll('.layout-btn[data-layout-mode]').forEach((btn) => {
+        const isActive = btn.getAttribute('data-layout-mode') === mode;
+        btn.classList.toggle('is-active', isActive);
+        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+}
+
+function setLayout(layoutMode) {
+    const mode = LAYOUT_MODES.includes(layoutMode) ? layoutMode : 'comfy';
+    localStorage.setItem(LAYOUT_KEY, mode);
+    applyLayout(mode);
+    Object.values(charts).forEach((chart) => {
+        if (chart) {
+            chart.resize();
+        }
+    });
+    if (state.lastData) {
+        renderDashboard(state.lastData);
+    }
+}
+
 function toggleTheme() {
     const current = document.body.getAttribute('data-theme') || 'light';
     const next = current === 'dark' ? 'light' : 'dark';
@@ -424,6 +460,59 @@ function toggleTheme() {
     if (state.lastData) {
         renderDashboard(state.lastData);
     }
+}
+
+function updateLastUpdatedLabel(timestampMs) {
+    const label = document.getElementById('lastUpdatedLabel');
+    if (!label) {
+        return;
+    }
+    if (!timestampMs) {
+        label.textContent = 'Updated: -';
+        return;
+    }
+    const dt = new Date(timestampMs);
+    const timeText = Number.isNaN(dt.getTime()) ? '-' : dt.toLocaleTimeString();
+    label.textContent = `Updated: ${timeText}`;
+}
+
+function setupPwaInstall() {
+    const installBtn = document.getElementById('installAppBtn');
+    if (!installBtn) {
+        return;
+    }
+
+    window.addEventListener('beforeinstallprompt', (event) => {
+        event.preventDefault();
+        deferredInstallPrompt = event;
+        installBtn.classList.remove('is-hidden');
+    });
+
+    window.addEventListener('appinstalled', () => {
+        deferredInstallPrompt = null;
+        installBtn.classList.add('is-hidden');
+    });
+
+    installBtn.addEventListener('click', async () => {
+        if (!deferredInstallPrompt) {
+            return;
+        }
+        deferredInstallPrompt.prompt();
+        await deferredInstallPrompt.userChoice;
+        deferredInstallPrompt = null;
+        installBtn.classList.add('is-hidden');
+    });
+}
+
+function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) {
+        return;
+    }
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch((error) => {
+            console.error('Service worker registration failed:', error);
+        });
+    });
 }
 
 function applyThemeFromSystemIfNeeded() {
@@ -439,6 +528,23 @@ function setupEventListeners() {
     document.getElementById('fontCycleBtn').addEventListener('click', cycleFontPreset);
     document.getElementById('fontSizeCycleBtn').addEventListener('click', cycleFontSizePreset);
     document.getElementById('uiControlsToggleBtn').addEventListener('click', toggleQuickControls);
+
+    document.querySelectorAll('.layout-btn[data-layout-mode]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const layoutMode = btn.getAttribute('data-layout-mode');
+            if (!layoutMode) {
+                return;
+            }
+            setLayout(layoutMode);
+        });
+    });
+
+    const refreshNowBtn = document.getElementById('refreshNowBtn');
+    if (refreshNowBtn) {
+        refreshNowBtn.addEventListener('click', () => {
+            loadDashboard();
+        });
+    }
 
     document.addEventListener('click', (event) => {
         const wrap = document.querySelector('.ui-controls-wrap');
@@ -1359,6 +1465,7 @@ async function loadDashboard() {
         const data = await fetchAnalytics(selectedAccount);
         state.lastData = data;
         renderDashboard(data);
+        updateLastUpdatedLabel(Date.now());
         setLoadState(false);
     } catch (error) {
         console.error('Error loading dashboard:', error);
@@ -1381,11 +1488,15 @@ function startAutoRefresh(interval) {
 
 document.addEventListener('DOMContentLoaded', () => {
     applyTheme(getPreferredTheme());
+    applyLayout(getPreferredLayout());
     applyBackgroundTheme(getPreferredBackground());
     applyAccentTheme(getPreferredAccent());
     applyFont(getPreferredFont());
     applyFontSize(getPreferredFontSize());
+    updateLastUpdatedLabel(0);
     setQuickControlsCollapsed(localStorage.getItem(QUICK_CONTROLS_COLLAPSED_KEY) !== '0');
+    setupPwaInstall();
+    registerServiceWorker();
     setupEventListeners();
     loadAccountsIfNeeded(true).catch((error) => {
         console.error('Error loading accounts:', error);

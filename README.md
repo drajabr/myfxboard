@@ -32,6 +32,11 @@ From the project root:
 
 	http://localhost:3000
 
+5. Install as mobile/desktop app (optional)
+
+	Open the dashboard in your browser and use the Install App button in the header,
+	or use the browser's Add to Home Screen / Install option.
+
 ## Run commands
 
 From the project root:
