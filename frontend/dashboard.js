@@ -14,6 +14,11 @@ const LAYOUT_BUTTON_LABELS = {
     compact: 'P',
     dense: 'D',
 };
+const LAYOUT_NAME_LABELS = {
+    comfy: 'Comfy',
+    compact: 'Compact',
+    dense: 'Dense',
+};
 
 const ACCENT_PRESETS = [
     {
@@ -54,6 +59,9 @@ const ACCENT_PRESETS = [
 ];
 
 const FONT_PRESETS = [
+    { key: 'manrope', label: 'M', fontFamily: "'Manrope', 'Segoe UI', Tahoma, sans-serif" },
+    { key: 'sora', label: 'R', fontFamily: "'Sora', 'Segoe UI', Tahoma, sans-serif" },
+    { key: 'jetbrains', label: 'J', fontFamily: "'JetBrains Mono', 'Consolas', monospace" },
     { key: 'bahnschrift', label: 'B', fontFamily: "'Bahnschrift', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" },
     { key: 'sans', label: 'S', fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" },
     { key: 'arial', label: 'A', fontFamily: "Arial, 'Segoe UI', Tahoma, sans-serif" },
@@ -445,10 +453,14 @@ function applyLayout(layoutMode) {
     const mode = LAYOUT_MODES.includes(layoutMode) ? layoutMode : 'comfy';
     document.body.setAttribute('data-layout', mode);
     const layoutBtn = document.getElementById('layoutCycleBtn');
+    const layoutModeLabel = document.getElementById('layoutModeLabel');
     if (layoutBtn) {
         layoutBtn.textContent = LAYOUT_BUTTON_LABELS[mode] || 'C';
         layoutBtn.title = `Layout: ${mode}`;
         layoutBtn.setAttribute('aria-label', `Switch layout (current: ${mode})`);
+    }
+    if (layoutModeLabel) {
+        layoutModeLabel.textContent = LAYOUT_NAME_LABELS[mode] || 'Comfy';
     }
 }
 
@@ -471,6 +483,14 @@ function cycleLayoutMode() {
     const currentIndex = LAYOUT_MODES.indexOf(current);
     const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % LAYOUT_MODES.length : 0;
     setLayout(LAYOUT_MODES[nextIndex]);
+}
+
+function onLayoutCycleClick(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    cycleLayoutMode();
 }
 
 function toggleTheme() {
@@ -552,7 +572,17 @@ function setupEventListeners() {
 
     const layoutCycleBtn = document.getElementById('layoutCycleBtn');
     if (layoutCycleBtn) {
-        layoutCycleBtn.addEventListener('click', cycleLayoutMode);
+        layoutCycleBtn.addEventListener('click', onLayoutCycleClick);
+    }
+
+    const layoutModeLabel = document.getElementById('layoutModeLabel');
+    if (layoutModeLabel) {
+        layoutModeLabel.addEventListener('click', onLayoutCycleClick);
+        layoutModeLabel.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                onLayoutCycleClick(event);
+            }
+        });
     }
 
     const refreshNowBtn = document.getElementById('refreshNowBtn');
@@ -563,6 +593,11 @@ function setupEventListeners() {
     }
 
     document.addEventListener('click', (event) => {
+        const cycleTarget = event.target.closest('#layoutCycleBtn, #layoutModeLabel');
+        if (cycleTarget) {
+            onLayoutCycleClick(event);
+            return;
+        }
         const wrap = document.querySelector('.ui-controls-wrap');
         const controls = document.getElementById('uiQuickControls');
         if (!wrap || !controls || wrap.contains(event.target)) {
@@ -890,6 +925,44 @@ function renderTradeMetrics(metrics) {
             <div class="label">${label}</div>
             <div class="value ${label.includes('Hold') || label.includes('Rate') ? '' : pnlClass(pnl)}">${value}</div>
         </div>
+    `).join('');
+}
+
+function renderDenseOverview(data) {
+    const tbody = document.getElementById('denseOverviewTable');
+    if (!tbody) {
+        return;
+    }
+
+    const summary = data?.summary || {};
+    const allTime = data?.periods?.all_time || {};
+    const metrics = data?.trade_metrics || {};
+    const distribution = data?.filtered_distribution || {};
+    const directions = data?.filtered_direction_distribution || {};
+    const histogramStats = data?.pnl_histogram?.stats || {};
+
+    const rows = [
+        ['Accounts', String(toNum(summary.accounts_count))],
+        ['Open Positions', String(toNum(summary.open_positions))],
+        ['Equity', formatMoney(summary.equity)],
+        ['Balance', formatMoney(summary.balance)],
+        ['Floating PnL', formatMoney(summary.floating_pnl)],
+        ['All Time PnL', formatMoney(allTime.pnl)],
+        ['All Time Trades', String(toNum(allTime.trades_count))],
+        ['All Time Win Rate', formatPct(allTime.win_rate_pct)],
+        ['Expectancy', formatMoney(metrics.expectancy)],
+        ['Profit Factor', Number(toNum(metrics.profit_factor)).toFixed(2)],
+        ['Filtered Wins/Losses/BE', `${toNum(distribution.wins)} / ${toNum(distribution.losses)} / ${toNum(distribution.breakeven || distribution.neutral)}`],
+        ['Directional Mix L/S/U', `${toNum(directions.longs)} / ${toNum(directions.shorts)} / ${toNum(directions.unknown)}`],
+        ['PnL Dist Mean / StdDev', `${formatSignedRounded(histogramStats.mean)} / ${toNum(histogramStats.std_dev).toFixed(1)}`],
+        ['Histogram Trades', String(toNum(histogramStats.total_trades))],
+    ];
+
+    tbody.innerHTML = rows.map(([label, value]) => `
+        <tr>
+            <td>${label}</td>
+            <td>${value}</td>
+        </tr>
     `).join('');
 }
 
@@ -1684,6 +1757,7 @@ function renderDashboard(data) {
     updateKpis(data.summary, data.periods, data.trade_metrics, data.filtered_summary);
     renderPeriodStats(data.periods);
     renderTradeMetrics(data.trade_metrics);
+    renderDenseOverview(data);
     updatePositionsTable(data.positions);
     updateExposureTable(data.symbol_exposure);
     updateTradesTable(data.recent_trades);

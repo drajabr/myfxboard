@@ -1,3 +1,51 @@
+@font-face {
+    font-family: 'Manrope';
+    src: url('./fonts/manrope-400.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Manrope';
+    src: url('./fonts/manrope-700.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Sora';
+    src: url('./fonts/sora-400.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Sora';
+    src: url('./fonts/sora-700.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'JetBrains Mono';
+    src: url('./fonts/jetbrains-mono-400.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'JetBrains Mono';
+    src: url('./fonts/jetbrains-mono-700.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+}
+
 :root {
     --bg: #f3f8f5;
     --surface: #ffffff;
@@ -10,7 +58,7 @@
     --accent-strong: #25754f;
     --accent-rgb: 47, 143, 98;
     --bg-tint-rgb: 47, 143, 98;
-    --app-font: 'Bahnschrift', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    --app-font: 'Manrope', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     --app-font-size: 16px;
     --pnl-positive: #2f8f62;
     --pnl-negative: #e04848;
@@ -115,7 +163,7 @@ body[data-layout='dense'] {
     margin: 0;
     line-height: 1;
     text-transform: lowercase;
-    font-family: 'Bahnschrift SemiCondensed', 'Arial Narrow', 'Segoe UI', sans-serif;
+    font-family: 'Sora', 'Manrope', 'Arial Narrow', 'Segoe UI', sans-serif;
     font-style: italic;
     font-size: 2.05rem;
     letter-spacing: 0.01em;
@@ -385,6 +433,10 @@ body[data-layout='dense'] {
     line-height: 1;
 }
 
+#layoutModeLabel {
+    cursor: pointer;
+}
+
 .form-group button,
 .settings-form > button {
     padding: 0.6rem 0.9rem;
@@ -422,7 +474,11 @@ body[data-layout='dense'] {
 }
 
 body[data-layout='compact'] .summary-spotlight .metric-card {
-    grid-column: span 4;
+    grid-column: span 6;
+}
+
+body[data-layout='compact'] .summary-spotlight {
+    grid-template-columns: repeat(16, minmax(0, 1fr));
 }
 
 body[data-layout='dense'] .summary-spotlight .metric-card {
@@ -510,6 +566,11 @@ body[data-layout='compact'] #periodStatsGrid .metric-card {
     grid-column: span 2;
 }
 
+body[data-layout='compact'] #periodStatsGrid .metric-card:nth-child(1),
+body[data-layout='compact'] #periodStatsGrid .metric-card:nth-child(5) {
+    grid-column: span 2;
+}
+
 body[data-layout='dense'] #periodStatsGrid .metric-card {
     grid-column: span 1;
 }
@@ -523,6 +584,14 @@ body[data-layout='dense'] #periodStatsGrid .metric-card {
     grid-column: span 2;
 }
 
+body[data-layout='compact'] #tradeMetricsGrid .metric-card {
+    grid-column: span 2;
+}
+
+body[data-layout='compact'] .metric-grid {
+    grid-template-columns: repeat(16, minmax(0, 1fr));
+}
+
 body[data-layout='dense'] #tradeMetricsGrid .metric-card {
     grid-column: span 1;
 }
@@ -533,6 +602,18 @@ body[data-layout='dense'] #tradeMetricsGrid .metric-card {
 
 .metric-table-dense {
     font-size: 0.78rem;
+}
+
+.dense-only {
+    display: none;
+}
+
+body[data-layout='dense'] .dense-only {
+    display: block;
+}
+
+body[data-layout='dense'] .dense-hide {
+    display: none;
 }
 
 .section-performance-windows .metric-grid {
@@ -570,7 +651,7 @@ body[data-layout='dense'] .metric-card .value {
     grid-template-columns: repeat(12, minmax(0, 1fr));
     gap: var(--layout-gap);
     margin-bottom: var(--layout-gap);
-    align-items: stretch;
+    align-items: start;
 }
 
 .charts-row > * {
@@ -587,15 +668,15 @@ body[data-layout='dense'] .charts-row > * {
 
 .chart-container {
     padding: var(--layout-block-pad);
-    min-height: var(--layout-row-min-h);
-    height: var(--chart-height);
+    min-height: unset;
+    height: auto;
     overflow: visible;
 }
 
 .chart-container canvas {
     width: 100% !important;
-    height: calc(var(--chart-height) - 2.2rem) !important;
-    max-height: calc(var(--chart-height) - 2.2rem);
+    height: min(calc(var(--chart-height) - 2.2rem), 42vh) !important;
+    max-height: min(calc(var(--chart-height) - 2.2rem), 42vh);
 }
 
 body[data-layout='dense'] .table-section {
@@ -979,14 +1060,10 @@ body[data-layout='dense'] .calendar-cell {
     }
 
     .header-right {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        grid-template-areas:
-            'selector reset'
-            'selector settings';
+        display: flex;
+        flex-wrap: nowrap;
         align-items: center;
-        row-gap: 0.35rem;
-        column-gap: 0.45rem;
+        gap: 0.4rem;
         width: 100%;
     }
 
@@ -995,25 +1072,26 @@ body[data-layout='dense'] .calendar-cell {
     }
 
     .account-selector {
-        grid-area: selector;
+        flex: 1 1 auto;
         min-width: 0;
-        width: 100%;
+        width: auto;
         max-width: none;
     }
 
     #resetTradesFilterBtn {
-        grid-area: reset;
-        justify-self: end;
+        flex: 0 0 auto;
     }
 
     .ui-controls-wrap {
-        grid-area: settings;
-        justify-self: end;
+        justify-self: auto;
         margin-left: 0;
+        flex: 0 0 auto;
     }
 
     .ui-quick-controls {
         right: 0;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        min-width: 214px;
     }
 
     .charts-row {
@@ -1053,12 +1131,8 @@ body[data-layout='dense'] .calendar-cell {
         grid-template-columns: 1fr;
     }
 
-    .header-right {
-        grid-template-columns: minmax(0, 1fr) auto;
-    }
-
     .account-selector {
-        width: 100%;
+        width: auto;
     }
 
     .ui-controls-wrap {
@@ -1067,7 +1141,7 @@ body[data-layout='dense'] .calendar-cell {
     }
 
     .ui-quick-controls {
-        min-width: 272px;
+        min-width: 214px;
         right: 0;
     }
 }

@@ -57,7 +57,7 @@
                         </div>
                         <div class="quick-control-item">
                             <button id="layoutCycleBtn" class="icon-btn icon-btn--square" type="button" aria-label="Switch layout" title="Switch layout mode">C</button>
-                            <span class="quick-control-label">Layout</span>
+                            <span id="layoutModeLabel" class="quick-control-label" role="button" tabindex="0" aria-label="Cycle layout mode">Comfy</span>
                         </div>
                     </div>
                 </div>
@@ -80,6 +80,21 @@
                     </div>
                 </div>
                 <div class="metric-grid" id="periodStatsGrid"></div>
+            </section>
+
+            <section class="table-section dense-only" id="denseOverviewSection">
+                <h3>Dense Overview</h3>
+                <table class="data-table metric-table-dense">
+                    <thead>
+                        <tr>
+                            <th>Metric</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody id="denseOverviewTable">
+                        <tr><td colspan="2" style="text-align:center;">No data</td></tr>
+                    </tbody>
+                </table>
             </section>
 
             <section class="charts-row">
@@ -131,7 +146,7 @@
                 </div>
             </section>
 
-            <section class="charts-row">
+            <section class="charts-row dense-hide">
                 <div class="table-section calendar-card">
                     <div class="calendar-head">
                         <h3 id="monthCalendarTitle">Monthly Calendar</h3>
@@ -155,7 +170,7 @@
             </section>
 
 
-            <section class="charts-row">
+            <section class="charts-row dense-hide">
                 <div class="chart-container">
                     <h3>Win/Loss Distribution</h3>
                     <div id="winLossProgress" class="distribution-progress" aria-live="polite">
@@ -245,7 +260,7 @@
             </section>
 
             <!-- New charts before historic trades table -->
-            <section class="charts-row">
+            <section class="charts-row dense-hide">
                 <div class="chart-container">
                     <h3>PnL by Day of Week</h3>
                     <canvas id="pnlByDayOfWeekChart"></canvas>
