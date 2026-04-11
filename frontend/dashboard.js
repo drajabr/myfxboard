@@ -1572,40 +1572,25 @@ function updateCharts(data) {
         charts.durationWinRate.update();
     }
 
-    const histogramBins = Array.isArray(data.pnl_histogram?.bins) ? data.pnl_histogram.bins : [];
-    const histogramCurve = Array.isArray(data.pnl_histogram?.normal_curve) ? data.pnl_histogram.normal_curve : [];
-    const histogramLabels = histogramBins.map((bin) => `${formatSignedRounded(bin.from)}..${formatSignedRounded(bin.to)}`);
-    const histogramCounts = histogramBins.map((bin) => toNum(bin.count));
-    const curveCounts = histogramCurve.map((point) => toNum(point.expected_count));
+    const scatterPnls = Array.isArray(data.trade_duration_scatter) ? data.trade_duration_scatter : [];
+    const sortedPnls = scatterPnls.map((t) => toNum(t.profit)).sort((a, b) => a - b);
     const histogramTitle = document.getElementById('pnlHistogramTitle');
     const histogramStats = data.pnl_histogram?.stats || {};
     if (histogramTitle) {
-        histogramTitle.textContent = `PnL Distribution (μ ${formatSignedRounded(histogramStats.mean)}, σ ${toNum(histogramStats.std_dev).toFixed(1)})`;
+        histogramTitle.textContent = `PnL Distribution (μ ${formatSignedRounded(histogramStats.mean)}, σ ${toNum(histogramStats.std_dev).toFixed(1)}, ${sortedPnls.length} trades)`;
     }
 
     const histogramChartData = {
-        labels: histogramLabels,
+        labels: sortedPnls.map((_, i) => i + 1),
         datasets: [
             {
-                type: 'bar',
-                label: 'Trades',
-                data: histogramCounts,
-                borderRadius: 6,
+                label: 'Trade PnL',
+                data: sortedPnls,
+                borderRadius: 2,
                 borderSkipped: false,
-                backgroundColor: histogramBins.map((bin) => {
-                    const center = (toNum(bin.from) + toNum(bin.to)) / 2;
-                    return center >= 0 ? `rgba(${accentRgb}, 0.68)` : 'rgba(224, 72, 72, 0.6)';
-                }),
-            },
-            {
-                type: 'line',
-                label: 'Normal Curve',
-                data: curveCounts,
-                borderColor: text,
-                backgroundColor: text,
-                pointRadius: 0,
-                borderWidth: 2,
-                tension: 0.35,
+                backgroundColor: sortedPnls.map((v) => v >= 0 ? positive : negative),
+                barPercentage: 1.0,
+                categoryPercentage: 1.0,
             },
         ],
     };
@@ -1618,22 +1603,23 @@ function updateCharts(data) {
         },
         plugins: {
             legend: { display: false },
+            tooltip: {
+                callbacks: {
+                    title: (items) => items.length ? `Trade #${items[0].label}` : '',
+                    label: (ctx) => `PnL: $${toNum(ctx.raw).toFixed(2)}`,
+                },
+            },
         },
         scales: {
             x: {
+                display: false,
+            },
+            y: {
                 ticks: {
                     color: text,
                     font: chartFont,
-                    autoSkip: true,
-                    maxTicksLimit: maxTicksForCount(histogramLabels.length),
-                    maxRotation: 0,
-                    minRotation: 0,
+                    callback: (v) => `$${v}`,
                 },
-                grid: { display: false },
-            },
-            y: {
-                beginAtZero: true,
-                ticks: { color: text, font: chartFont },
                 grid: {
                     color: 'rgba(125, 138, 159, 0.2)',
                     drawBorder: false,
