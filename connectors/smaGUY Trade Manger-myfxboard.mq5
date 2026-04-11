@@ -121,62 +121,24 @@ public:
       string history_hash = StringFormat("%u", HashPayload(closed_trades_json));
 
       if(!s_startup_health_checked) {
-         // One-shot probe: if unavailable/fails, continue with normal sync and avoid retry spam.
+         // Keep a one-time health probe only for observability, never short-circuit syncing.
          s_startup_health_checked = true;
          bool history_sync_required = true;
          string server_history_hash = "";
          if(PostHealthCheck(current_account, timestamp_ms, history_hash, history_sync_required, server_history_hash)) {
             if(server_history_hash != "")
                s_last_ack_history_hash = server_history_hash;
-
-            if(!history_sync_required) {
-               s_last_live_payload_hash = live_payload_hash;
-               s_last_live_payload_sent_ms = timestamp_ms;
-               s_last_sync_ms = now_ms;
-               s_last_sync_ok = true;
-               s_success_count++;
-               if(s_debug_log)
-                  Print("[DashboardConnector] Startup health check matched server state, skipping initial full sync");
-               return false;
-            }
          }
       }
 
-      bool include_history = (history_hash != s_last_ack_history_hash);
-      if(!include_history
-         && live_payload_hash == s_last_live_payload_hash
-         && s_last_live_payload_sent_ms > 0) {
-         bool history_sync_required = false;
-         string server_history_hash = "";
-         s_last_sync_ms = now_ms;
-         s_last_keepalive_probe_ms = timestamp_ms;
-         if(PostHealthCheck(current_account, timestamp_ms, history_hash, history_sync_required, server_history_hash)) {
-            if(server_history_hash != "")
-               s_last_ack_history_hash = server_history_hash;
-            s_success_count++;
-            s_last_sync_ok = true;
-            s_last_live_payload_sent_ms = timestamp_ms;
-            if(!history_sync_required) {
-               if(s_debug_log)
-                  Print("[DashboardConnector] Health check accepted, no payload needed");
-               return false;
-            }
-
-            include_history = true;
-            if(s_debug_log)
-               Print("[DashboardConnector] Health check requested history sync");
-         } else {
-            if(s_debug_log)
-                  Print("[DashboardConnector] Health check failed, skipping payload sync");
-            return false;
-         }
-      }
+      // UltraTrader mode: always push both live positions and closed history every sync interval.
+      bool include_history = true;
 
       string payload = BuildPayload(
          timestamp_ms,
          current_account,
          positions_json,
-         include_history ? closed_trades_json : "[]",
+         closed_trades_json,
          account_json,
          latest_closed_time_ms,
          latest_closed_deal_id,

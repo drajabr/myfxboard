@@ -106,3 +106,42 @@ export const validateIngestionAuth = async (req: any, _res: Response, next: Next
     _res.status(500).json({ error: 'Auth validation failed' });
   }
 };
+
+/**
+ * Optional dashboard edit-token protection.
+ * If DASHBOARD_EDIT_TOKEN is set, non-read requests must provide it via:
+ * - X-Edit-Token header
+ * - Authorization: Bearer <token>
+ * - ?edit_token=<token>
+ */
+export const validateDashboardEditToken = (req: any, res: Response, next: NextFunction) => {
+  const configuredToken = String(process.env.DASHBOARD_EDIT_TOKEN || '').trim();
+  if (!configuredToken) {
+    return next();
+  }
+
+  const method = String(req.method || '').toUpperCase();
+  const isReadOnlyMethod = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+  if (isReadOnlyMethod) {
+    return next();
+  }
+
+  const headerToken = String(req.headers?.['x-edit-token'] || '').trim();
+  const authHeader = String(req.headers?.authorization || '').trim();
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const queryToken = String(req.query?.edit_token || '').trim();
+  const providedToken = headerToken || bearerToken || queryToken;
+
+  if (!providedToken) {
+    return res.status(401).json({ error: 'Missing edit token' });
+  }
+
+  const tokenMatch = providedToken.length === configuredToken.length
+    && crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(configuredToken));
+
+  if (!tokenMatch) {
+    return res.status(403).json({ error: 'Invalid edit token' });
+  }
+
+  return next();
+};

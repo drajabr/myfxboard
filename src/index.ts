@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dashboardRoutes from './api/routes.js';
 import ingestionRoutes from './api/ingestion.js';
+import { validateDashboardEditToken } from './middleware/auth.js';
 import { ensureDatabaseSchema } from './db/bootstrap.js';
 import { isDatabaseReady } from './db/connection.js';
 
@@ -53,7 +54,7 @@ app.get('/health', async (_req, res) => {
 });
 
 // Dashboard read-only routes
-app.use('/api/account', dashboardRoutes);
+app.use('/api/account', validateDashboardEditToken, dashboardRoutes);
 
 // Ingestion routes
 app.use('/api/ingestion', ingestionRoutes);

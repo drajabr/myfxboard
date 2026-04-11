@@ -1581,16 +1581,15 @@ function updateCharts(data) {
     }
 
     const histogramChartData = {
-        labels: sortedPnls.map((_, i) => i + 1),
         datasets: [
             {
                 label: 'Trade PnL',
-                data: sortedPnls,
-                borderRadius: 2,
-                borderSkipped: false,
+                data: sortedPnls.map((pnl, i) => ({ x: i + 1, y: pnl })),
+                pointRadius: sortedPnls.length > 200 ? 2 : sortedPnls.length > 80 ? 3 : 4,
+                pointHoverRadius: 6,
                 backgroundColor: sortedPnls.map((v) => v >= 0 ? positive : negative),
-                barPercentage: 1.0,
-                categoryPercentage: 1.0,
+                borderColor: sortedPnls.map((v) => v >= 0 ? positive : negative),
+                borderWidth: 0,
             },
         ],
     };
@@ -1605,14 +1604,17 @@ function updateCharts(data) {
             legend: { display: false },
             tooltip: {
                 callbacks: {
-                    title: (items) => items.length ? `Trade #${items[0].label}` : '',
-                    label: (ctx) => `PnL: $${toNum(ctx.raw).toFixed(2)}`,
+                    title: (items) => items.length ? `Trade #${items[0].parsed.x}` : '',
+                    label: (ctx) => `PnL: $${toNum(ctx.parsed.y).toFixed(2)}`,
                 },
             },
         },
         scales: {
             x: {
-                display: false,
+                type: 'linear',
+                title: { display: true, text: 'Trade #', color: text, font: chartFont },
+                ticks: { color: text, font: chartFont },
+                grid: { display: false },
             },
             y: {
                 ticks: {
@@ -1630,7 +1632,7 @@ function updateCharts(data) {
 
     if (!charts.pnlHistogram) {
         charts.pnlHistogram = new Chart(document.getElementById('pnlHistogramChart'), {
-            type: 'bar',
+            type: 'scatter',
             data: histogramChartData,
             options: histogramOptions,
         });

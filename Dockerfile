@@ -34,6 +34,7 @@ COPY --from=builder --chown=nodejs:nodejs /app/package*.json ./
 
 # Install production dependencies only
 ENV NODE_ENV=production
+ENV DASHBOARD_EDIT_TOKEN=
 RUN npm install --omit=dev
 
 # Copy compiled code from builder
