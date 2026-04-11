@@ -645,7 +645,7 @@ function setupEventListeners() {
     document.getElementById('combineTradesBtn').addEventListener('click', () => {
         state.combinePositions = !state.combinePositions;
         const btn = document.getElementById('combineTradesBtn');
-        btn.textContent = state.combinePositions ? '⊞' : '⊟';
+        btn.textContent = state.combinePositions ? '❯' : '❮';
         btn.title = state.combinePositions ? 'Showing combined positions' : 'Showing individual trades';
         if (state.lastData) renderDashboard(state.lastData);
     });
@@ -985,6 +985,20 @@ function updatePositionsTable(positions) {
     `).join('');
 }
 
+const SYMBOL_ALIASES = {
+    'GOLD': 'XAUUSD', 'SILVER': 'XAGUSD',
+    'US30': 'DJ30', 'USTEC': 'NAS100', 'US500': 'SP500',
+    'WTI': 'USOIL', 'BRENT': 'UKOIL',
+    'BTC': 'BTCUSD', 'ETH': 'ETHUSD',
+};
+
+function normalizeSymbol(sym) {
+    if (!sym) return '';
+    let s = sym.toUpperCase().replace(/[.#_!\-]+$/g, '').replace(/^[.#]+/, '');
+    if (SYMBOL_ALIASES[s]) s = SYMBOL_ALIASES[s];
+    return s;
+}
+
 function deriveDirection(trade) {
     const entry = toNum(trade.entry_price);
     const exit = trade.exit_price !== null ? toNum(trade.exit_price) : null;
@@ -999,11 +1013,11 @@ function combineOverlappingTrades(trades) {
 
     for (const trade of sorted) {
         const dir = deriveDirection(trade);
-        const sym = trade.symbol;
+        const normSym = normalizeSymbol(trade.symbol);
         let merged = false;
         for (let i = groups.length - 1; i >= 0; i--) {
             const g = groups[i];
-            if (g.symbol !== sym || g.direction !== dir) continue;
+            if (g.normSymbol !== normSym || g.direction !== dir) continue;
             const gClose = Math.max(...g.children.map(c => toNum(c.exit_time_ms) || toNum(c.entry_time_ms)));
             if (toNum(trade.entry_time_ms) <= gClose) {
                 g.children.push(trade);
@@ -1012,7 +1026,7 @@ function combineOverlappingTrades(trades) {
             }
         }
         if (!merged) {
-            groups.push({ symbol: sym, direction: dir, children: [trade] });
+            groups.push({ symbol: trade.symbol, normSymbol: normSym, direction: dir, children: [trade] });
         }
     }
 
@@ -1312,17 +1326,36 @@ function positionDistLabels(trackEl, segments) {
     }
 
     requestAnimationFrame(() => {
-        const containerRect = labelsEl.getBoundingClientRect();
-        for (let i = 0; i < entries.length; i++) {
-            const curr = entries[i];
-            const textRect = curr.textEl.getBoundingClientRect();
-            const nextLeft = i < entries.length - 1
-                ? entries[i + 1].el.getBoundingClientRect().left
-                : containerRect.right;
-            const overflows = textRect.right > nextLeft - 4 || textRect.right > containerRect.right - 2;
-            if (overflows) {
-                curr.el.style.left = `${curr.startPct + curr.widthPct}%`;
-                curr.el.classList.add('dist-label--end');
+        const containerW = labelsEl.getBoundingClientRect().width;
+        if (containerW <= 0) return;
+
+        const measured = entries.map((e) => ({ ...e, labelW: e.el.getBoundingClientRect().width }));
+        const placed = [];
+        const GAP = 6;
+
+        for (let i = 0; i < measured.length; i++) {
+            const m = measured[i];
+            const startPx = (m.startPct / 100) * containerW;
+            const endPx = ((m.startPct + m.widthPct) / 100) * containerW;
+            const labelW = m.labelW;
+
+            const sL = startPx;
+            const sR = startPx + labelW;
+            const startOk = !placed.some(p => sL < p.right + GAP && sR > p.left - GAP) && sR <= containerW + 2;
+
+            if (startOk) {
+                placed.push({ left: sL, right: sR });
+            } else {
+                const eR = endPx;
+                const eL = endPx - labelW;
+                const endOk = !placed.some(p => eL < p.right + GAP && eR > p.left - GAP) && eL >= -2;
+                if (endOk) {
+                    m.el.style.left = `${m.startPct + m.widthPct}%`;
+                    m.el.classList.add('dist-label--end');
+                    placed.push({ left: eL, right: eR });
+                } else {
+                    m.el.style.display = 'none';
+                }
             }
         }
     });
