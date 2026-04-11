@@ -808,16 +808,16 @@ body[data-layout='dense'] .data-table {
     top: 0;
     display: flex;
     align-items: flex-start;
-    gap: 2px;
+    gap: 4px;
     white-space: nowrap;
 }
 
-.dist-label-line {
-    width: 1.5px;
+.dist-label-dot {
+    width: 8px;
     height: 8px;
+    border-radius: 50%;
     flex-shrink: 0;
-    margin-top: -3px;
-    background: var(--text-muted);
+    margin-top: 1px;
 }
 
 .dist-label-text {
@@ -1043,6 +1043,48 @@ body[data-layout='dense'] .calendar-cell {
 
 .trades-count-info {
     margin-top: 0.6rem;
+}
+
+.dir-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.dir-buy {
+    color: var(--pnl-positive);
+    background: color-mix(in srgb, var(--pnl-positive) 14%, transparent);
+}
+
+.dir-sell {
+    color: var(--pnl-negative);
+    background: color-mix(in srgb, var(--pnl-negative) 14%, transparent);
+}
+
+.combine-toggle {
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.78rem;
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.combine-toggle:hover {
+    text-decoration: underline;
+}
+
+.combine-child {
+    background: color-mix(in srgb, var(--surface-alt) 60%, transparent);
+    font-size: 0.85em;
+}
+
+.combine-child td:first-child {
+    padding-left: 1.2rem;
 }
 
 .trades-footer {

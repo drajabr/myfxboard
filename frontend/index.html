@@ -286,14 +286,17 @@
                 <div class="trades-head">
                     <h3 id="tradesSectionTitle">Historic Trades</h3>
                     <div class="trades-controls">
+                        <button id="combineTradesBtn" class="icon-btn icon-btn--square" type="button" title="Toggle combine positions" aria-label="Toggle combine positions">⊞</button>
                         <span id="tradesFilterLabel" class="trades-filter-label">Filter: None</span>
                     </div>
                 </div>
                 <table class="data-table">
                     <thead>
                         <tr>
+                            <th></th>
                             <th><button class="sort-btn" type="button" data-trades-sort="account_id">Account</button></th>
                             <th><button class="sort-btn" type="button" data-trades-sort="symbol">Symbol</button></th>
+                            <th><button class="sort-btn" type="button" data-trades-sort="direction">Direction</button></th>
                             <th><button class="sort-btn" type="button" data-trades-sort="entry_price">Entry</button></th>
                             <th><button class="sort-btn" type="button" data-trades-sort="exit_price">Exit</button></th>
                             <th><button class="sort-btn" type="button" data-trades-sort="size">Size</button></th>
@@ -305,7 +308,7 @@
                         </tr>
                     </thead>
                     <tbody id="tradesTable">
-                        <tr><td colspan="10" style="text-align:center;">No trades</td></tr>
+                        <tr><td colspan="12" style="text-align:center;">No trades</td></tr>
                     </tbody>
                 </table>
                 <div class="trades-footer">

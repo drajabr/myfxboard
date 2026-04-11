@@ -122,6 +122,7 @@ const state = {
     activeTradeFilter: null,
     exposureSort: { key: 'size', direction: 'desc' },
     tradesSort: { key: 'exit_time_ms', direction: 'desc' },
+    combinePositions: true,
     accounts: [],
     accountsFetchedAt: 0,
     inflight: false,
@@ -641,6 +642,14 @@ function setupEventListeners() {
         loadDashboard();
     });
 
+    document.getElementById('combineTradesBtn').addEventListener('click', () => {
+        state.combinePositions = !state.combinePositions;
+        const btn = document.getElementById('combineTradesBtn');
+        btn.textContent = state.combinePositions ? '⊞' : '⊟';
+        btn.title = state.combinePositions ? 'Showing combined positions' : 'Showing individual trades';
+        if (state.lastData) renderDashboard(state.lastData);
+    });
+
     document.getElementById('loadMoreTradesBtn').addEventListener('click', () => {
         state.tradesLimit += 10;
         loadDashboard();
@@ -976,12 +985,85 @@ function updatePositionsTable(positions) {
     `).join('');
 }
 
+function deriveDirection(trade) {
+    const entry = toNum(trade.entry_price);
+    const exit = trade.exit_price !== null ? toNum(trade.exit_price) : null;
+    const profit = toNum(trade.profit);
+    if (exit === null || profit === 0 || entry === exit) return 'N/A';
+    return ((exit - entry) * profit) > 0 ? 'Buy' : 'Sell';
+}
+
+function combineOverlappingTrades(trades) {
+    const sorted = [...trades].sort((a, b) => toNum(a.entry_time_ms) - toNum(b.entry_time_ms));
+    const groups = [];
+
+    for (const trade of sorted) {
+        const dir = deriveDirection(trade);
+        const sym = trade.symbol;
+        let merged = false;
+        for (let i = groups.length - 1; i >= 0; i--) {
+            const g = groups[i];
+            if (g.symbol !== sym || g.direction !== dir) continue;
+            const gClose = Math.max(...g.children.map(c => toNum(c.exit_time_ms) || toNum(c.entry_time_ms)));
+            if (toNum(trade.entry_time_ms) <= gClose) {
+                g.children.push(trade);
+                merged = true;
+                break;
+            }
+        }
+        if (!merged) {
+            groups.push({ symbol: sym, direction: dir, children: [trade] });
+        }
+    }
+
+    return groups.map((g) => {
+        if (g.children.length === 1) {
+            const t = g.children[0];
+            return { ...t, direction: g.direction, _combined: false };
+        }
+        const totalSize = g.children.reduce((s, t) => s + toNum(t.size), 0);
+        const totalPnl = g.children.reduce((s, t) => s + toNum(t.profit), 0);
+        const avgEntry = totalSize > 0
+            ? g.children.reduce((s, t) => s + toNum(t.entry_price) * toNum(t.size), 0) / totalSize
+            : 0;
+        const avgExit = totalSize > 0
+            ? g.children.reduce((s, t) => s + (t.exit_price !== null ? toNum(t.exit_price) : toNum(t.entry_price)) * toNum(t.size), 0) / totalSize
+            : 0;
+        const firstOpen = Math.min(...g.children.map(c => toNum(c.entry_time_ms)));
+        const lastClose = Math.max(...g.children.map(c => toNum(c.exit_time_ms) || toNum(c.entry_time_ms)));
+        const accounts = [...new Set(g.children.map(c => c.account_id).filter(Boolean))];
+        const result = totalPnl > 0 ? 'win' : totalPnl < 0 ? 'loss' : 'breakeven';
+        return {
+            _combined: true,
+            _children: g.children,
+            _accountCount: accounts.length,
+            account_id: accounts.length === 1 ? accounts[0] : `${accounts.length} accts`,
+            symbol: g.symbol,
+            direction: g.direction,
+            entry_price: avgEntry,
+            exit_price: avgExit,
+            size: totalSize,
+            profit: totalPnl,
+            result,
+            entry_time_ms: firstOpen,
+            exit_time_ms: lastClose,
+            duration_sec: (lastClose - firstOpen) / 1000,
+        };
+    });
+}
+
 function updateTradesTable(trades) {
     const tbody = document.getElementById('tradesTable');
-    const rows = Array.isArray(trades) ? [...trades] : [];
+    let rows = Array.isArray(trades) ? [...trades] : [];
+
+    rows = rows.map((t) => ({ ...t, direction: deriveDirection(t) }));
+
+    if (state.combinePositions && rows.length > 0) {
+        rows = combineOverlappingTrades(rows);
+    }
 
     if (rows.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;">No trades</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;">No trades</td></tr>';
         return;
     }
 
@@ -989,7 +1071,7 @@ function updateTradesTable(trades) {
         const key = state.tradesSort.key;
         let cmp = 0;
 
-        if (key === 'account_id' || key === 'symbol' || key === 'result') {
+        if (key === 'account_id' || key === 'symbol' || key === 'result' || key === 'direction') {
             cmp = String(a[key] || '').localeCompare(String(b[key] || ''));
         } else {
             cmp = toNum(a[key]) - toNum(b[key]);
@@ -998,15 +1080,26 @@ function updateTradesTable(trades) {
         return state.tradesSort.direction === 'asc' ? cmp : -cmp;
     });
 
-    tbody.innerHTML = rows.map((trade) => {
+    const dirBadge = (dir) => {
+        const cls = dir === 'Buy' ? 'dir-buy' : dir === 'Sell' ? 'dir-sell' : '';
+        return `<span class="dir-badge ${cls}">${dir}</span>`;
+    };
+
+    const renderRow = (trade, isChild) => {
         const openTime = formatDateTimeMs(trade.entry_time_ms);
         const closeTime = formatDateTimeMs(trade.exit_time_ms);
         const accountLabel = trade.account_id ? String(trade.account_id) : '-';
         const duration = durationLabel(trade.duration_sec);
+        const toggleCol = trade._combined
+            ? `<td class="combine-toggle" title="Click to expand">▶ ${trade._children.length}</td>`
+            : '<td></td>';
+        const childClass = isChild ? ' class="combine-child"' : '';
         return `
-        <tr>
+        <tr${childClass}>
+            ${isChild ? '<td></td>' : toggleCol}
             <td><span class="account-tag">${accountLabel}</span></td>
             <td>${trade.symbol}</td>
+            <td>${dirBadge(trade.direction || deriveDirection(trade))}</td>
             <td>${formatPrice(trade.entry_price)}</td>
             <td>${trade.exit_price !== null ? formatPrice(trade.exit_price) : '-'}</td>
             <td>${Number(trade.size || 0).toFixed(2)}</td>
@@ -1016,7 +1109,38 @@ function updateTradesTable(trades) {
             <td>${closeTime}</td>
             <td>${duration}</td>
         </tr>
-    `}).join('');
+    `;
+    };
+
+    let html = '';
+    for (const trade of rows) {
+        html += renderRow(trade, false);
+        if (trade._combined && trade._children) {
+            for (const child of trade._children) {
+                html += renderRow({ ...child, direction: deriveDirection(child) }, true);
+            }
+        }
+    }
+    tbody.innerHTML = html;
+
+    tbody.querySelectorAll('.combine-toggle').forEach((td) => {
+        td.addEventListener('click', () => {
+            const parentRow = td.closest('tr');
+            let sibling = parentRow.nextElementSibling;
+            const expanding = sibling && sibling.classList.contains('combine-child') && sibling.style.display === 'none';
+            while (sibling && sibling.classList.contains('combine-child')) {
+                sibling.style.display = expanding ? '' : 'none';
+                sibling = sibling.nextElementSibling;
+            }
+            td.textContent = expanding
+                ? `▼ ${td.textContent.trim().replace(/^[▶▼]\s*/, '')}`
+                : `▶ ${td.textContent.trim().replace(/^[▶▼]\s*/, '')}`;
+        });
+    });
+
+    tbody.querySelectorAll('.combine-child').forEach((row) => {
+        row.style.display = 'none';
+    });
 }
 
 function updateExposureTable(exposureRows) {
@@ -1163,6 +1287,7 @@ function positionDistLabels(trackEl, segments) {
     }
     labelsEl.innerHTML = '';
 
+    const colorMap = { W: 'var(--pnl-positive)', L: 'var(--pnl-negative)', BE: 'var(--pnl-neutral)' };
     let offset = 0;
     const entries = [];
     for (const seg of segments) {
@@ -1171,14 +1296,15 @@ function positionDistLabels(trackEl, segments) {
         label.className = 'dist-label';
         label.style.left = `${offset}%`;
 
-        const line = document.createElement('div');
-        line.className = 'dist-label-line';
+        const dot = document.createElement('span');
+        dot.className = 'dist-label-dot';
+        dot.style.background = colorMap[seg.letter] || 'var(--text-muted)';
 
         const text = document.createElement('span');
         text.className = 'dist-label-text';
         text.textContent = `${seg.count} ${seg.letter} (${seg.pct.toFixed(1)}%)`;
 
-        label.appendChild(line);
+        label.appendChild(dot);
         label.appendChild(text);
         labelsEl.appendChild(label);
         entries.push({ el: label, textEl: text, startPct: offset, widthPct: seg.pct });
@@ -1641,7 +1767,7 @@ function updateCharts(data) {
     const histogramTitle = document.getElementById('pnlHistogramTitle');
     const histogramStats = data.pnl_histogram?.stats || {};
     if (histogramTitle) {
-        histogramTitle.textContent = `PnL Distribution (μ ${formatSignedRounded(histogramStats.mean)}, σ ${toNum(histogramStats.std_dev).toFixed(1)}, ${sortedPnls.length} trades)`;
+        histogramTitle.textContent = `PnL Distribution (${sortedPnls.length} trades)`;
     }
 
     const histogramChartData = {
@@ -1668,7 +1794,7 @@ function updateCharts(data) {
             legend: { display: false },
             tooltip: {
                 callbacks: {
-                    title: (items) => items.length ? `Trade #${items[0].parsed.x}` : '',
+                    title: () => '',
                     label: (ctx) => `PnL: $${toNum(ctx.parsed.y).toFixed(2)}`,
                 },
             },
@@ -1676,9 +1802,7 @@ function updateCharts(data) {
         scales: {
             x: {
                 type: 'linear',
-                title: { display: true, text: 'Trade #', color: text, font: chartFont },
-                ticks: { color: text, font: chartFont },
-                grid: { display: false },
+                display: false,
             },
             y: {
                 ticks: {
