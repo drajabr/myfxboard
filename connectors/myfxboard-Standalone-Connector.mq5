@@ -13,6 +13,7 @@
 input group "myfxboard Dashboard Connection"
 input string InpDashboardUrl         = "http://localhost:3000"; // Server URL
 input string InpDashboardPSK         = "";                      // Shared Secret (PSK)
+input string InpAccountNickname      = "";                      // Account Nickname (optional)
 input int    InpSyncIntervalSec      = 3;                       // Sync Interval (seconds)
 input int    InpKeepaliveSec         = 0;                       // Legacy unused field
 input datetime InpHistoryStartDate   = 0;                       // History Start Date (0=all history)
@@ -347,10 +348,13 @@ private:
       double margin_used  = AccountInfoDouble(ACCOUNT_MARGIN);
       double margin_free  = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
       double margin_level = (margin_used > 0) ? (equity * 100.0 / margin_used) : 0;
+      string broker_name  = AccountInfoString(ACCOUNT_COMPANY);
+      string nickname     = InpAccountNickname;
+      string display_name = (StringTrimLeft(StringTrimRight(nickname)) != "") ? nickname : broker_name;
 
       string account_json = StringFormat(
-         "{\"equity\":%.2f,\"balance\":%.2f,\"margin_used\":%.2f,\"margin_free\":%.2f,\"margin_level\":%.2f}",
-         equity, balance, margin_used, margin_free, margin_level
+         "{\"equity\":%.2f,\"balance\":%.2f,\"margin_used\":%.2f,\"margin_free\":%.2f,\"margin_level\":%.2f,\"nickname\":\"%s\"}",
+         equity, balance, margin_used, margin_free, margin_level, display_name
       );
 
       return account_json;

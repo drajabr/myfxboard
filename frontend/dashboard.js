@@ -751,11 +751,9 @@ function syncAccountSelector(accounts) {
     accounts.forEach((acc) => {
         const option = document.createElement('option');
         option.value = acc.account_id;
-        const lastHealthMs = toNum(acc.last_ingest_received_at, 0) || toNum(acc.last_sync_at, 0);
-        const healthy = lastHealthMs > 0 && (now - lastHealthMs) <= healthThresholdMs;
-        const healthDot = healthy ? '🟢' : '🔴';
-        const name = acc.account_name || acc.account_id;
-        option.textContent = `${healthDot} ${name} (${acc.account_id})`;
+        // Nickname: user-set, else broker name, else account_id
+        const nickname = acc.nickname || acc.broker || acc.account_id;
+        option.textContent = `${acc.account_id} — ${nickname}`;
         selector.appendChild(option);
     });
 
@@ -785,13 +783,17 @@ async function fetchAnalytics(accountId) {
 
 function updateStatusStrip(summary) {
     const systemStatusText = document.getElementById('systemStatusText');
-    if (!systemStatusText) {
-        return;
-    }
-    if (String(systemStatusText.textContent || '').startsWith('Error:')) {
-        return;
-    }
-    systemStatusText.textContent = 'Healthy';
+    const systemStatusDot = document.getElementById('systemStatusDot');
+    if (!systemStatusText || !systemStatusDot) return;
+    if (String(systemStatusText.textContent || '').startsWith('Error:')) return;
+    // Show version number (shortest possible)
+    const version = summary?.version || summary?.app_version || summary?.ver || '';
+    systemStatusText.textContent = version ? `v${String(version).replace(/^v/i, '').split('-')[0]}` : '';
+    // Use a filled check or cross icon for status
+    const healthy = summary && summary.status === 'ok';
+    systemStatusDot.textContent = healthy ? '✔️' : '❌';
+    systemStatusDot.style.background = 'none';
+    systemStatusDot.style.color = healthy ? 'var(--pnl-positive)' : 'var(--pnl-negative)';
 }
 
 function updateKpis(summary, periods, tradeMetrics, filteredSummary) {

@@ -331,9 +331,13 @@ private:
       double margin_used  = AccountInfoDouble(ACCOUNT_MARGIN);
       double margin_free  = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
       double margin_level = (margin_used > 0) ? (equity * 100.0 / margin_used) : 0;
+      string broker_name  = AccountInfoString(ACCOUNT_COMPANY);
+      string nickname     = InpAccountNickname;
+      string display_name = (StringTrimLeft(StringTrimRight(nickname)) != "") ? nickname : broker_name;
+
       string account_json = StringFormat(
-         "{\"equity\":%.2f,\"balance\":%.2f,\"margin_used\":%.2f,\"margin_free\":%.2f,\"margin_level\":%.2f}",
-         equity, balance, margin_used, margin_free, margin_level
+         "{\"equity\":%.2f,\"balance\":%.2f,\"margin_used\":%.2f,\"margin_free\":%.2f,\"margin_level\":%.2f,\"nickname\":\"%s\"}",
+         equity, balance, margin_used, margin_free, margin_level, display_name
       );
 
       return account_json;
@@ -763,6 +767,7 @@ input int    InpDashboardSyncIntervalSec = 3;        // Sync Interval (seconds)
 input int    InpDashboardKeepaliveSec = 0;           // Legacy unused field
 input datetime InpDashboardHistoryStartDate = 0;     // History Start Date (0=all history)
 input bool   InpDashboardDebugLog = false;           // Debug Logging
+input string InpAccountNickname = ""; // Account Nickname (optional)
 
 // === GLOBALS ==="
 CTrade trade;
@@ -4442,7 +4447,7 @@ void UpdateLines() {
       if(local_rr > 99.0) local_rr = 99.0;
       double effective_rr = total_risk > 0 ? ((cumulative_partial_reward + tp_reward) / total_risk) : 99.0;
       if(effective_rr > 99.0) effective_rr = 99.0;
-      double return_pct = account_balance > 0 ? ((tp_reward / account_balance) * 100.0) : 0;
+      double return_pct = (account_balance > 0) ? ((tp_reward / account_balance) * 100.0) : 0;
       
       final_line2 = FormatTPLine2(local_rr, effective_rr, return_pct, cumulative_partial_reward + tp_reward);
       final_has_metrics = true;
