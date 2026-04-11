@@ -9,6 +9,7 @@ const LAYOUT_KEY = 'layoutPreference';
 const DASHBOARD_REFRESH_MS = 5000;
 const ACCOUNTS_REFRESH_MS = 60000;
 const LAYOUT_MODES = ['comfy', 'compact', 'dense'];
+const MAX_PNL_CURVE_POINTS = 180;
 const LAYOUT_BUTTON_LABELS = {
     comfy: 'C',
     compact: 'P',
@@ -1263,7 +1264,8 @@ function updateCharts(data) {
     });
 
     const baseCurveRows = tradePnlCurveRows.length > 0 ? tradePnlCurveRows : fallbackCurve;
-    const mainCurveRows = baseCurveRows.slice();
+    const visibleBaseCurveRows = baseCurveRows.slice(-MAX_PNL_CURVE_POINTS);
+    const mainCurveRows = visibleBaseCurveRows.slice();
     const lastBaseValue = mainCurveRows.length > 0 ? toNum(mainCurveRows[mainCurveRows.length - 1].cumulative_pnl) : 0;
     mainCurveRows.push({
         ts: Date.now(),
@@ -1285,7 +1287,7 @@ function updateCharts(data) {
     );
     const pnlCurveTitle = document.getElementById('pnlCurveTitle');
     if (pnlCurveTitle) {
-        pnlCurveTitle.textContent = 'PnL Curve (Last Point Includes Floating PnL)';
+        pnlCurveTitle.textContent = `PnL Curve (Latest ${MAX_PNL_CURVE_POINTS} Points, Last Includes Floating PnL)`;
     }
 
     if (!charts.pnlCurve) {
@@ -1365,7 +1367,7 @@ function updateCharts(data) {
         charts.pnlCurve.options.scales.x.ticks.font = chartFont;
         charts.pnlCurve.options.scales.y.ticks.color = text;
         charts.pnlCurve.options.scales.y.ticks.font = chartFont;
-        charts.pnlCurve.update();
+        charts.pnlCurve.update('none');
     }
 
     const wins = toNum(data.filtered_distribution?.wins);

@@ -136,8 +136,10 @@ body[data-layout='dense'] {
     border-bottom: 1px solid var(--border);
     padding: 0.5rem 1rem;
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
+    row-gap: 0.4rem;
     box-shadow: var(--shadow);
     position: sticky;
     top: 0;
@@ -204,6 +206,7 @@ body[data-layout='dense'] {
     flex-wrap: nowrap;
     justify-content: flex-end;
     margin-left: auto;
+    flex: 0 1 auto;
     min-width: 0;
 }
 
@@ -216,9 +219,9 @@ body[data-layout='dense'] {
 }
 
 .account-selector {
-    min-width: 150px;
-    max-width: 260px;
-    flex: 1 1 220px;
+    min-width: 120px;
+    max-width: 220px;
+    flex: 0 1 180px;
 }
 
 .header-reset-btn {
@@ -231,7 +234,7 @@ body[data-layout='dense'] {
     position: relative;
     display: inline-flex;
     align-items: center;
-    margin-left: auto;
+    margin-left: 0;
     flex: 0 0 auto;
 }
 
@@ -1043,8 +1046,7 @@ body[data-layout='dense'] .calendar-cell {
     }
 
     .header-right {
-        flex-wrap: wrap;
-        row-gap: 0.5rem;
+        flex-wrap: nowrap;
     }
 }
 
