@@ -486,14 +486,6 @@ function cycleLayoutMode() {
     setLayout(LAYOUT_MODES[nextIndex]);
 }
 
-function onLayoutCycleClick(event) {
-    if (event) {
-        event.preventDefault();
-        event.stopPropagation();
-    }
-    cycleLayoutMode();
-}
-
 function toggleTheme() {
     const current = document.body.getAttribute('data-theme') || 'light';
     const next = current === 'dark' ? 'light' : 'dark';
@@ -573,16 +565,17 @@ function setupEventListeners() {
 
     const layoutCycleBtn = document.getElementById('layoutCycleBtn');
     if (layoutCycleBtn) {
-        layoutCycleBtn.addEventListener('click', onLayoutCycleClick);
+        layoutCycleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            cycleLayoutMode();
+        });
     }
 
     const layoutModeLabel = document.getElementById('layoutModeLabel');
     if (layoutModeLabel) {
-        layoutModeLabel.addEventListener('click', onLayoutCycleClick);
-        layoutModeLabel.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-                onLayoutCycleClick(event);
-            }
+        layoutModeLabel.addEventListener('click', (e) => {
+            e.stopPropagation();
+            cycleLayoutMode();
         });
     }
 
@@ -594,11 +587,6 @@ function setupEventListeners() {
     }
 
     document.addEventListener('click', (event) => {
-        const cycleTarget = event.target.closest('#layoutCycleBtn, #layoutModeLabel');
-        if (cycleTarget) {
-            onLayoutCycleClick(event);
-            return;
-        }
         const wrap = document.querySelector('.ui-controls-wrap');
         const controls = document.getElementById('uiQuickControls');
         if (!wrap || !controls || wrap.contains(event.target)) {
