@@ -31,15 +31,7 @@
                 <select id="accountSelector" class="account-selector">
                     <option value="">All Accounts</option>
                 </select>
-                <div class="layout-switch" role="group" aria-label="Dashboard layout">
-                    <button class="layout-btn is-active" type="button" data-layout-mode="comfy" title="Comfy layout">Comfy</button>
-                    <button class="layout-btn" type="button" data-layout-mode="compact" title="Compact layout">Compact</button>
-                    <button class="layout-btn" type="button" data-layout-mode="dense" title="Dense layout">Dense</button>
-                </div>
-                <button id="refreshNowBtn" class="icon-btn" type="button" title="Refresh now">Refresh</button>
-                <button id="installAppBtn" class="icon-btn is-hidden" type="button" title="Install app">Install App</button>
-                <div id="lastUpdatedLabel" class="status-pill status-pill--sync" aria-live="polite">Updated: -</div>
-                <button id="resetTradesFilterBtn" class="icon-btn" type="button">Reset Filter</button>
+                <button id="resetTradesFilterBtn" class="icon-btn icon-btn--square header-reset-btn" type="button" title="Reset filter" aria-label="Reset filter">↺</button>
                 <div class="ui-controls-wrap" aria-label="Quick style controls group">
                     <button id="uiControlsToggleBtn" class="icon-btn icon-btn--square" type="button" aria-label="Toggle quick controls" title="Toggle quick controls">⚙</button>
                     <div id="uiQuickControls" class="ui-quick-controls is-collapsed" aria-label="Quick style controls">
@@ -62,6 +54,10 @@
                         <div class="quick-control-item">
                             <button id="fontSizeCycleBtn" class="icon-btn icon-btn--square" type="button" aria-label="Switch font size" title="Switch font size">3</button>
                             <span class="quick-control-label">Size</span>
+                        </div>
+                        <div class="quick-control-item">
+                            <button id="layoutCycleBtn" class="icon-btn icon-btn--square" type="button" aria-label="Switch layout" title="Switch layout mode">C</button>
+                            <span class="quick-control-label">Layout</span>
                         </div>
                     </div>
                 </div>
@@ -257,6 +253,17 @@
                 <div class="chart-container">
                     <h3>PnL by Hour of Day</h3>
                     <canvas id="pnlByHourOfDayChart"></canvas>
+                </div>
+            </section>
+
+            <section class="charts-row">
+                <div class="chart-container">
+                    <h3 id="durationWinRateTitle">Win Rate by Trade Duration</h3>
+                    <canvas id="durationWinRateChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3 id="pnlHistogramTitle">PnL Distribution (Histogram)</h3>
+                    <canvas id="pnlHistogramChart"></canvas>
                 </div>
             </section>
 

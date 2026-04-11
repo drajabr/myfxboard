@@ -5,6 +5,15 @@ import { DashboardSummary } from '../types/index.js';
 const router = Router();
 const DEFAULT_BREAKEVEN_TOLERANCE_FLOOR = 1.0;
 const DEFAULT_BREAKEVEN_TOLERANCE_MAX = 5.0;
+const HISTOGRAM_BIN_COUNT = 16;
+const DURATION_BUCKETS = [
+  { key: 'lt5m', label: '<5m', minSec: 0, maxSec: 5 * 60 },
+  { key: 'm5to15', label: '5m-15m', minSec: 5 * 60, maxSec: 15 * 60 },
+  { key: 'm15to60', label: '15m-1h', minSec: 15 * 60, maxSec: 60 * 60 },
+  { key: 'h1to4', label: '1h-4h', minSec: 60 * 60, maxSec: 4 * 60 * 60 },
+  { key: 'h4to24', label: '4h-24h', minSec: 4 * 60 * 60, maxSec: 24 * 60 * 60 },
+  { key: 'gte24h', label: '24h+', minSec: 24 * 60 * 60, maxSec: Number.POSITIVE_INFINITY },
+];
 
 const resolveBreakevenToleranceFloor = () => {
   const configured = Number(process.env.BREAKEVEN_TOLERANCE_FLOOR);
@@ -60,6 +69,126 @@ const normalizeSnapshot = (s: any) => ({
   wins: toNum(s.wins),
   losses: toNum(s.losses),
 });
+
+const getDurationBucket = (durationSec: number) => (
+  DURATION_BUCKETS.find((bucket) => durationSec >= bucket.minSec && durationSec < bucket.maxSec) || DURATION_BUCKETS[DURATION_BUCKETS.length - 1]
+);
+
+const buildWinRateByTradeDuration = (trades: any[], breakevenTolerance: number) => {
+  const rows = DURATION_BUCKETS.map((bucket) => ({
+    key: bucket.key,
+    label: bucket.label,
+    trades: 0,
+    wins: 0,
+    losses: 0,
+    neutral: 0,
+    pnl_sum: 0,
+  }));
+  const rowMap = new Map(rows.map((row) => [row.key, row]));
+
+  trades.forEach((trade) => {
+    const durationSec = Math.max(0, toNum(trade.duration_sec));
+    const profit = toNum(trade.profit);
+    const bucket = getDurationBucket(durationSec);
+    const row = rowMap.get(bucket.key);
+    if (!row) {
+      return;
+    }
+
+    row.trades += 1;
+    row.pnl_sum += profit;
+    if (profit > breakevenTolerance) {
+      row.wins += 1;
+      return;
+    }
+    if (profit < -breakevenTolerance) {
+      row.losses += 1;
+      return;
+    }
+    row.neutral += 1;
+  });
+
+  return rows.map((row) => ({
+    label: row.label,
+    trades: row.trades,
+    wins: row.wins,
+    losses: row.losses,
+    neutral: row.neutral,
+    win_rate_pct: row.trades > 0 ? (row.wins / row.trades) * 100 : 0,
+    avg_pnl: row.trades > 0 ? row.pnl_sum / row.trades : 0,
+  }));
+};
+
+const buildPnlHistogram = (trades: any[], binCount: number = HISTOGRAM_BIN_COUNT) => {
+  const profits = trades.map((trade) => toNum(trade.profit)).filter((v) => Number.isFinite(v));
+  if (profits.length === 0) {
+    return {
+      bins: [],
+      normal_curve: [],
+      stats: {
+        min: 0,
+        max: 0,
+        mean: 0,
+        std_dev: 0,
+        total_trades: 0,
+        bin_size: 0,
+        bin_count: binCount,
+      },
+    };
+  }
+
+  let min = Math.min(...profits);
+  let max = Math.max(...profits);
+  if (min === max) {
+    min -= 0.5;
+    max += 0.5;
+  }
+
+  const totalTrades = profits.length;
+  const binSize = (max - min) / binCount;
+  const bins = Array.from({ length: binCount }, (_, idx) => ({
+    from: min + (idx * binSize),
+    to: min + ((idx + 1) * binSize),
+    count: 0,
+  }));
+
+  profits.forEach((profit) => {
+    const rawIndex = Math.floor((profit - min) / binSize);
+    const index = Math.max(0, Math.min(binCount - 1, rawIndex));
+    bins[index].count += 1;
+  });
+
+  const mean = profits.reduce((sum, value) => sum + value, 0) / totalTrades;
+  const variance = profits.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / totalTrades;
+  const stdDev = Math.sqrt(Math.max(variance, 0));
+  const sqrtTwoPi = Math.sqrt(2 * Math.PI);
+  const normalCurve = bins.map((bin) => {
+    const center = (bin.from + bin.to) / 2;
+    if (stdDev <= 1e-9) {
+      return { center, expected_count: 0 };
+    }
+    const z = (center - mean) / stdDev;
+    const pdf = Math.exp(-0.5 * (z ** 2)) / (stdDev * sqrtTwoPi);
+    return {
+      center,
+      expected_count: pdf * binSize * totalTrades,
+    };
+  });
+
+  return {
+    bins,
+    normal_curve: normalCurve,
+    stats: {
+      min,
+      max,
+      mean,
+      std_dev: stdDev,
+      total_trades: totalTrades,
+      bin_size: binSize,
+      bin_count: binCount,
+    },
+  };
+};
 
 const getRangeStart = (label: 'today' | 'last7d' | 'last30d' | 'ytd' | 'all_time', nowMs: number) => {
   const now = new Date(nowMs);
@@ -180,6 +309,20 @@ const buildEmptyAnalyticsResponse = (
     alltime_daily_pnl: [],
     pnl_by_day_of_week: [],
     pnl_by_hour_of_day: [],
+    win_rate_by_trade_duration: [],
+    pnl_histogram: {
+      bins: [],
+      normal_curve: [],
+      stats: {
+        min: 0,
+        max: 0,
+        mean: 0,
+        std_dev: 0,
+        total_trades: 0,
+        bin_size: 0,
+        bin_count: HISTOGRAM_BIN_COUNT,
+      },
+    },
     trade_pnl_curve: [],
     equity_curve: buildFlatZeroCurve(curveDays, nowMs),
     balance_curve: buildFlatZeroBalanceCurve(curveDays, nowMs),
@@ -231,6 +374,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
 
     let positions: any[] = [];
     let recentTradesPool: any[] = [];
+    const allFilteredTrades: any[] = [];
     let equity = 0;
     let balance = 0;
     const tradeCurveEvents: Array<{ ts: number; pnl: number }> = [];
@@ -351,11 +495,12 @@ router.get('/analytics', async (req: Request, res: Response) => {
 
       const accPositions = accPositionsRaw.map(normalizePosition);
       const accRecentTrades = recentTradesRaw.map(normalizeTrade);
-  const curveTrades = curveTradesRaw.map(normalizeTrade);
+        const curveTrades = curveTradesRaw.map(normalizeTrade);
       const latestSnapshot = latestSnapshotRaw ? normalizeSnapshot(latestSnapshotRaw) : null;
 
       positions = positions.concat(accPositions);
       recentTradesPool = recentTradesPool.concat(accRecentTrades);
+      allFilteredTrades.push(...curveTrades);
       equity += latestSnapshot?.equity || latestSnapshot?.balance || 0;
       balance += latestSnapshot?.balance || 0;
       filteredTradesTotal += filteredCount;
@@ -557,6 +702,10 @@ router.get('/analytics', async (req: Request, res: Response) => {
         return acc;
       }, []);
 
+    const aggregatedBreakevenTolerance = resolveBreakevenToleranceFloor();
+    const winRateByTradeDuration = buildWinRateByTradeDuration(allFilteredTrades, aggregatedBreakevenTolerance);
+    const pnlHistogram = buildPnlHistogram(allFilteredTrades, HISTOGRAM_BIN_COUNT);
+
     res.json({
       scope: accountIdParam === 'all' ? 'all' : 'single',
       account_id: accountIdParam,
@@ -591,6 +740,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
       alltime_daily_pnl: allTimeDailyPnl,
       pnl_by_day_of_week: pnlByDayOfWeek,
       pnl_by_hour_of_day: pnlByHourOfDay,
+      win_rate_by_trade_duration: winRateByTradeDuration,
+      pnl_histogram: pnlHistogram,
       trade_pnl_curve: tradePnlCurve,
       symbol_exposure: symbolExposure,
       calendars: {

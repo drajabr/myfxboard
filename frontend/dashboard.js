@@ -9,6 +9,11 @@ const LAYOUT_KEY = 'layoutPreference';
 const DASHBOARD_REFRESH_MS = 5000;
 const ACCOUNTS_REFRESH_MS = 60000;
 const LAYOUT_MODES = ['comfy', 'compact', 'dense'];
+const LAYOUT_BUTTON_LABELS = {
+    comfy: 'C',
+    compact: 'P',
+    dense: 'D',
+};
 
 const ACCENT_PRESETS = [
     {
@@ -124,6 +129,8 @@ const charts = {
     dailyPnl: null,
     pnlByDayOfWeek: null,
     pnlByHourOfDay: null,
+    durationWinRate: null,
+    pnlHistogram: null,
 };
 
 const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
@@ -197,6 +204,12 @@ function maxTicksForCount(count) {
 
 function formatPct(value) {
     return `${Number(value || 0).toFixed(1)}%`;
+}
+
+function formatSignedRounded(value) {
+    const n = toNum(value, 0);
+    const rounded = Math.round(n);
+    return `${rounded > 0 ? '+' : ''}${rounded}`;
 }
 
 function formatDeltaPct(value) {
@@ -431,11 +444,12 @@ function applyTheme(theme) {
 function applyLayout(layoutMode) {
     const mode = LAYOUT_MODES.includes(layoutMode) ? layoutMode : 'comfy';
     document.body.setAttribute('data-layout', mode);
-    document.querySelectorAll('.layout-btn[data-layout-mode]').forEach((btn) => {
-        const isActive = btn.getAttribute('data-layout-mode') === mode;
-        btn.classList.toggle('is-active', isActive);
-        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-    });
+    const layoutBtn = document.getElementById('layoutCycleBtn');
+    if (layoutBtn) {
+        layoutBtn.textContent = LAYOUT_BUTTON_LABELS[mode] || 'C';
+        layoutBtn.title = `Layout: ${mode}`;
+        layoutBtn.setAttribute('aria-label', `Switch layout (current: ${mode})`);
+    }
 }
 
 function setLayout(layoutMode) {
@@ -450,6 +464,13 @@ function setLayout(layoutMode) {
     if (state.lastData) {
         renderDashboard(state.lastData);
     }
+}
+
+function cycleLayoutMode() {
+    const current = getPreferredLayout();
+    const currentIndex = LAYOUT_MODES.indexOf(current);
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % LAYOUT_MODES.length : 0;
+    setLayout(LAYOUT_MODES[nextIndex]);
 }
 
 function toggleTheme() {
@@ -529,15 +550,10 @@ function setupEventListeners() {
     document.getElementById('fontSizeCycleBtn').addEventListener('click', cycleFontSizePreset);
     document.getElementById('uiControlsToggleBtn').addEventListener('click', toggleQuickControls);
 
-    document.querySelectorAll('.layout-btn[data-layout-mode]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            const layoutMode = btn.getAttribute('data-layout-mode');
-            if (!layoutMode) {
-                return;
-            }
-            setLayout(layoutMode);
-        });
-    });
+    const layoutCycleBtn = document.getElementById('layoutCycleBtn');
+    if (layoutCycleBtn) {
+        layoutCycleBtn.addEventListener('click', cycleLayoutMode);
+    }
 
     const refreshNowBtn = document.getElementById('refreshNowBtn');
     if (refreshNowBtn) {
@@ -777,6 +793,7 @@ function updateKpis(summary, periods, tradeMetrics, filteredSummary) {
 
 function renderPeriodStats(periods) {
     const grid = document.getElementById('periodStatsGrid');
+    const isDense = getPreferredLayout() === 'dense';
     const labels = [
         ['today', 'Today'],
         ['last7d', 'Last 7 Days'],
@@ -784,6 +801,38 @@ function renderPeriodStats(periods) {
         ['ytd', 'YTD'],
         ['all_time', 'All Time'],
     ];
+
+    if (isDense) {
+        grid.classList.add('metric-grid--dense-table');
+        grid.innerHTML = `
+            <table class="data-table metric-table-dense">
+                <thead>
+                    <tr>
+                        <th>Window</th>
+                        <th>PnL</th>
+                        <th>Trades</th>
+                        <th>Win Rate</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${labels.map(([key, title]) => {
+                        const p = periods[key];
+                        return `
+                            <tr>
+                                <td>${title}</td>
+                                <td class="${pnlClass(p.pnl)}">${formatMoney(p.pnl)}</td>
+                                <td>${toNum(p.trades_count)}</td>
+                                <td>${formatPct(p.win_rate_pct)}</td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        `;
+        return;
+    }
+
+    grid.classList.remove('metric-grid--dense-table');
 
     grid.innerHTML = labels.map(([key, title]) => {
         const p = periods[key];
@@ -799,6 +848,7 @@ function renderPeriodStats(periods) {
 
 function renderTradeMetrics(metrics) {
     const grid = document.getElementById('tradeMetricsGrid');
+    const isDense = getPreferredLayout() === 'dense';
     const cards = [
         ['Win Rate', formatPct(metrics.win_rate_pct), metrics.win_rate_pct],
         ['Profit Factor', Number(toNum(metrics.profit_factor)).toFixed(2), 0],
@@ -809,6 +859,31 @@ function renderTradeMetrics(metrics) {
         ['Max Loss', formatMoney(metrics.max_loss), metrics.max_loss],
         ['Avg Hold Time', durationLabel(metrics.avg_hold_seconds), 0],
     ];
+
+    if (isDense) {
+        grid.classList.add('metric-grid--dense-table');
+        grid.innerHTML = `
+            <table class="data-table metric-table-dense">
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${cards.map(([label, value, pnl]) => `
+                        <tr>
+                            <td>${label}</td>
+                            <td class="${label.includes('Hold') || label.includes('Rate') ? '' : pnlClass(pnl)}">${value}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+        return;
+    }
+
+    grid.classList.remove('metric-grid--dense-table');
 
     grid.innerHTML = cards.map(([label, value, pnl]) => `
         <div class="metric-card">
@@ -1343,6 +1418,175 @@ function updateCharts(data) {
         charts.pnlByHourOfDay.options.scales.y.ticks.color = text;
         charts.pnlByHourOfDay.options.scales.y.ticks.font = chartFont;
         charts.pnlByHourOfDay.update();
+    }
+
+    const durationRows = Array.isArray(data.win_rate_by_trade_duration) ? data.win_rate_by_trade_duration : [];
+    const durationLabels = durationRows.map((row) => String(row.label || ''));
+    const durationWinRates = durationRows.map((row) => toNum(row.win_rate_pct));
+    const durationTrades = durationRows.map((row) => toNum(row.trades));
+    const durationTitle = document.getElementById('durationWinRateTitle');
+    if (durationTitle) {
+        durationTitle.textContent = state.activeTradeFilter
+            ? `Win Rate by Trade Duration (${state.activeTradeFilter.label})`
+            : 'Win Rate by Trade Duration (All Trades)';
+    }
+
+    const durationChartData = {
+        labels: durationLabels,
+        datasets: [
+            {
+                type: 'bar',
+                label: 'Win Rate %',
+                data: durationWinRates,
+                yAxisID: 'y',
+                borderRadius: 8,
+                borderSkipped: false,
+                backgroundColor: durationWinRates.map((v) => `rgba(${accentRgb}, ${Math.min(0.92, 0.3 + (v / 130))})`),
+                borderColor: accent,
+                borderWidth: 1,
+            },
+            {
+                type: 'line',
+                label: 'Trades',
+                data: durationTrades,
+                yAxisID: 'yTrades',
+                borderColor: text,
+                backgroundColor: text,
+                pointRadius: 2.4,
+                tension: 0.25,
+            },
+        ],
+    };
+
+    const durationOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        layout: {
+            padding: { left: 10, right: 18, top: 8, bottom: 18 },
+        },
+        plugins: {
+            legend: { labels: { color: text, font: chartFont } },
+        },
+        scales: {
+            x: {
+                ticks: { color: text, font: chartFont },
+                grid: { display: false },
+            },
+            y: {
+                position: 'left',
+                min: 0,
+                max: 100,
+                ticks: {
+                    color: text,
+                    font: chartFont,
+                    callback: (v) => `${v}%`,
+                },
+                grid: {
+                    color: 'rgba(125, 138, 159, 0.2)',
+                    drawBorder: false,
+                },
+            },
+            yTrades: {
+                position: 'right',
+                beginAtZero: true,
+                ticks: { color: text, font: chartFont },
+                grid: { drawOnChartArea: false },
+            },
+        },
+    };
+
+    if (!charts.durationWinRate) {
+        charts.durationWinRate = new Chart(document.getElementById('durationWinRateChart'), {
+            type: 'bar',
+            data: durationChartData,
+            options: durationOptions,
+        });
+    } else {
+        charts.durationWinRate.data = durationChartData;
+        charts.durationWinRate.options = durationOptions;
+        charts.durationWinRate.update();
+    }
+
+    const histogramBins = Array.isArray(data.pnl_histogram?.bins) ? data.pnl_histogram.bins : [];
+    const histogramCurve = Array.isArray(data.pnl_histogram?.normal_curve) ? data.pnl_histogram.normal_curve : [];
+    const histogramLabels = histogramBins.map((bin) => `${formatSignedRounded(bin.from)}..${formatSignedRounded(bin.to)}`);
+    const histogramCounts = histogramBins.map((bin) => toNum(bin.count));
+    const curveCounts = histogramCurve.map((point) => toNum(point.expected_count));
+    const histogramTitle = document.getElementById('pnlHistogramTitle');
+    const histogramStats = data.pnl_histogram?.stats || {};
+    if (histogramTitle) {
+        histogramTitle.textContent = `PnL Distribution (μ ${formatSignedRounded(histogramStats.mean)}, σ ${toNum(histogramStats.std_dev).toFixed(1)})`;
+    }
+
+    const histogramChartData = {
+        labels: histogramLabels,
+        datasets: [
+            {
+                type: 'bar',
+                label: 'Trades',
+                data: histogramCounts,
+                borderRadius: 6,
+                borderSkipped: false,
+                backgroundColor: histogramBins.map((bin) => {
+                    const center = (toNum(bin.from) + toNum(bin.to)) / 2;
+                    return center >= 0 ? `rgba(${accentRgb}, 0.68)` : 'rgba(224, 72, 72, 0.6)';
+                }),
+            },
+            {
+                type: 'line',
+                label: 'Normal Curve',
+                data: curveCounts,
+                borderColor: text,
+                backgroundColor: text,
+                pointRadius: 0,
+                borderWidth: 2,
+                tension: 0.35,
+            },
+        ],
+    };
+
+    const histogramOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        layout: {
+            padding: { left: 10, right: 18, top: 8, bottom: 18 },
+        },
+        plugins: {
+            legend: { labels: { color: text, font: chartFont } },
+        },
+        scales: {
+            x: {
+                ticks: {
+                    color: text,
+                    font: chartFont,
+                    autoSkip: true,
+                    maxTicksLimit: maxTicksForCount(histogramLabels.length),
+                    maxRotation: 0,
+                    minRotation: 0,
+                },
+                grid: { display: false },
+            },
+            y: {
+                beginAtZero: true,
+                ticks: { color: text, font: chartFont },
+                grid: {
+                    color: 'rgba(125, 138, 159, 0.2)',
+                    drawBorder: false,
+                },
+            },
+        },
+    };
+
+    if (!charts.pnlHistogram) {
+        charts.pnlHistogram = new Chart(document.getElementById('pnlHistogramChart'), {
+            type: 'bar',
+            data: histogramChartData,
+            options: histogramOptions,
+        });
+    } else {
+        charts.pnlHistogram.data = histogramChartData;
+        charts.pnlHistogram.options = histogramOptions;
+        charts.pnlHistogram.update();
     }
 }
 
