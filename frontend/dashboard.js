@@ -1154,6 +1154,54 @@ function buildBarChartOptions(text, labelCount = 0) {
     };
 }
 
+function positionDistLabels(trackEl, segments) {
+    let labelsEl = trackEl.nextElementSibling;
+    if (!labelsEl || !labelsEl.classList.contains('distribution-labels')) {
+        labelsEl = document.createElement('div');
+        labelsEl.className = 'distribution-labels';
+        trackEl.after(labelsEl);
+    }
+    labelsEl.innerHTML = '';
+
+    let offset = 0;
+    const entries = [];
+    for (const seg of segments) {
+        if (!seg.visible) { offset += seg.pct; continue; }
+        const label = document.createElement('div');
+        label.className = 'dist-label';
+        label.style.left = `${offset}%`;
+
+        const line = document.createElement('div');
+        line.className = 'dist-label-line';
+
+        const text = document.createElement('span');
+        text.className = 'dist-label-text';
+        text.textContent = `${seg.count} ${seg.letter} (${seg.pct.toFixed(1)}%)`;
+
+        label.appendChild(line);
+        label.appendChild(text);
+        labelsEl.appendChild(label);
+        entries.push({ el: label, textEl: text, startPct: offset, widthPct: seg.pct });
+        offset += seg.pct;
+    }
+
+    requestAnimationFrame(() => {
+        const containerRect = labelsEl.getBoundingClientRect();
+        for (let i = 0; i < entries.length; i++) {
+            const curr = entries[i];
+            const textRect = curr.textEl.getBoundingClientRect();
+            const nextLeft = i < entries.length - 1
+                ? entries[i + 1].el.getBoundingClientRect().left
+                : containerRect.right;
+            const overflows = textRect.right > nextLeft - 4 || textRect.right > containerRect.right - 2;
+            if (overflows) {
+                curr.el.style.left = `${curr.startPct + curr.widthPct}%`;
+                curr.el.classList.add('dist-label--end');
+            }
+        }
+    });
+}
+
 function updateDistributionProgress(wins, losses, neutralCount, directionalOutcomes) {
     const winsSegment = document.getElementById('distWinsSegment');
     const lossesSegment = document.getElementById('distLossesSegment');
@@ -1252,6 +1300,22 @@ function updateDistributionProgress(wins, losses, neutralCount, directionalOutco
     shortWinsText.parentElement.style.display = shortWins > 0 ? '' : 'none';
     shortLossesText.parentElement.style.display = shortLosses > 0 ? '' : 'none';
     shortNeutralText.parentElement.style.display = shortNeutral > 0 ? '' : 'none';
+
+    positionDistLabels(winsSegment.parentElement, [
+        { pct: winsPct, count: wins, letter: 'W', visible: wins > 0 },
+        { pct: lossesPct, count: losses, letter: 'L', visible: losses > 0 },
+        { pct: neutralPct, count: neutralCount, letter: 'BE', visible: neutralCount > 0 },
+    ]);
+    positionDistLabels(longWinsSegment.parentElement, [
+        { pct: longWinsPct, count: longWins, letter: 'W', visible: longWins > 0 },
+        { pct: longLossesPct, count: longLosses, letter: 'L', visible: longLosses > 0 },
+        { pct: longNeutralPct, count: longNeutral, letter: 'BE', visible: longNeutral > 0 },
+    ]);
+    positionDistLabels(shortWinsSegment.parentElement, [
+        { pct: shortWinsPct, count: shortWins, letter: 'W', visible: shortWins > 0 },
+        { pct: shortLossesPct, count: shortLosses, letter: 'L', visible: shortLosses > 0 },
+        { pct: shortNeutralPct, count: shortNeutral, letter: 'BE', visible: shortNeutral > 0 },
+    ]);
 }
 
 function updateCharts(data) {

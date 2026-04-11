@@ -707,7 +707,8 @@ body[data-layout='dense'] .data-table {
 .distribution-progress {
     display: flex;
     flex-direction: column;
-    gap: 0.8rem;
+    flex: 1;
+    justify-content: space-evenly;
     margin-top: 0.25rem;
 }
 
@@ -764,9 +765,7 @@ body[data-layout='dense'] .data-table {
 }
 
 .distribution-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem 1rem;
+    display: none;
 }
 
 .distribution-item {
@@ -795,6 +794,42 @@ body[data-layout='dense'] .data-table {
 
 .distribution-dot--neutral {
     background: var(--pnl-neutral);
+}
+
+.distribution-labels {
+    position: relative;
+    height: 20px;
+    width: 100%;
+    margin-top: 3px;
+}
+
+.dist-label {
+    position: absolute;
+    top: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 2px;
+    white-space: nowrap;
+}
+
+.dist-label-line {
+    width: 1.5px;
+    height: 8px;
+    flex-shrink: 0;
+    margin-top: -3px;
+    background: var(--text-muted);
+}
+
+.dist-label-text {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    line-height: 1;
+}
+
+.dist-label--end {
+    flex-direction: row-reverse;
+    transform: translateX(-100%);
 }
 
 .table-section {
