@@ -647,7 +647,10 @@ function setupEventListeners() {
         const btn = document.getElementById('combineTradesBtn');
         btn.textContent = state.combinePositions ? '❯' : '❮';
         btn.title = state.combinePositions ? 'Showing combined positions' : 'Showing individual trades';
-        if (state.lastData) renderDashboard(state.lastData);
+        if (state.lastData) {
+            updateTradesTable(state.lastData.trades);
+            updateTradeControls(state.lastData);
+        }
     });
 
     document.getElementById('loadMoreTradesBtn').addEventListener('click', () => {
