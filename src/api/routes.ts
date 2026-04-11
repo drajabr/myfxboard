@@ -5,7 +5,7 @@ import { DashboardSummary } from '../types/index.js';
 const router = Router();
 const DEFAULT_BREAKEVEN_TOLERANCE_FLOOR = 1.0;
 const DEFAULT_BREAKEVEN_TOLERANCE_MAX = 5.0;
-const HISTOGRAM_BIN_COUNT = 16;
+const HISTOGRAM_BIN_COUNT = 30;
 const DURATION_BUCKETS = [
   { key: 'lt5m', label: '<5m', minSec: 0, maxSec: 5 * 60 },
   { key: 'm5to15', label: '5m-15m', minSec: 5 * 60, maxSec: 15 * 60 },
@@ -323,6 +323,7 @@ const buildEmptyAnalyticsResponse = (
         bin_count: HISTOGRAM_BIN_COUNT,
       },
     },
+    trade_duration_scatter: [],
     trade_pnl_curve: [],
     equity_curve: buildFlatZeroCurve(curveDays, nowMs),
     balance_curve: buildFlatZeroBalanceCurve(curveDays, nowMs),
@@ -705,6 +706,10 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const aggregatedBreakevenTolerance = resolveBreakevenToleranceFloor();
     const winRateByTradeDuration = buildWinRateByTradeDuration(allFilteredTrades, aggregatedBreakevenTolerance);
     const pnlHistogram = buildPnlHistogram(allFilteredTrades, HISTOGRAM_BIN_COUNT);
+    const tradeDurationScatter = allFilteredTrades.map((t) => ({
+      duration_min: Math.max(0, toNum(t.duration_sec)) / 60,
+      profit: toNum(t.profit),
+    }));
 
     res.json({
       scope: accountIdParam === 'all' ? 'all' : 'single',
@@ -742,6 +747,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
       pnl_by_hour_of_day: pnlByHourOfDay,
       win_rate_by_trade_duration: winRateByTradeDuration,
       pnl_histogram: pnlHistogram,
+      trade_duration_scatter: tradeDurationScatter,
       trade_pnl_curve: tradePnlCurve,
       symbol_exposure: symbolExposure,
       calendars: {

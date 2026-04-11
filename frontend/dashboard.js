@@ -127,6 +127,7 @@ const state = {
     inflight: false,
     pendingRefresh: false,
     lastData: null,
+    lastDataHash: null,
     statusLoadingSince: 0,
     statusSettleTimer: null,
 };
@@ -439,7 +440,7 @@ function applyTheme(theme) {
     document.body.setAttribute('data-theme', theme);
     const btn = document.getElementById('themeToggleBtn');
     if (btn) {
-        btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+        btn.textContent = theme === 'dark' ? '🌙' : '☀️';
         btn.title = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
     }
     const themeSelect = document.getElementById('theme');
@@ -1121,7 +1122,7 @@ function buildBarChartOptions(text, labelCount = 0) {
             padding: { left: 10, right: 18, top: 8, bottom: 18 },
         },
         plugins: {
-            legend: { labels: { color: text, font: chartFont } },
+            legend: { display: false },
         },
         scales: {
             x: {
@@ -1192,10 +1193,17 @@ function updateDistributionProgress(wins, losses, neutralCount, directionalOutco
     lossesSegment.style.width = `${lossesPct}%`;
     neutralSegment.style.width = `${neutralPct}%`;
 
+    winsSegment.style.display = wins > 0 ? '' : 'none';
+    lossesSegment.style.display = losses > 0 ? '' : 'none';
+    neutralSegment.style.display = neutralCount > 0 ? '' : 'none';
+
     allText.textContent = `${total} total`;
     winsText.textContent = `W ${wins} (${winsPct.toFixed(1)}%)`;
     lossesText.textContent = `L ${losses} (${lossesPct.toFixed(1)}%)`;
     neutralText.textContent = `BE ${neutralCount} (${neutralPct.toFixed(1)}%)`;
+    winsText.parentElement.style.display = wins > 0 ? '' : 'none';
+    lossesText.parentElement.style.display = losses > 0 ? '' : 'none';
+    neutralText.parentElement.style.display = neutralCount > 0 ? '' : 'none';
 
     const longWins = toNum(directionalOutcomes?.long_wins);
     const longLosses = toNum(directionalOutcomes?.long_losses);
@@ -1218,20 +1226,32 @@ function updateDistributionProgress(wins, losses, neutralCount, directionalOutco
     longWinsSegment.style.width = `${longWinsPct}%`;
     longLossesSegment.style.width = `${longLossesPct}%`;
     longNeutralSegment.style.width = `${longNeutralPct}%`;
+    longWinsSegment.style.display = longWins > 0 ? '' : 'none';
+    longLossesSegment.style.display = longLosses > 0 ? '' : 'none';
+    longNeutralSegment.style.display = longNeutral > 0 ? '' : 'none';
 
     shortWinsSegment.style.width = `${shortWinsPct}%`;
     shortLossesSegment.style.width = `${shortLossesPct}%`;
     shortNeutralSegment.style.width = `${shortNeutralPct}%`;
+    shortWinsSegment.style.display = shortWins > 0 ? '' : 'none';
+    shortLossesSegment.style.display = shortLosses > 0 ? '' : 'none';
+    shortNeutralSegment.style.display = shortNeutral > 0 ? '' : 'none';
 
     longsText.textContent = `${longTotal} total`;
     longWinsText.textContent = `W ${longWins} (${longWinsPct.toFixed(1)}%)`;
     longLossesText.textContent = `L ${longLosses} (${longLossesPct.toFixed(1)}%)`;
     longNeutralText.textContent = `BE ${longNeutral} (${longNeutralPct.toFixed(1)}%)`;
+    longWinsText.parentElement.style.display = longWins > 0 ? '' : 'none';
+    longLossesText.parentElement.style.display = longLosses > 0 ? '' : 'none';
+    longNeutralText.parentElement.style.display = longNeutral > 0 ? '' : 'none';
 
     shortsText.textContent = `${shortTotal} total`;
     shortWinsText.textContent = `W ${shortWins} (${shortWinsPct.toFixed(1)}%)`;
     shortLossesText.textContent = `L ${shortLosses} (${shortLossesPct.toFixed(1)}%)`;
     shortNeutralText.textContent = `BE ${shortNeutral} (${shortNeutralPct.toFixed(1)}%)`;
+    shortWinsText.parentElement.style.display = shortWins > 0 ? '' : 'none';
+    shortLossesText.parentElement.style.display = shortLosses > 0 ? '' : 'none';
+    shortNeutralText.parentElement.style.display = shortNeutral > 0 ? '' : 'none';
 }
 
 function updateCharts(data) {
@@ -1407,8 +1427,6 @@ function updateCharts(data) {
         charts.dailyPnl.data.labels = dailyLabels;
         charts.dailyPnl.data.datasets[0].data = dailyValues;
         charts.dailyPnl.data.datasets[0].backgroundColor = dailyValues.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
-        charts.dailyPnl.options.plugins.legend.labels.color = text;
-        charts.dailyPnl.options.plugins.legend.labels.font = chartFont;
         charts.dailyPnl.options.scales.x.ticks.color = text;
         charts.dailyPnl.options.scales.x.ticks.font = chartFont;
         charts.dailyPnl.options.scales.y.ticks.color = text;
@@ -1446,8 +1464,6 @@ function updateCharts(data) {
     } else {
         charts.pnlByDayOfWeek.data.datasets[0].data = dayOfWeekPnL;
         charts.pnlByDayOfWeek.data.datasets[0].backgroundColor = dayOfWeekPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
-        charts.pnlByDayOfWeek.options.plugins.legend.labels.color = text;
-        charts.pnlByDayOfWeek.options.plugins.legend.labels.font = chartFont;
         charts.pnlByDayOfWeek.options.scales.x.ticks.color = text;
         charts.pnlByDayOfWeek.options.scales.x.ticks.font = chartFont;
         charts.pnlByDayOfWeek.options.scales.y.ticks.color = text;
@@ -1474,8 +1490,6 @@ function updateCharts(data) {
     } else {
         charts.pnlByHourOfDay.data.datasets[0].data = hourOfDayPnL;
         charts.pnlByHourOfDay.data.datasets[0].backgroundColor = hourOfDayPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
-        charts.pnlByHourOfDay.options.plugins.legend.labels.color = text;
-        charts.pnlByHourOfDay.options.plugins.legend.labels.font = chartFont;
         charts.pnlByHourOfDay.options.scales.x.ticks.color = text;
         charts.pnlByHourOfDay.options.scales.x.ticks.font = chartFont;
         charts.pnlByHourOfDay.options.scales.y.ticks.color = text;
@@ -1483,10 +1497,7 @@ function updateCharts(data) {
         charts.pnlByHourOfDay.update();
     }
 
-    const durationRows = Array.isArray(data.win_rate_by_trade_duration) ? data.win_rate_by_trade_duration : [];
-    const durationLabels = durationRows.map((row) => String(row.label || ''));
-    const durationPnls = durationRows.map((row) => toNum(row.avg_pnl));
-    const durationTrades = durationRows.map((row) => toNum(row.trades));
+    const scatterTrades = Array.isArray(data.trade_duration_scatter) ? data.trade_duration_scatter : [];
     const durationTitle = document.getElementById('durationWinRateTitle');
     if (durationTitle) {
         durationTitle.textContent = state.activeTradeFilter
@@ -1494,29 +1505,16 @@ function updateCharts(data) {
             : 'PnL by Trade Duration (All Trades)';
     }
 
+    const scatterPoints = scatterTrades.map((t) => ({ x: toNum(t.duration_min), y: toNum(t.profit) }));
+
     const durationChartData = {
-        labels: durationLabels,
         datasets: [
             {
-                type: 'bar',
-                label: 'Avg PnL',
-                data: durationPnls,
-                yAxisID: 'y',
-                borderRadius: 8,
-                borderSkipped: false,
-                backgroundColor: durationPnls.map((v) => v >= 0 ? positive : negative),
-                borderColor: durationPnls.map((v) => v >= 0 ? positive : negative),
-                borderWidth: 1,
-            },
-            {
-                type: 'line',
-                label: 'Trades',
-                data: durationTrades,
-                yAxisID: 'yTrades',
-                borderColor: text,
-                backgroundColor: text,
-                pointRadius: 2.4,
-                tension: 0.25,
+                label: 'Trade PnL',
+                data: scatterPoints,
+                backgroundColor: scatterPoints.map((p) => p.y >= 0 ? positive : negative),
+                pointRadius: 4,
+                pointHoverRadius: 6,
             },
         ],
     };
@@ -1528,15 +1526,27 @@ function updateCharts(data) {
             padding: { left: 10, right: 18, top: 8, bottom: 18 },
         },
         plugins: {
-            legend: { labels: { color: text, font: chartFont } },
+            legend: { display: false },
+            tooltip: {
+                callbacks: {
+                    label: (ctx) => {
+                        const p = ctx.raw;
+                        const mins = toNum(p.x);
+                        const dur = mins >= 60 ? `${(mins / 60).toFixed(1)}h` : `${Math.round(mins)}m`;
+                        return `Duration: ${dur}  PnL: $${toNum(p.y).toFixed(2)}`;
+                    },
+                },
+            },
         },
         scales: {
             x: {
+                type: 'linear',
+                title: { display: true, text: 'Duration (min)', color: text, font: chartFont },
                 ticks: { color: text, font: chartFont },
                 grid: { display: false },
             },
             y: {
-                position: 'left',
+                title: { display: true, text: 'PnL ($)', color: text, font: chartFont },
                 ticks: {
                     color: text,
                     font: chartFont,
@@ -1547,18 +1557,12 @@ function updateCharts(data) {
                     drawBorder: false,
                 },
             },
-            yTrades: {
-                position: 'right',
-                beginAtZero: true,
-                ticks: { color: text, font: chartFont },
-                grid: { drawOnChartArea: false },
-            },
         },
     };
 
     if (!charts.durationWinRate) {
         charts.durationWinRate = new Chart(document.getElementById('durationWinRateChart'), {
-            type: 'bar',
+            type: 'scatter',
             data: durationChartData,
             options: durationOptions,
         });
@@ -1613,7 +1617,7 @@ function updateCharts(data) {
             padding: { left: 10, right: 18, top: 8, bottom: 18 },
         },
         plugins: {
-            legend: { labels: { color: text, font: chartFont } },
+            legend: { display: false },
         },
         scales: {
             x: {
@@ -1755,6 +1759,20 @@ function renderDashboard(data) {
     renderYearlyCalendar(data.calendars.yearly);
 }
 
+function simpleDataFingerprint(data) {
+    const s = data.summary || {};
+    const p = data.periods?.all_time || {};
+    const tm = data.trade_metrics || {};
+    return [
+        s.equity, s.balance, s.floating_pnl, s.open_positions,
+        p.pnl, p.trades_count,
+        tm.win_rate_pct, tm.profit_factor,
+        (data.positions || []).length,
+        (data.recent_trades || []).length,
+        (data.trade_pnl_curve || []).length,
+    ].join('|');
+}
+
 async function loadDashboard() {
     if (state.inflight) {
         state.pendingRefresh = true;
@@ -1769,8 +1787,12 @@ async function loadDashboard() {
 
         const selectedAccount = document.getElementById('accountSelector').value || localStorage.getItem('selectedAccount') || '';
         const data = await fetchAnalytics(selectedAccount);
-        state.lastData = data;
-        renderDashboard(data);
+        const fingerprint = simpleDataFingerprint(data);
+        if (fingerprint !== state.lastDataHash) {
+            state.lastData = data;
+            state.lastDataHash = fingerprint;
+            renderDashboard(data);
+        }
         updateLastUpdatedLabel(Date.now());
         setLoadState(false);
     } catch (error) {
