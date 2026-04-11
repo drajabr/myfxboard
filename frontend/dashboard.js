@@ -1485,13 +1485,13 @@ function updateCharts(data) {
 
     const durationRows = Array.isArray(data.win_rate_by_trade_duration) ? data.win_rate_by_trade_duration : [];
     const durationLabels = durationRows.map((row) => String(row.label || ''));
-    const durationWinRates = durationRows.map((row) => toNum(row.win_rate_pct));
+    const durationPnls = durationRows.map((row) => toNum(row.avg_pnl));
     const durationTrades = durationRows.map((row) => toNum(row.trades));
     const durationTitle = document.getElementById('durationWinRateTitle');
     if (durationTitle) {
         durationTitle.textContent = state.activeTradeFilter
-            ? `Win Rate by Trade Duration (${state.activeTradeFilter.label})`
-            : 'Win Rate by Trade Duration (All Trades)';
+            ? `PnL by Trade Duration (${state.activeTradeFilter.label})`
+            : 'PnL by Trade Duration (All Trades)';
     }
 
     const durationChartData = {
@@ -1499,13 +1499,13 @@ function updateCharts(data) {
         datasets: [
             {
                 type: 'bar',
-                label: 'Win Rate %',
-                data: durationWinRates,
+                label: 'Avg PnL',
+                data: durationPnls,
                 yAxisID: 'y',
                 borderRadius: 8,
                 borderSkipped: false,
-                backgroundColor: durationWinRates.map((v) => `rgba(${accentRgb}, ${Math.min(0.92, 0.3 + (v / 130))})`),
-                borderColor: accent,
+                backgroundColor: durationPnls.map((v) => v >= 0 ? positive : negative),
+                borderColor: durationPnls.map((v) => v >= 0 ? positive : negative),
                 borderWidth: 1,
             },
             {
@@ -1537,12 +1537,10 @@ function updateCharts(data) {
             },
             y: {
                 position: 'left',
-                min: 0,
-                max: 100,
                 ticks: {
                     color: text,
                     font: chartFont,
-                    callback: (v) => `${v}%`,
+                    callback: (v) => `$${v}`,
                 },
                 grid: {
                     color: 'rgba(125, 138, 159, 0.2)',
