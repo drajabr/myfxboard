@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   history_sync_cursor TEXT,
   history_in_sync BOOLEAN DEFAULT false,
   equity NUMERIC(20, 2),
+  nickname TEXT DEFAULT '',
   updated_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
 );
 

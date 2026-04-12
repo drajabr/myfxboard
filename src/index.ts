@@ -19,8 +19,15 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const TRUST_PROXY = String(process.env.TRUST_PROXY || 'true').toLowerCase() === 'true';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const frontendDir = path.resolve(__dirname, '../../frontend');
+// In dev (tsx src/index.ts), __dirname is /app/src; in prod it's /app/dist/src.
+// Resolve frontend path for both layouts.
+const frontendDir = fs.existsSync(path.resolve(__dirname, '../frontend'))
+  ? path.resolve(__dirname, '../frontend')
+  : path.resolve(__dirname, '../../frontend');
 const frontendIndexPath = path.join(frontendDir, 'index.html');
+const chartUmdPath = fs.existsSync(path.resolve(__dirname, '../node_modules/chart.js/dist/chart.umd.js'))
+  ? path.resolve(__dirname, '../node_modules/chart.js/dist/chart.umd.js')
+  : path.resolve(__dirname, '../../node_modules/chart.js/dist/chart.umd.js');
 
 // Middleware
 app.set('trust proxy', TRUST_PROXY);
@@ -58,6 +65,16 @@ app.use('/api/account', validateDashboardEditToken, dashboardRoutes);
 
 // Ingestion routes
 app.use('/api/ingestion', ingestionRoutes);
+
+// Serve self-hosted Chart.js bundle to satisfy strict CSP (script-src 'self').
+app.get('/vendor/chart.umd.js', (_req, res) => {
+  if (fs.existsSync(chartUmdPath)) {
+    res.type('application/javascript');
+    res.sendFile(chartUmdPath);
+    return;
+  }
+  res.status(404).send('Chart.js bundle not found');
+});
 
 // Serve frontend directly from the Node server.
 if (fs.existsSync(frontendIndexPath)) {

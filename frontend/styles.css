@@ -554,8 +554,8 @@ body[data-layout='dense'] .summary-spotlight .metric-card {
 }
 
 .metric-grid {
-    display: grid;
-    grid-template-columns: repeat(12, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: wrap;
     gap: var(--layout-gap);
 }
 
@@ -576,11 +576,13 @@ body[data-layout='dense'] .summary-spotlight .metric-card {
 }
 
 #tradeMetricsGrid .metric-card {
-    grid-column: span 3;
+    flex: 1 1 calc(25% - var(--layout-gap));
+    min-width: 110px;
 }
 
 body[data-layout='dense'] #tradeMetricsGrid .metric-card {
-    grid-column: span 4;
+    flex: 1 1 calc(33.333% - var(--layout-gap));
+    min-width: 90px;
 }
 
 .metric-grid--dense-table {
@@ -589,6 +591,27 @@ body[data-layout='dense'] #tradeMetricsGrid .metric-card {
 
 .metric-table-dense {
     font-size: 0.78rem;
+}
+
+.dense-overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--layout-gap);
+}
+
+.dense-overview-grid .metric-table-dense {
+    width: 100%;
+}
+
+.pos-combine-toggle {
+    cursor: pointer;
+    user-select: none;
+    font-weight: 600;
+}
+
+.pos-combine-child {
+    opacity: 0.75;
+    font-size: 0.92em;
 }
 
 .dense-only {
@@ -612,9 +635,8 @@ body[data-layout='dense'] .dense-hide {
     border-radius: 10px;
     border: 1px solid var(--border);
     background: var(--surface-alt);
-    min-width: 72px;
-    width: min-content;
-    max-width: 100%;
+    min-width: 0;
+    flex: 1 1 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -695,6 +717,17 @@ body[data-layout='dense'] .main-content > *:not(.charts-row) {
 }
 
 body[data-layout='dense'] .main-content > * {
+    margin-bottom: 0;
+}
+
+body[data-layout='dense'] .dense-tables-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--layout-gap);
+    grid-column: 1 / -1;
+}
+
+body[data-layout='dense'] .dense-tables-row > .table-section {
     margin-bottom: 0;
 }
 
@@ -1124,7 +1157,7 @@ body[data-layout='dense'] .calendar-cell {
 
 @media (min-width: 761px) and (max-width: 1180px) {
     #tradeMetricsGrid .metric-card {
-        grid-column: span 4;
+        flex: 1 1 calc(33.333% - var(--layout-gap));
     }
 }
 
@@ -1161,14 +1194,17 @@ body[data-layout='dense'] .calendar-cell {
         grid-column: span 6;
     }
 
-    .summary-spotlight,
-    .metric-grid {
+    .summary-spotlight {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .summary-spotlight .metric-card,
-    #tradeMetricsGrid .metric-card {
+    .summary-spotlight .metric-card {
         grid-column: auto;
+    }
+
+    #tradeMetricsGrid .metric-card {
+        flex: 1 1 calc(50% - var(--layout-gap));
+        min-width: 100px;
     }
 
     .year-grid {
@@ -1177,9 +1213,12 @@ body[data-layout='dense'] .calendar-cell {
 }
 
 @media (max-width: 480px) {
-    .summary-spotlight,
-    .metric-grid {
+    .summary-spotlight {
         grid-template-columns: 1fr;
+    }
+
+    #tradeMetricsGrid .metric-card {
+        flex: 1 1 100%;
     }
 
     body[data-layout='dense'] .charts-row > * {

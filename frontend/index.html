@@ -11,7 +11,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="stylesheet" href="./styles.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="/vendor/chart.umd.js"></script>
 </head>
 <body>
     <div class="app-container">
@@ -84,21 +84,32 @@
 
             <section class="table-section dense-only" id="denseOverviewSection">
                 <h3>Dense Overview</h3>
-                <table class="data-table metric-table-dense">
-                    <thead>
-                        <tr>
-                            <th>Metric</th>
-                            <th>Value</th>
-                            <th>Metric</th>
-                            <th>Value</th>
-                            <th>Metric</th>
-                            <th>Value</th>
-                        </tr>
-                    </thead>
-                    <tbody id="denseOverviewTable">
-                        <tr><td colspan="6" style="text-align:center;">No data</td></tr>
-                    </tbody>
-                </table>
+                <div class="dense-overview-grid">
+                    <table class="data-table metric-table-dense">
+                        <thead>
+                            <tr><th>Metric</th><th>Value</th></tr>
+                        </thead>
+                        <tbody id="denseOverviewTable1">
+                            <tr><td colspan="2" style="text-align:center;">No data</td></tr>
+                        </tbody>
+                    </table>
+                    <table class="data-table metric-table-dense">
+                        <thead>
+                            <tr><th>Metric</th><th>Value</th></tr>
+                        </thead>
+                        <tbody id="denseOverviewTable2">
+                            <tr><td colspan="2" style="text-align:center;">No data</td></tr>
+                        </tbody>
+                    </table>
+                    <table class="data-table metric-table-dense">
+                        <thead>
+                            <tr><th>Metric</th><th>Value</th></tr>
+                        </thead>
+                        <tbody id="denseOverviewTable3">
+                            <tr><td colspan="2" style="text-align:center;">No data</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </section>
 
             <section class="charts-row">
@@ -114,7 +125,12 @@
 
             <section class="charts-row">
                 <div class="table-section">
-                    <h3>Open Positions</h3>
+                    <div class="trades-head">
+                        <h3>Open Positions</h3>
+                        <div class="trades-controls">
+                            <button id="combinePositionsBtn" class="icon-btn icon-btn--square" type="button" title="Showing combined positions" aria-label="Toggle combine open positions">❯</button>
+                        </div>
+                    </div>
                     <table class="data-table">
                         <thead>
                             <tr>
@@ -125,10 +141,11 @@
                                 <th>PnL</th>
                                 <th>SL</th>
                                 <th>TP</th>
+                                <th>Age</th>
                             </tr>
                         </thead>
                         <tbody id="positionsTable">
-                            <tr><td colspan="7" style="text-align:center;">No open positions</td></tr>
+                            <tr><td colspan="8" style="text-align:center;">No open positions</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -176,7 +193,7 @@
 
             <section class="charts-row dense-hide">
                 <div class="chart-container">
-                    <h3>Win/Loss Distribution</h3>
+                    <h3>Win/Loss Ratio</h3>
                     <div id="winLossProgress" class="distribution-progress" aria-live="polite">
                         <div class="distribution-block">
                             <div class="distribution-block-head">

@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: myfxboard-db-dev
+    environment:
+      POSTGRES_USER: dashboard
+      POSTGRES_PASSWORD: dashboard_pass
+      POSTGRES_DB: myfxboard
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dashboard -d myfxboard"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+      start_period: 3s
+
+  server:
+    image: node:20-alpine
+    container_name: myfxboard-server-dev
+    working_dir: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://dashboard:dashboard_pass@postgres:5432/myfxboard
+      PORT: 3000
+      CONNECTOR_SHARED_SECRET: dev-secret
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: sh -c "npm install && npm run dev"
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  default:
+    driver: bridge

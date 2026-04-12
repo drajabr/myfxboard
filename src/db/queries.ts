@@ -102,6 +102,14 @@ export const accountQueries = {
     return result.rows[0] || null;
   },
 
+  async updateNickname(account_id: string, nickname: string, client?: pg.PoolClient) {
+    const q = getQueryFn(client);
+    await q(
+      `UPDATE accounts SET nickname = $2 WHERE account_id = $1`,
+      [account_id, nickname]
+    );
+  },
+
   async list() {
     const result = await query('SELECT * FROM accounts ORDER BY created_at DESC');
     return result.rows;

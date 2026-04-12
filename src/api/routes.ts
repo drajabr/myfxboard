@@ -34,21 +34,9 @@ const toNum = (value: unknown, fallback = 0): number => {
   return Number.isFinite(n) ? n : fallback;
 };
 
-const normalizePosition = (p: any) => ({
-  ...p,
-  size: toNum(p.size),
-  direction: String(p.direction || ''),
-  entry_price: toNum(p.entry_price),
-  current_price: p.current_price === null ? null : toNum(p.current_price),
-  avg_sl: p.avg_sl === null ? null : toNum(p.avg_sl),
-  avg_tp: p.avg_tp === null ? null : toNum(p.avg_tp),
-  unrealized_pnl: toNum(p.unrealized_pnl),
-  open_time_ms: toNum(p.open_time_ms),
-  updated_at_ms: toNum(p.updated_at_ms),
-});
-
 const normalizeTrade = (t: any) => ({
   ...t,
+  symbol: normalizeSymbol(t.symbol),
   size: toNum(t.size),
   entry_price: toNum(t.entry_price),
   exit_price: t.exit_price === null ? null : toNum(t.exit_price),
@@ -126,8 +114,21 @@ const normalizePosition = (p: any) => ({
   open_time_ms: toNum(p.open_time_ms),
   updated_at_ms: toNum(p.updated_at_ms),
 });
+
+const getDurationBucket = (durationSec: number) => (
   DURATION_BUCKETS.find((bucket) => durationSec >= bucket.minSec && durationSec < bucket.maxSec) || DURATION_BUCKETS[DURATION_BUCKETS.length - 1]
 );
+
+const normalizeSnapshot = (s: any) => ({
+  ...s,
+  equity: toNum(s.equity),
+  balance: toNum(s.balance),
+  return_pct: toNum(s.return_pct),
+  trades_count: toNum(s.trades_count),
+  wins: toNum(s.wins),
+  losses: toNum(s.losses),
+  snapshot_time_ms: toNum(s.snapshot_time_ms),
+});
 
 const buildWinRateByTradeDuration = (trades: any[], breakevenTolerance: number) => {
   const rows = DURATION_BUCKETS.map((bucket) => ({
@@ -978,6 +979,8 @@ router.get('', async (_req: Request, res: Response) => {
     const safe = accounts.map(a => ({
       account_id: a.account_id,
       account_name: a.account_name,
+      broker: a.broker,
+      nickname: a.nickname || '',
       created_at: a.created_at,
       last_sync_at: a.last_sync_at,
       last_ingest_received_at: a.last_ingest_received_at,

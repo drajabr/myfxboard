@@ -123,6 +123,7 @@ const state = {
     exposureSort: { key: 'size', direction: 'desc' },
     tradesSort: { key: 'exit_time_ms', direction: 'desc' },
     combinePositions: true,
+    combineOpenPositions: true,
     accounts: [],
     accountsFetchedAt: 0,
     inflight: false,
@@ -648,8 +649,18 @@ function setupEventListeners() {
         btn.textContent = state.combinePositions ? '❯' : '❮';
         btn.title = state.combinePositions ? 'Showing combined positions' : 'Showing individual trades';
         if (state.lastData) {
-            updateTradesTable(state.lastData.trades);
+            updateTradesTable(state.lastData.recent_trades);
             updateTradeControls(state.lastData);
+        }
+    });
+
+    document.getElementById('combinePositionsBtn').addEventListener('click', () => {
+        state.combineOpenPositions = !state.combineOpenPositions;
+        const btn = document.getElementById('combinePositionsBtn');
+        btn.textContent = state.combineOpenPositions ? '❯' : '❮';
+        btn.title = state.combineOpenPositions ? 'Showing combined positions' : 'Showing individual positions';
+        if (state.lastData) {
+            updatePositionsTable(state.lastData.positions);
         }
     });
 
@@ -751,9 +762,11 @@ function syncAccountSelector(accounts) {
     accounts.forEach((acc) => {
         const option = document.createElement('option');
         option.value = acc.account_id;
-        // Nickname: user-set, else broker name, else account_id
         const nickname = acc.nickname || acc.broker || acc.account_id;
-        option.textContent = `${acc.account_id} — ${nickname}`;
+        const lastSync = toNum(acc.last_sync_at || acc.last_ingest_received_at, 0);
+        const isOnline = lastSync > 0 && (now - lastSync) < healthThresholdMs;
+        const statusDot = isOnline ? '🟢' : '🔴';
+        option.textContent = `${statusDot} ${acc.account_id} — ${nickname}`;
         selector.appendChild(option);
     });
 
@@ -785,15 +798,15 @@ function updateStatusStrip(summary) {
     const systemStatusText = document.getElementById('systemStatusText');
     const systemStatusDot = document.getElementById('systemStatusDot');
     if (!systemStatusText || !systemStatusDot) return;
+    // Don't overwrite error state
     if (String(systemStatusText.textContent || '').startsWith('Error:')) return;
-    // Show version number (shortest possible)
-    const version = summary?.version || summary?.app_version || summary?.ver || '';
-    systemStatusText.textContent = version ? `v${String(version).replace(/^v/i, '').split('-')[0]}` : '';
-    // Use a filled check or cross icon for status
-    const healthy = summary && summary.status === 'ok';
-    systemStatusDot.textContent = healthy ? '✔️' : '❌';
-    systemStatusDot.style.background = 'none';
-    systemStatusDot.style.color = healthy ? 'var(--pnl-positive)' : 'var(--pnl-negative)';
+    // Reset to standard dot rendering
+    systemStatusDot.textContent = '';
+    systemStatusDot.style.background = '';
+    systemStatusDot.style.color = '';
+    systemStatusDot.classList.remove('status-dot--idle', 'status-dot--loading', 'status-dot--error');
+    systemStatusDot.classList.add('status-dot--ok');
+    systemStatusText.textContent = 'Healthy';
 }
 
 function updateKpis(summary, periods, tradeMetrics, filteredSummary) {
@@ -857,6 +870,8 @@ function renderPeriodStats(periods) {
 function renderTradeMetrics(metrics) {
     const grid = document.getElementById('tradeMetricsGrid');
     const cards = [
+        ['Max Drawdown', formatMoney(metrics.max_drawdown), toNum(metrics.max_drawdown)],
+        ['Avg Hold Time', durationLabel(metrics.avg_hold_seconds), 0],
         ['Win Rate', formatPct(metrics.win_rate_pct), metrics.win_rate_pct],
         ['Profit Factor', Number(toNum(metrics.profit_factor)).toFixed(2), 0],
         ['Expectancy', formatMoney(metrics.expectancy), toNum(metrics.expectancy)],
@@ -865,8 +880,6 @@ function renderTradeMetrics(metrics) {
         ['Average Loss', formatMoney(metrics.avg_loss), metrics.avg_loss],
         ['Max Win', formatMoney(metrics.max_win), metrics.max_win],
         ['Max Loss', formatMoney(metrics.max_loss), metrics.max_loss],
-        ['Max Drawdown', formatMoney(metrics.max_drawdown), toNum(metrics.max_drawdown)],
-        ['Avg Hold Time', durationLabel(metrics.avg_hold_seconds), 0],
     ];
 
     grid.classList.remove('metric-grid--dense-table');
@@ -880,8 +893,10 @@ function renderTradeMetrics(metrics) {
 }
 
 function renderDenseOverview(data) {
-    const tbody = document.getElementById('denseOverviewTable');
-    if (!tbody) {
+    const tbody1 = document.getElementById('denseOverviewTable1');
+    const tbody2 = document.getElementById('denseOverviewTable2');
+    const tbody3 = document.getElementById('denseOverviewTable3');
+    if (!tbody1 || !tbody2 || !tbody3) {
         return;
     }
 
@@ -912,40 +927,143 @@ function renderDenseOverview(data) {
 
     const cols = 3;
     const rowCount = Math.ceil(items.length / cols);
-    let html = '';
-    for (let r = 0; r < rowCount; r++) {
-        html += '<tr>';
-        for (let c = 0; c < cols; c++) {
+    const tbodies = [tbody1, tbody2, tbody3];
+    for (let c = 0; c < cols; c++) {
+        let html = '';
+        for (let r = 0; r < rowCount; r++) {
             const item = items[r + c * rowCount];
             if (item) {
-                html += `<td>${item[0]}</td><td>${item[1]}</td>`;
-            } else {
-                html += '<td></td><td></td>';
+                html += `<tr><td>${item[0]}</td><td>${item[1]}</td></tr>`;
             }
         }
-        html += '</tr>';
+        tbodies[c].innerHTML = html || '<tr><td colspan="2" style="text-align:center;">No data</td></tr>';
     }
-    tbody.innerHTML = html;
 }
 
 function updatePositionsTable(positions) {
     const tbody = document.getElementById('positionsTable');
     if (!positions || positions.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No open positions</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No open positions</td></tr>';
         return;
     }
 
-    tbody.innerHTML = positions.map((pos) => `
-        <tr>
-            <td>${pos.symbol}</td>
+    const nowMs = Date.now();
+    let rows = [...positions];
+
+    if (state.combineOpenPositions && rows.length > 1) {
+        const groups = {};
+        for (const pos of rows) {
+            const normSym = normalizeSymbol(pos.symbol);
+            if (!groups[normSym]) {
+                groups[normSym] = { symbol: pos.symbol, normSymbol: normSym, children: [] };
+            }
+            groups[normSym].children.push(pos);
+        }
+        rows = Object.values(groups).map((g) => {
+            if (g.children.length === 1) {
+                return { ...g.children[0], _combined: false };
+            }
+            const totalSize = g.children.reduce((s, p) => s + toNum(p.size), 0);
+            const totalPnl = g.children.reduce((s, p) => s + toNum(p.unrealized_pnl || 0), 0);
+            const avgEntry = totalSize > 0
+                ? g.children.reduce((s, p) => s + toNum(p.entry_price) * toNum(p.size), 0) / totalSize
+                : 0;
+            const avgCurrent = totalSize > 0
+                ? g.children.reduce((s, p) => s + toNum(p.current_price || p.entry_price) * toNum(p.size), 0) / totalSize
+                : 0;
+            const avgSl = g.children.some(p => p.avg_sl !== null)
+                ? (totalSize > 0 ? g.children.reduce((s, p) => s + toNum(p.avg_sl || 0) * toNum(p.size), 0) / totalSize : null)
+                : null;
+            const avgTp = g.children.some(p => p.avg_tp !== null)
+                ? (totalSize > 0 ? g.children.reduce((s, p) => s + toNum(p.avg_tp || 0) * toNum(p.size), 0) / totalSize : null)
+                : null;
+            const earliestOpen = Math.min(...g.children.map(p => toNum(p.open_time_ms)).filter(t => t > 0));
+            return {
+                _combined: true,
+                _children: g.children,
+                symbol: g.symbol,
+                size: totalSize,
+                entry_price: avgEntry,
+                current_price: avgCurrent,
+                unrealized_pnl: totalPnl,
+                avg_sl: avgSl,
+                avg_tp: avgTp,
+                open_time_ms: earliestOpen === Infinity ? 0 : earliestOpen,
+            };
+        });
+    }
+
+    const renderPosRow = (pos, isChild) => {
+        const openMs = toNum(pos.open_time_ms);
+        const ageSec = openMs > 0 ? Math.max(0, (nowMs - openMs) / 1000) : 0;
+        const ageText = openMs > 0 ? durationLabel(ageSec) : '-';
+        const childClass = isChild ? ' class="pos-combine-child"' : '';
+        const symbolCell = pos._combined
+            ? `<td class="pos-combine-toggle" title="Click to expand">\u25B6 ${pos.symbol} (${pos._children.length})</td>`
+            : `<td>${pos.symbol}</td>`;
+        return `
+        <tr${childClass}>
+            ${symbolCell}
             <td>${Number(pos.size || 0).toFixed(2)}</td>
             <td>${formatPrice(pos.entry_price)}</td>
             <td>${pos.current_price !== null ? formatPrice(pos.current_price) : '-'}</td>
             <td class="${pnlClass(pos.unrealized_pnl || 0)}">${formatMoney(pos.unrealized_pnl || 0)}</td>
             <td>${pos.avg_sl !== null ? formatPrice(pos.avg_sl) : '-'}</td>
             <td>${pos.avg_tp !== null ? formatPrice(pos.avg_tp) : '-'}</td>
+            <td>${ageText}</td>
         </tr>
-    `).join('');
+    `;
+    };
+
+    if (!state.combineOpenPositions) {
+        tbody.innerHTML = positions.map((pos) => {
+            const openMs = toNum(pos.open_time_ms);
+            const ageSec = openMs > 0 ? Math.max(0, (nowMs - openMs) / 1000) : 0;
+            const ageText = openMs > 0 ? durationLabel(ageSec) : '-';
+            return `
+            <tr>
+                <td>${pos.symbol}</td>
+                <td>${Number(pos.size || 0).toFixed(2)}</td>
+                <td>${formatPrice(pos.entry_price)}</td>
+                <td>${pos.current_price !== null ? formatPrice(pos.current_price) : '-'}</td>
+                <td class="${pnlClass(pos.unrealized_pnl || 0)}">${formatMoney(pos.unrealized_pnl || 0)}</td>
+                <td>${pos.avg_sl !== null ? formatPrice(pos.avg_sl) : '-'}</td>
+                <td>${pos.avg_tp !== null ? formatPrice(pos.avg_tp) : '-'}</td>
+                <td>${ageText}</td>
+            </tr>
+        `;
+        }).join('');
+        return;
+    }
+
+    let html = '';
+    for (const pos of rows) {
+        html += renderPosRow(pos, false);
+        if (pos._combined && pos._children) {
+            for (const child of pos._children) {
+                html += renderPosRow(child, true);
+            }
+        }
+    }
+    tbody.innerHTML = html;
+
+    tbody.querySelectorAll('.pos-combine-toggle').forEach((td) => {
+        td.addEventListener('click', () => {
+            const parentRow = td.closest('tr');
+            let sibling = parentRow.nextElementSibling;
+            const isCurrentlyHidden = sibling && sibling.classList.contains('pos-combine-child') && sibling.style.display === 'none';
+            while (sibling && sibling.classList.contains('pos-combine-child')) {
+                sibling.style.display = isCurrentlyHidden ? '' : 'none';
+                sibling = sibling.nextElementSibling;
+            }
+            const count = td.textContent.trim().replace(/^[\u25B6\u25BC]\s*/, '');
+            td.textContent = isCurrentlyHidden ? `\u25BC ${count}` : `\u25B6 ${count}`;
+        });
+    });
+
+    tbody.querySelectorAll('.pos-combine-child').forEach((row) => {
+        row.style.display = 'none';
+    });
 }
 
 const SYMBOL_ALIASES = {
@@ -1144,14 +1262,13 @@ function updateTradesTable(trades) {
         td.addEventListener('click', () => {
             const parentRow = td.closest('tr');
             let sibling = parentRow.nextElementSibling;
-            const expanding = sibling && sibling.classList.contains('combine-child') && sibling.style.display === 'none';
+            const isCurrentlyHidden = sibling && sibling.classList.contains('combine-child') && sibling.style.display === 'none';
             while (sibling && sibling.classList.contains('combine-child')) {
-                sibling.style.display = expanding ? '' : 'none';
+                sibling.style.display = isCurrentlyHidden ? '' : 'none';
                 sibling = sibling.nextElementSibling;
             }
-            td.textContent = expanding
-                ? `▼ ${td.textContent.trim().replace(/^[▶▼]\s*/, '')}`
-                : `▶ ${td.textContent.trim().replace(/^[▶▼]\s*/, '')}`;
+            const count = td.textContent.trim().replace(/^[▶▼]\s*/, '');
+            td.textContent = isCurrentlyHidden ? `▼ ${count}` : `▶ ${count}`;
         });
     });
 
@@ -2039,7 +2156,7 @@ async function loadDashboard() {
     setLoadState(true);
 
     try {
-        await loadAccountsIfNeeded(false);
+        await loadAccountsIfNeeded(true);
 
         const selectedAccount = document.getElementById('accountSelector').value || localStorage.getItem('selectedAccount') || '';
         const data = await fetchAnalytics(selectedAccount);

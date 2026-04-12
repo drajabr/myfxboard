@@ -208,6 +208,12 @@ router.post(
         );
       });
 
+      // Save nickname if provided
+      const nickname = String(accountData?.nickname || '').trim();
+      if (nickname) {
+        await accountQueries.updateNickname(accountId, nickname);
+      }
+
       // Check for history backfill needs
       const accountLastClosedMs = Number(account.last_closed_time_ms || 0);
       const historyStatus = ea_latest_closed_time_ms > accountLastClosedMs ? 'up_to_date' : 'backfill_required';
