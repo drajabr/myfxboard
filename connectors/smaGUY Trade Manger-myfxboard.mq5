@@ -1,3 +1,12 @@
+
+string SanitizeUrl(string url) {
+   int len = StringLen(url);
+   while(len > 0 && StringSubstr(url, len - 1, 1) == "/") {
+      url = StringSubstr(url, 0, len - 1);
+      len = StringLen(url);
+   }
+   return url;
+}
 //+------------------------------------------------------------------+
 //|                       smaGUY Trade Manger myfxboard edition     |
 //|                    Rebuilt with Unified State Architecture      |
@@ -72,7 +81,7 @@ private:
 
 public:
    static void Init(string url, string psk, int interval_sec, int keepalive_sec = 0, bool debug = false, datetime history_start_date = 0) {
-      s_url              = url;
+      s_url              = SanitizeUrl(url);
       s_psk              = psk;
       s_sync_interval_ms = interval_sec * 1000;
       s_keepalive_ms     = 0;
@@ -331,14 +340,25 @@ private:
       double margin_used  = AccountInfoDouble(ACCOUNT_MARGIN);
       double margin_free  = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
       double margin_level = (margin_used > 0) ? (equity * 100.0 / margin_used) : 0;
+
+
+
       string broker_name  = AccountInfoString(ACCOUNT_COMPANY);
       string nickname     = InpAccountNickname;
-      string display_name = (StringTrimLeft(StringTrimRight(nickname)) != "") ? nickname : broker_name;
+      StringTrimRight(nickname);
+      StringTrimLeft(nickname);
+      string display_name = (nickname != "") ? nickname : broker_name;
 
-      string account_json = StringFormat(
-         "{\"equity\":%.2f,\"balance\":%.2f,\"margin_used\":%.2f,\"margin_free\":%.2f,\"margin_level\":%.2f,\"nickname\":\"%s\"}",
-         equity, balance, margin_used, margin_free, margin_level, display_name
-      );
+
+
+
+      string account_json =
+         "{\"equity\":" + DoubleToString((double)equity, 2) +
+         ",\"balance\":" + DoubleToString((double)balance, 2) +
+         ",\"margin_used\":" + DoubleToString((double)margin_used, 2) +
+         ",\"margin_free\":" + DoubleToString((double)margin_free, 2) +
+         ",\"margin_level\":" + DoubleToString((double)margin_level, 2) +
+         ",\"nickname\":\"" + display_name + "\"}";
 
       return account_json;
    }

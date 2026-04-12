@@ -59,18 +59,73 @@ const normalizeTrade = (t: any) => ({
   duration_sec: toNum(t.duration_sec),
 });
 
-const normalizeSnapshot = (s: any) => ({
-  ...s,
-  snapshot_time_ms: toNum(s.snapshot_time_ms),
-  equity: toNum(s.equity),
-  balance: toNum(s.balance),
-  return_pct: toNum(s.return_pct),
-  trades_count: toNum(s.trades_count),
-  wins: toNum(s.wins),
-  losses: toNum(s.losses),
-});
 
-const getDurationBucket = (durationSec: number) => (
+// --- Symbol normalization logic (matches frontend) ---
+const SYMBOL_ALIASES: Record<string, string> = {
+  // Precious Metals
+  'GOLD': 'XAUUSD', 'GLD': 'XAUUSD', 'GC': 'XAUUSD',
+  'SILVER': 'XAGUSD', 'SLV': 'XAGUSD', 'SI': 'XAGUSD',
+  'PLATINUM': 'XPTUSD', 'PL': 'XPTUSD',
+  'PALLADIUM': 'XPDUSD', 'PA': 'XPDUSD',
+  'COPPER': 'XCUUSD', 'HG': 'XCUUSD',
+  // US Indices
+  'DJ30': 'US30', 'DJI30': 'US30', 'DOWJONES30': 'US30', 'DJIA': 'US30', 'WS30': 'US30', 'YM': 'US30', 'DOW30': 'US30', 'USA30': 'US30',
+  'USTEC': 'NAS100', 'US100': 'NAS100', 'NDX100': 'NAS100', 'USTECH': 'NAS100', 'NQ100': 'NAS100', 'NSDQ100': 'NAS100', 'NQ': 'NAS100', 'NASDAQ100': 'NAS100', 'NDX': 'NAS100', 'USTEC100': 'NAS100', 'USTECH100': 'NAS100', 'NDAQ': 'NAS100',
+  'SP500': 'SPX500', 'US500': 'SPX500', 'ES': 'SPX500', 'SPX': 'SPX500', 'USA500': 'SPX500',
+  'RUSS2000': 'US2000', 'RUSSELL2000': 'US2000', 'RTY': 'US2000',
+  // EU Indices
+  'DE30': 'DE40', 'DAX40': 'DE40', 'DAX30': 'DE40', 'GER40': 'DE40', 'GER30': 'DE40', 'GDAXI': 'DE40', 'GERMANY40': 'DE40', 'GRXEUR': 'DE40',
+  'FTSE100': 'UK100', 'FTSE': 'UK100', 'UKX': 'UK100',
+  'FRA40': 'FR40', 'CAC40': 'FR40', 'FCHI40': 'FR40', 'FRANCE40': 'FR40',
+  'EUSTX50': 'EU50', 'STOX50': 'EU50', 'STOXX50E': 'EU50', 'EURO50': 'EU50', 'SX5E': 'EU50', 'EUROSTOXX50': 'EU50',
+  'SPN35': 'ES35', 'IBEX35': 'ES35', 'ESP35': 'ES35', 'SPAIN35': 'ES35',
+  'FTMIB': 'IT40', 'ITA40': 'IT40', 'ITALY40': 'IT40',
+  // Asia-Pac
+  'NI225': 'JP225', 'NIKKEI225': 'JP225', 'NIKKEI': 'JP225', 'NK225': 'JP225', 'JPN225': 'JP225', 'NKD': 'JP225', 'JAPAN225': 'JP225',
+  'HSI50': 'HK50', 'HSI': 'HK50', 'HANGSENG': 'HK50', 'HKG33': 'HK50', 'HONGKONG50': 'HK50',
+  'AU200': 'AUS200', 'ASX200': 'AUS200', 'AUSTRALIA200': 'AUS200',
+  'CN50': 'CHINA50', 'CHINAA50': 'CHINA50', 'FTXIN9': 'CHINA50',
+  'NIFTY50': 'INDIA50',
+  // Energy
+  'WTI': 'USOIL', 'CRUDEOIL': 'USOIL', 'CLOIL': 'USOIL', 'CL': 'USOIL', 'XTIUSD': 'USOIL', 'USCRUDE': 'USOIL', 'WTIUSD': 'USOIL', 'OILUSD': 'USOIL', 'OIL': 'USOIL', 'OILWTI': 'USOIL', 'USOUSD': 'USOIL', 'EXTRALIGHT': 'USOIL',
+  'BRENT': 'UKOIL', 'BRN': 'UKOIL', 'XBRUSD': 'UKOIL', 'UKCRUDE': 'UKOIL', 'BRENTOIL': 'UKOIL', 'BRT': 'UKOIL', 'OILBRENT': 'UKOIL', 'BRENTUSD': 'UKOIL',
+  'NGAS': 'NATGAS', 'XNGUSD': 'NATGAS', 'NATURALGAS': 'NATGAS', 'NG': 'NATGAS',
+  // Crypto
+  'BITCOIN': 'BTCUSD', 'BTC': 'BTCUSD', 'XBT': 'BTCUSD', 'XBTUSD': 'BTCUSD',
+  'ETHEREUM': 'ETHUSD', 'ETH': 'ETHUSD',
+  'LITECOIN': 'LTCUSD', 'LTC': 'LTCUSD',
+  'RIPPLE': 'XRPUSD', 'XRP': 'XRPUSD',
+  'BITCOINCASH': 'BCHUSD', 'BCH': 'BCHUSD', 'BAB': 'BCHUSD',
+  'DOGECOIN': 'DOGEUSD', 'DOGUSD': 'DOGEUSD', 'DOGE': 'DOGEUSD',
+  'CARDANO': 'ADAUSD', 'ADA': 'ADAUSD',
+  'SOLANA': 'SOLUSD', 'SOL': 'SOLUSD',
+  'POLKADOT': 'DOTUSD', 'DOT': 'DOTUSD',
+};
+const SYMBOL_PREFIX_RE = /^(?:#|!|\.|m\.|c\.|e\.|s\.|FX[_:]|CFD[_:]|IDX[_:])/i;
+const SYMBOL_SUFFIX_RE = /(?:\.cash|Cash|_SB|_sb|\.ecn|\.raw|\.stp|\.pro|\.prime|\.ndd|\.std|\.stnd|micro|_micro|_mini|\.fx|\.fs|-OTC|mini|cent|eco|pro|raw|\.[a-z]{1,2}|[+!#.\-_]m$|[+!#.\-_]$|_[mMiz]$)/;
+function normalizeSymbol(sym: string): string {
+  if (!sym) return '';
+  let s = sym.trim();
+  s = s.replace(SYMBOL_PREFIX_RE, '');
+  s = s.replace(SYMBOL_SUFFIX_RE, '');
+  s = s.replace(SYMBOL_SUFFIX_RE, '');
+  s = s.replace(/[\/._\-\s]/g, '').toUpperCase();
+  return SYMBOL_ALIASES[s] || s;
+}
+
+const normalizePosition = (p: any) => ({
+  ...p,
+  symbol: normalizeSymbol(p.symbol),
+  size: toNum(p.size),
+  direction: String(p.direction || ''),
+  entry_price: toNum(p.entry_price),
+  current_price: p.current_price === null ? null : toNum(p.current_price),
+  avg_sl: p.avg_sl === null ? null : toNum(p.avg_sl),
+  avg_tp: p.avg_tp === null ? null : toNum(p.avg_tp),
+  unrealized_pnl: toNum(p.unrealized_pnl),
+  open_time_ms: toNum(p.open_time_ms),
+  updated_at_ms: toNum(p.updated_at_ms),
+});
   DURATION_BUCKETS.find((bucket) => durationSec >= bucket.minSec && durationSec < bucket.maxSec) || DURATION_BUCKETS[DURATION_BUCKETS.length - 1]
 );
 
