@@ -1145,34 +1145,35 @@ body[data-layout='dense'] .data-table {
 }
 
 .calendar-head--inline {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    display: flex;
     align-items: center;
     gap: 0.45rem;
     margin-bottom: 0.7rem;
 }
 
 .calendar-head__title {
+    flex: 1 1 0;
     margin: 0;
     font-size: var(--layout-head-size);
     white-space: nowrap;
-    justify-self: start;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
 .calendar-head__center {
-    display: inline-flex;
+    flex: 0 0 auto;
+    display: flex;
     align-items: center;
-    justify-self: center;
     gap: 0.3rem;
     max-width: 100%;
 }
 
 .calendar-head__actions {
-    display: inline-flex;
-    justify-self: end;
+    flex: 1 1 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
 }
 
 .calendar-center-label {
@@ -1206,13 +1207,22 @@ body[data-layout='dense'] .data-table {
 
 @media (max-width: 760px) {
     .calendar-head--inline {
-        grid-template-columns: 1fr auto;
+        display: flex;
+        flex-wrap: wrap;
         row-gap: 0.4rem;
     }
 
+    .calendar-head__title {
+        flex: 1 0 100%;
+    }
+
     .calendar-head__center {
-        grid-column: 1 / -1;
-        justify-self: center;
+        flex: 1;
+        justify-content: center;
+    }
+
+    .calendar-head__actions {
+        flex: 0 0 auto;
     }
 
     .calendar-center-label--boxed {

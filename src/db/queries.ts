@@ -524,12 +524,13 @@ export const tradeQueries = {
     account_id: string,
     from_time_ms: number,
     to_time_ms: number
-  ): Promise<Array<{ day: number; pnl: number; trades: number }>> {
+  ): Promise<Array<{ day: number; pnl: number; trades: number; wins: number }>> {
     const result = await query(
       `SELECT
           EXTRACT(DAY FROM TO_TIMESTAMP(exit_time_ms / 1000.0))::int AS day,
           COALESCE(SUM(profit), 0)::float8 AS pnl,
-          COUNT(*)::int AS trades
+          COUNT(*)::int AS trades,
+          COUNT(*) FILTER (WHERE profit > 0)::int AS wins
          FROM trades
         WHERE account_id = $1
           AND exit_time_ms IS NOT NULL

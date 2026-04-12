@@ -448,9 +448,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const dailyWinRateMap = new Map<string, { wins: number; total: number }>();
     const dayOfWeekWinRateMap = new Map<number, { wins: number; total: number }>();
     const hourOfDayWinRateMap = new Map<number, { wins: number; total: number }>();
-    const monthDayMap = new Map<number, { pnl: number; trades: number }>();
-    const monthDayWinRateMap = new Map<number, { wins: number; total: number }>();
-    const yearMonthMap = new Map<number, { pnl: number; trades: number }>();
+    const monthDayMap = new Map<number, { pnl: number; trades: number; wins: number }>();
+    const yearMonthMap = new Map<number, { pnl: number; trades: number; wins: number }>();
 
     const filterStartMs = Number.isFinite(tradeFromMs) ? tradeFromMs : 0;
     const filterEndMs = Number.isFinite(tradeToMs) ? tradeToMs : nowMs;
@@ -651,16 +650,18 @@ router.get('/analytics', async (req: Request, res: Response) => {
       });
 
       monthRows.forEach((row) => {
-        const existing = monthDayMap.get(row.day) || { pnl: 0, trades: 0 };
+        const existing = monthDayMap.get(row.day) || { pnl: 0, trades: 0, wins: 0 };
         existing.pnl += toNum(row.pnl);
         existing.trades += toNum(row.trades);
+        existing.wins += toNum((row as any).wins);
         monthDayMap.set(row.day, existing);
       });
 
       yearRows.forEach((row) => {
-        const existing = yearMonthMap.get(row.month) || { pnl: 0, trades: 0 };
+        const existing = yearMonthMap.get(row.month) || { pnl: 0, trades: 0, wins: 0 };
         existing.pnl += toNum(row.pnl);
         existing.trades += toNum(row.trades);
+        existing.wins += toNum((row as any).wins);
         yearMonthMap.set(row.month, existing);
       });
 
@@ -697,17 +698,6 @@ router.get('/analytics', async (req: Request, res: Response) => {
         hourOfDayWinRateMap.set(hourKey, hodWr);
 
         const dt = new Date(ts);
-        const inTargetMonth = dt.getFullYear() === monthYear && dt.getMonth() === monthIdx;
-        if (inTargetMonth) {
-          const dayKey = dt.getDate();
-          const dayWr = monthDayWinRateMap.get(dayKey) || { wins: 0, total: 0 };
-          dayWr.total += 1;
-          if (isWin) {
-            dayWr.wins += 1;
-          }
-          monthDayWinRateMap.set(dayKey, dayWr);
-        }
-
         tradeCurveEvents.push({
           ts,
           pnl: profit,
@@ -829,19 +819,22 @@ router.get('/analytics', async (req: Request, res: Response) => {
       .map(([symbol, size]) => ({ symbol, size }))
       .sort((a, b) => b.size - a.size);
 
-    const monthDays = Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => ({
-      day,
-      pnl: monthDayMap.get(day)?.pnl || 0,
-      trades: monthDayMap.get(day)?.trades || 0,
-      win_rate_pct: (monthDayWinRateMap.get(day)?.total || 0) > 0
-        ? ((monthDayWinRateMap.get(day)?.wins || 0) / (monthDayWinRateMap.get(day)?.total || 1)) * 100
-        : 0,
-    }));
+    const monthDays = Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
+      const entry = monthDayMap.get(day);
+      const trades = entry?.trades || 0;
+      const wins = entry?.wins || 0;
+      return {
+        day,
+        pnl: entry?.pnl || 0,
+        trades,
+        win_rate_pct: trades > 0 ? Math.round((wins / trades) * 1000) / 10 : 0,
+      };
+    });
 
     const yearMonths = Array.from({ length: 12 }, (_, i) => i + 1).map((month) => {
       const entry = yearMonthMap.get(month);
       const trades = entry?.trades || 0;
-      const wins = (entry as any)?.wins || 0;
+      const wins = entry?.wins || 0;
       return {
         month,
         pnl: entry?.pnl || 0,
