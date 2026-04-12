@@ -208,10 +208,16 @@ router.post(
         );
       });
 
-      // Save nickname if provided
+      // Persist identity/display fields for existing accounts.
       const nickname = String(accountData?.nickname || '').trim();
-      if (nickname) {
-        await accountQueries.updateNickname(accountId, nickname);
+      const accountName = String(accountData?.account_name || nickname).trim();
+      const broker = String(accountData?.broker || '').trim();
+      if (nickname || accountName || broker) {
+        await accountQueries.updateIdentity(accountId, {
+          nickname: nickname || undefined,
+          account_name: accountName || undefined,
+          broker: broker || undefined,
+        });
       }
 
       // Check for history backfill needs

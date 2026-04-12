@@ -108,6 +108,11 @@ export interface IngestPayload {
     equity: number;
     balance: number;
     margin_used: number;
+    margin_free?: number;
+    margin_level?: number;
+    nickname?: string;
+    account_name?: string;
+    broker?: string;
   };
   sync_id: string;
   ea_latest_closed_time_ms: number;

@@ -110,6 +110,29 @@ export const accountQueries = {
     );
   },
 
+  async updateIdentity(
+    account_id: string,
+    identity: { account_name?: string; broker?: string; nickname?: string },
+    client?: pg.PoolClient
+  ) {
+    const q = getQueryFn(client);
+    const accountName = String(identity.account_name || '').trim();
+    const broker = String(identity.broker || '').trim();
+    const nickname = String(identity.nickname || '').trim();
+
+    const result = await q(
+      `UPDATE accounts
+          SET account_name = CASE WHEN COALESCE(NULLIF($2, ''), '') <> '' THEN $2 ELSE account_name END,
+              broker = CASE WHEN COALESCE(NULLIF($3, ''), '') <> '' THEN $3 ELSE broker END,
+              nickname = CASE WHEN COALESCE(NULLIF($4, ''), '') <> '' THEN $4 ELSE nickname END
+       WHERE account_id = $1
+       RETURNING *`,
+      [account_id, accountName, broker, nickname]
+    );
+
+    return result.rows[0] || null;
+  },
+
   async list() {
     const result = await query('SELECT * FROM accounts ORDER BY created_at DESC');
     return result.rows;
@@ -521,12 +544,13 @@ export const tradeQueries = {
   async summarizeYearCalendar(
     account_id: string,
     year: number
-  ): Promise<Array<{ month: number; pnl: number; trades: number }>> {
+  ): Promise<Array<{ month: number; pnl: number; trades: number; wins: number }>> {
     const result = await query(
       `SELECT
           EXTRACT(MONTH FROM TO_TIMESTAMP(exit_time_ms / 1000.0))::int AS month,
           COALESCE(SUM(profit), 0)::float8 AS pnl,
-          COUNT(*)::int AS trades
+          COUNT(*)::int AS trades,
+          COUNT(*) FILTER (WHERE profit > 0)::int AS wins
          FROM trades
         WHERE account_id = $1
           AND exit_time_ms IS NOT NULL

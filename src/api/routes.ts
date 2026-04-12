@@ -309,6 +309,7 @@ const buildEmptyAnalyticsResponse = (
     month,
     pnl: 0,
     trades: 0,
+    win_rate_pct: 0,
   }));
 
   const zeroPeriod = {
@@ -363,8 +364,12 @@ const buildEmptyAnalyticsResponse = (
     },
     filtered_daily_pnl: [],
     alltime_daily_pnl: [],
+    daily_win_rate_filtered: [],
+    daily_win_rate_all_time: [],
     pnl_by_day_of_week: [],
     pnl_by_hour_of_day: [],
+    win_rate_by_day_of_week: [],
+    win_rate_by_hour_of_day: [],
     win_rate_by_trade_duration: [],
     pnl_histogram: {
       bins: [],
@@ -440,13 +445,18 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const allTimeDailyMap = new Map<string, number>();
     const dayOfWeekMap = new Map<number, number>();
     const hourOfDayMap = new Map<number, number>();
+    const dailyWinRateMap = new Map<string, { wins: number; total: number }>();
+    const dayOfWeekWinRateMap = new Map<number, { wins: number; total: number }>();
+    const hourOfDayWinRateMap = new Map<number, { wins: number; total: number }>();
     const monthDayMap = new Map<number, { pnl: number; trades: number }>();
+    const monthDayWinRateMap = new Map<number, { wins: number; total: number }>();
     const yearMonthMap = new Map<number, { pnl: number; trades: number }>();
 
     const filterStartMs = Number.isFinite(tradeFromMs) ? tradeFromMs : 0;
     const filterEndMs = Number.isFinite(tradeToMs) ? tradeToMs : nowMs;
     const breakevenToleranceFloor = resolveBreakevenToleranceFloor();
     const breakevenToleranceMax = resolveBreakevenToleranceMax(breakevenToleranceFloor);
+    let maxAccountBeTolerance = breakevenToleranceFloor;
     const dailyPnlStartMs = hasTradeFilter ? filterStartMs : Math.max(nowMs - (30 * 24 * 60 * 60 * 1000), 0);
     const dailyPnlEndMs = hasTradeFilter ? filterEndMs : nowMs;
     const groupedPnlStartMs = hasTradeFilter ? filterStartMs : 0;
@@ -506,6 +516,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
 
     for (const accountId of accountIds) {
       const breakevenTolerance = await tradeQueries.getBreakevenTolerance(accountId, breakevenToleranceFloor, breakevenToleranceMax);
+      if (breakevenTolerance > maxAccountBeTolerance) maxAccountBeTolerance = breakevenTolerance;
       const [
         accPositionsRaw,
         latestSnapshotRaw,
@@ -658,9 +669,48 @@ router.get('/analytics', async (req: Request, res: Response) => {
         if (!ts) {
           return;
         }
+        const dateKey = new Date(ts).toISOString().slice(0, 10);
+        const dayKey = new Date(ts).getDay();
+        const hourKey = new Date(ts).getHours();
+        const profit = toNum(trade.profit);
+        const isWin = profit > breakevenTolerance;
+
+        const dailyWr = dailyWinRateMap.get(dateKey) || { wins: 0, total: 0 };
+        dailyWr.total += 1;
+        if (isWin) {
+          dailyWr.wins += 1;
+        }
+        dailyWinRateMap.set(dateKey, dailyWr);
+
+        const dowWr = dayOfWeekWinRateMap.get(dayKey) || { wins: 0, total: 0 };
+        dowWr.total += 1;
+        if (isWin) {
+          dowWr.wins += 1;
+        }
+        dayOfWeekWinRateMap.set(dayKey, dowWr);
+
+        const hodWr = hourOfDayWinRateMap.get(hourKey) || { wins: 0, total: 0 };
+        hodWr.total += 1;
+        if (isWin) {
+          hodWr.wins += 1;
+        }
+        hourOfDayWinRateMap.set(hourKey, hodWr);
+
+        const dt = new Date(ts);
+        const inTargetMonth = dt.getFullYear() === monthYear && dt.getMonth() === monthIdx;
+        if (inTargetMonth) {
+          const dayKey = dt.getDate();
+          const dayWr = monthDayWinRateMap.get(dayKey) || { wins: 0, total: 0 };
+          dayWr.total += 1;
+          if (isWin) {
+            dayWr.wins += 1;
+          }
+          monthDayWinRateMap.set(dayKey, dayWr);
+        }
+
         tradeCurveEvents.push({
           ts,
-          pnl: toNum(trade.profit),
+          pnl: profit,
         });
       });
     }
@@ -681,6 +731,30 @@ router.get('/analytics', async (req: Request, res: Response) => {
       .sort((a, b) => a.day_of_week - b.day_of_week);
     const pnlByHourOfDay = Array.from(hourOfDayMap.entries())
       .map(([hour_of_day, pnl]) => ({ hour_of_day, pnl }))
+      .sort((a, b) => a.hour_of_day - b.hour_of_day);
+    const dailyWinRate = Array.from(dailyWinRateMap.entries())
+      .map(([date, stats]) => ({
+        date,
+        trades: stats.total,
+        wins: stats.wins,
+        win_rate_pct: stats.total > 0 ? (stats.wins / stats.total) * 100 : 0,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    const winRateByDayOfWeek = Array.from(dayOfWeekWinRateMap.entries())
+      .map(([day_of_week, stats]) => ({
+        day_of_week,
+        trades: stats.total,
+        wins: stats.wins,
+        win_rate_pct: stats.total > 0 ? (stats.wins / stats.total) * 100 : 0,
+      }))
+      .sort((a, b) => a.day_of_week - b.day_of_week);
+    const winRateByHourOfDay = Array.from(hourOfDayWinRateMap.entries())
+      .map(([hour_of_day, stats]) => ({
+        hour_of_day,
+        trades: stats.total,
+        wins: stats.wins,
+        win_rate_pct: stats.total > 0 ? (stats.wins / stats.total) * 100 : 0,
+      }))
       .sort((a, b) => a.hour_of_day - b.hour_of_day);
 
     const periods = {
@@ -759,13 +833,22 @@ router.get('/analytics', async (req: Request, res: Response) => {
       day,
       pnl: monthDayMap.get(day)?.pnl || 0,
       trades: monthDayMap.get(day)?.trades || 0,
+      win_rate_pct: (monthDayWinRateMap.get(day)?.total || 0) > 0
+        ? ((monthDayWinRateMap.get(day)?.wins || 0) / (monthDayWinRateMap.get(day)?.total || 1)) * 100
+        : 0,
     }));
 
-    const yearMonths = Array.from({ length: 12 }, (_, i) => i + 1).map((month) => ({
-      month,
-      pnl: yearMonthMap.get(month)?.pnl || 0,
-      trades: yearMonthMap.get(month)?.trades || 0,
-    }));
+    const yearMonths = Array.from({ length: 12 }, (_, i) => i + 1).map((month) => {
+      const entry = yearMonthMap.get(month);
+      const trades = entry?.trades || 0;
+      const wins = (entry as any)?.wins || 0;
+      return {
+        month,
+        pnl: entry?.pnl || 0,
+        trades,
+        win_rate_pct: trades > 0 ? Math.round((wins / trades) * 1000) / 10 : 0,
+      };
+    });
 
     const tradePnlCurve = tradeCurveEvents
       .slice()
@@ -780,13 +863,50 @@ router.get('/analytics', async (req: Request, res: Response) => {
         return acc;
       }, []);
 
-    const aggregatedBreakevenTolerance = resolveBreakevenToleranceFloor();
+    const aggregatedBreakevenTolerance = maxAccountBeTolerance;
+
+    // Re-classify all recent trades using the centralized BE tolerance
+    for (const t of recentTrades) {
+      const profit = toNum(t.profit);
+      if (profit > aggregatedBreakevenTolerance) t.result = 'win';
+      else if (profit < -aggregatedBreakevenTolerance) t.result = 'loss';
+      else t.result = 'breakeven';
+    }
+
     const winRateByTradeDuration = buildWinRateByTradeDuration(allFilteredTrades, aggregatedBreakevenTolerance);
     const pnlHistogram = buildPnlHistogram(allFilteredTrades, HISTOGRAM_BIN_COUNT);
     const tradeDurationScatter = allFilteredTrades.map((t) => ({
-      duration_min: Math.max(0, toNum(t.duration_sec)) / 60,
+      duration_sec: Math.max(0, toNum(t.duration_sec)),
       profit: toNum(t.profit),
+      symbol: t.symbol || 'Unknown',
     }));
+
+    // Symbol-level aggregation
+    const symbolMap = new Map<string, { pnl: number; wins: number; losses: number; total: number; win_pnl: number; loss_pnl: number; be_pnl: number }>();
+    for (const t of allFilteredTrades) {
+      const sym = t.symbol || 'Unknown';
+      if (!symbolMap.has(sym)) symbolMap.set(sym, { pnl: 0, wins: 0, losses: 0, total: 0, win_pnl: 0, loss_pnl: 0, be_pnl: 0 });
+      const entry = symbolMap.get(sym)!;
+      const profit = toNum(t.profit);
+      entry.pnl += profit;
+      entry.total += 1;
+      if (profit > aggregatedBreakevenTolerance) { entry.wins += 1; entry.win_pnl += profit; }
+      else if (profit < -aggregatedBreakevenTolerance) { entry.losses += 1; entry.loss_pnl += profit; }
+      else { entry.be_pnl += profit; }
+    }
+    const symbolStats = Array.from(symbolMap.entries())
+      .map(([symbol, s]) => ({
+        symbol,
+        pnl: Math.round(s.pnl * 100) / 100,
+        trades: s.total,
+        wins: s.wins,
+        losses: s.losses,
+        win_pnl: Math.round(s.win_pnl * 100) / 100,
+        loss_pnl: Math.round(s.loss_pnl * 100) / 100,
+        be_pnl: Math.round(s.be_pnl * 100) / 100,
+        win_rate_pct: s.total > 0 ? Math.round((s.wins / s.total) * 1000) / 10 : 0,
+      }))
+      .sort((a, b) => b.trades - a.trades);
 
     res.json({
       scope: accountIdParam === 'all' ? 'all' : 'single',
@@ -820,13 +940,19 @@ router.get('/analytics', async (req: Request, res: Response) => {
       filtered_direction_outcome_distribution: directionOutcomeDistribution,
       filtered_daily_pnl: filteredDailyPnl,
       alltime_daily_pnl: allTimeDailyPnl,
+      daily_win_rate_filtered: dailyWinRate,
+      daily_win_rate_all_time: dailyWinRate,
       pnl_by_day_of_week: pnlByDayOfWeek,
       pnl_by_hour_of_day: pnlByHourOfDay,
+      win_rate_by_day_of_week: winRateByDayOfWeek,
+      win_rate_by_hour_of_day: winRateByHourOfDay,
       win_rate_by_trade_duration: winRateByTradeDuration,
       pnl_histogram: pnlHistogram,
       trade_duration_scatter: tradeDurationScatter,
       trade_pnl_curve: tradePnlCurve,
       symbol_exposure: symbolExposure,
+      symbol_stats: symbolStats,
+      be_tolerance: aggregatedBreakevenTolerance,
       calendars: {
         monthly: {
           title: `${monthBase.toLocaleString('default', { month: 'long' })} ${monthYear}`,

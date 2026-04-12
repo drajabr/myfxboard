@@ -6,19 +6,16 @@ const FONT_KEY = 'fontPreference';
 const FONT_SIZE_KEY = 'fontSizePreference';
 const QUICK_CONTROLS_COLLAPSED_KEY = 'quickControlsCollapsed';
 const LAYOUT_KEY = 'layoutPreference';
+const UI_VERSION = 'v1.3';
 const DASHBOARD_REFRESH_MS = 5000;
 const ACCOUNTS_REFRESH_MS = 60000;
-const LAYOUT_MODES = ['comfy', 'compact', 'dense'];
+const LAYOUT_MODES = ['compact'];
 const MAX_PNL_CURVE_POINTS = 180;
 const LAYOUT_BUTTON_LABELS = {
-    comfy: 'C',
     compact: 'P',
-    dense: 'D',
 };
 const LAYOUT_NAME_LABELS = {
-    comfy: 'Comfy',
     compact: 'Compact',
-    dense: 'Dense',
 };
 
 const ACCENT_PRESETS = [
@@ -118,12 +115,15 @@ const state = {
     autoRefreshInterval: null,
     monthShift: 0,
     yearShift: 0,
-    tradesLimit: 10,
+    tradesLimit: 50,
     activeTradeFilter: null,
     exposureSort: { key: 'size', direction: 'desc' },
     tradesSort: { key: 'exit_time_ms', direction: 'desc' },
     combinePositions: true,
     combineOpenPositions: true,
+    combineExposure: true,
+    expandedPositionGroups: new Set(),
+    expandedTradeGroups: new Set(),
     accounts: [],
     accountsFetchedAt: 0,
     inflight: false,
@@ -132,6 +132,8 @@ const state = {
     lastDataHash: null,
     statusLoadingSince: 0,
     statusSettleTimer: null,
+    activeQuickPicker: null,
+    beTolerance: 0,
 };
 
 const MIN_SYNC_HEARTBEAT_MS = 700;
@@ -139,11 +141,17 @@ const MIN_SYNC_HEARTBEAT_MS = 700;
 const charts = {
     pnlCurve: null,
     dailyPnl: null,
+    dailyWr: null,
     pnlByDayOfWeek: null,
+    wrByDayOfWeek: null,
     pnlByHourOfDay: null,
+    wrByHourOfDay: null,
     durationWinRate: null,
+    durationWr: null,
     pnlHistogram: null,
 };
+
+const chartSignatures = {};
 
 const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
 let deferredInstallPrompt = null;
@@ -153,7 +161,29 @@ function formatMoney(value) {
 }
 
 function formatPrice(value, decimals = 5) {
-    return Number(value || 0).toFixed(decimals).replace(/\.?0+$/, '');
+    return Number(value || 0).toFixed(decimals);
+}
+
+function decimalPlaces(value) {
+    const str = String(value ?? '');
+    if (!str.includes('.')) {
+        return 0;
+    }
+    return str.split('.')[1].length;
+}
+
+function inferPriceDecimals(rows, key, fallback = 5) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return fallback;
+    }
+    const maxDec = rows.reduce((maxVal, row) => {
+        const val = row?.[key];
+        if (val === null || val === undefined) {
+            return maxVal;
+        }
+        return Math.max(maxVal, decimalPlaces(val));
+    }, 0);
+    return Math.min(Math.max(maxDec, 2), 6);
 }
 
 function toNum(value, fallback = 0) {
@@ -231,6 +261,26 @@ function formatDeltaPct(value) {
     return `${arrow} ${sign}${numeric.toFixed(1)}%`;
 }
 
+function buildAccountDisplay(accountId, primaryName, secondaryName) {
+    const idText = String(accountId || '').trim();
+    const first = String(primaryName || '').trim();
+    const second = String(secondaryName || '').trim();
+    const candidates = [first, second].filter(Boolean);
+    const unique = [];
+    for (const value of candidates) {
+        if (value.toLowerCase() === idText.toLowerCase()) {
+            continue;
+        }
+        if (!unique.some((existing) => existing.toLowerCase() === value.toLowerCase())) {
+            unique.push(value);
+        }
+    }
+    return {
+        idText: idText || '-',
+        labelText: unique[0] || '',
+    };
+}
+
 function pnlClass(value) {
     if (value > 0) {
         return 'pnl-positive';
@@ -258,6 +308,24 @@ function durationLabel(seconds) {
         return `${h}h ${m}m`;
     }
     return `${m}m`;
+}
+
+function formatDurationTick(seconds) {
+    const s = Math.abs(seconds);
+    if (s < 60) return `${Math.round(s)}s`;
+    if (s < 3600) return `${Math.round(s / 60)}m`;
+    if (s < 86400) return `${+(s / 3600).toFixed(1)}h`;
+    if (s < 604800) return `${+(s / 86400).toFixed(1)}d`;
+    if (s < 2592000) return `${+(s / 604800).toFixed(1)}w`;
+    return `${+(s / 2592000).toFixed(1)}M`;
+}
+
+function formatDurationTooltip(seconds) {
+    const s = Math.abs(seconds);
+    if (s < 60) return `${Math.round(s)}s`;
+    if (s < 3600) { const m = Math.floor(s / 60); const ss = Math.round(s % 60); return ss > 0 ? `${m}m ${ss}s` : `${m}m`; }
+    if (s < 86400) { const h = Math.floor(s / 3600); const m = Math.round((s % 3600) / 60); return m > 0 ? `${h}h ${m}m` : `${h}h`; }
+    const d = Math.floor(s / 86400); const h = Math.round((s % 86400) / 3600); return h > 0 ? `${d}d ${h}h` : `${d}d`;
 }
 
 function getPreferredTheme() {
@@ -289,8 +357,7 @@ function getPreferredFontSize() {
 }
 
 function getPreferredLayout() {
-    const saved = localStorage.getItem(LAYOUT_KEY);
-    return LAYOUT_MODES.includes(saved) ? saved : 'comfy';
+    return 'compact';
 }
 
 function getAccentPreset(key) {
@@ -438,6 +505,164 @@ function toggleQuickControls() {
     setQuickControlsCollapsed(collapsed);
 }
 
+function hideQuickPicker() {
+    const picker = document.getElementById('quickControlPicker');
+    if (!picker) {
+        return;
+    }
+    picker.classList.add('is-collapsed');
+    picker.innerHTML = '';
+    state.activeQuickPicker = null;
+}
+
+function closeAccountMenu() {
+    const menu = document.getElementById('accountSelectorMenu');
+    const btn = document.getElementById('accountSelectorBtn');
+    if (!menu || !btn) {
+        return;
+    }
+    menu.classList.add('is-collapsed');
+    btn.setAttribute('aria-expanded', 'false');
+}
+
+function toggleAccountMenu() {
+    const menu = document.getElementById('accountSelectorMenu');
+    const btn = document.getElementById('accountSelectorBtn');
+    if (!menu || !btn) {
+        return;
+    }
+    const opening = menu.classList.contains('is-collapsed');
+    menu.classList.toggle('is-collapsed', !opening);
+    btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+}
+
+function applyControlSelection(type, key) {
+    if (type === 'accent') {
+        localStorage.setItem(ACCENT_KEY, key);
+        applyAccentTheme(key);
+    }
+    if (type === 'background') {
+        localStorage.setItem(BACKGROUND_KEY, key);
+        applyBackgroundTheme(key);
+    }
+    if (type === 'theme') {
+        localStorage.setItem(THEME_KEY, key);
+        applyTheme(key);
+    }
+    if (type === 'font') {
+        localStorage.setItem(FONT_KEY, key);
+        applyFont(key);
+    }
+    if (type === 'fontSize') {
+        localStorage.setItem(FONT_SIZE_KEY, key);
+        applyFontSize(key);
+    }
+    if (state.lastData) {
+        renderDashboard(state.lastData);
+    }
+}
+
+function showQuickPicker(type, triggerEl) {
+    const picker = document.getElementById('quickControlPicker');
+    if (!picker) {
+        return;
+    }
+
+    if (state.activeQuickPicker === type && !picker.classList.contains('is-collapsed')) {
+        hideQuickPicker();
+        return;
+    }
+
+    let options = [];
+    let activeKey = '';
+
+    if (type === 'accent') {
+        activeKey = getPreferredAccent();
+        options = ACCENT_PRESETS.map((preset) => {
+            const color = (getThemeMode() === 'dark' ? preset.dark : preset.light).accent;
+            return {
+                key: preset.key,
+                label: preset.key.charAt(0).toUpperCase() + preset.key.slice(1),
+                swatchStyle: `background:${color}; border-radius:50%; border-color:rgba(0,0,0,0.12)`,
+                previewText: '',
+                labelStyle: `color:${color}; font-weight:600`,
+            };
+        });
+    }
+    if (type === 'background') {
+        activeKey = getPreferredBackground();
+        options = BACKGROUND_PRESETS.map((preset) => {
+            const p = getThemeMode() === 'dark' ? preset.dark : preset.light;
+            return {
+                key: preset.key,
+                label: preset.key.charAt(0).toUpperCase() + preset.key.slice(1),
+                swatchStyle: `background:radial-gradient(circle at 35% 30%, rgba(${p.tintRgb}, 0.65), ${p.bg}); border-color:rgba(${p.tintRgb}, 0.6); border-radius:6px`,
+                previewText: '',
+                labelStyle: '',
+            };
+        });
+    }
+    if (type === 'theme') {
+        activeKey = getThemeMode();
+        options = [
+            { key: 'light', label: 'Light', swatchStyle: 'background:#f3f8f5; border-radius:5px', previewText: '', labelStyle: '' },
+            { key: 'dark', label: 'Dark', swatchStyle: 'background:#0f141b; border-radius:5px', previewText: '', labelStyle: '' },
+        ];
+    }
+    if (type === 'font') {
+        activeKey = getPreferredFont();
+        options = FONT_PRESETS.map((preset) => ({
+            key: preset.key,
+            label: preset.key.charAt(0).toUpperCase() + preset.key.slice(1),
+            swatchStyle: `font-family:${preset.fontFamily}; font-size:1rem; font-weight:700; color:var(--text); background:none; border-color:transparent; width:auto; height:auto; padding:0 4px`,
+            previewText: 'Ag',
+            labelStyle: `font-family:${preset.fontFamily}`,
+        }));
+    }
+    if (type === 'fontSize') {
+        activeKey = getPreferredFontSize();
+        options = FONT_SIZE_PRESETS.map((preset) => ({
+            key: preset.key,
+            label: `Size ${preset.label} (${preset.size})`,
+            swatchStyle: `font-size:${preset.size}; font-weight:700; color:var(--text); background:none; border-color:transparent; width:auto; height:auto; padding:0 2px`,
+            previewText: 'A',
+            labelStyle: `font-size:${preset.size}`,
+        }));
+    }
+
+    picker.innerHTML = options.map((option) => `
+        <button class="quick-picker-option ${option.key === activeKey ? 'is-active' : ''}" type="button" data-picker-type="${type}" data-picker-key="${option.key}" title="${option.label}">
+            <span class="qp-swatch" style="${option.swatchStyle || ''}">${option.previewText || ''}</span>
+            <span class="qp-label" style="${option.labelStyle || ''}">${option.label}</span>
+        </button>
+    `).join('');
+
+    picker.classList.remove('is-collapsed');
+    state.activeQuickPicker = type;
+
+    // Keep the picker edges aligned with the controls drawer edges.
+    if (triggerEl) {
+        const controlsBar = document.getElementById('uiQuickControls');
+        if (controlsBar) {
+            picker.style.left = '0';
+            picker.style.right = '0';
+            picker.style.minWidth = `${controlsBar.clientWidth}px`;
+        }
+    }
+
+    picker.querySelectorAll('.quick-picker-option').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const selectedType = btn.getAttribute('data-picker-type');
+            const selectedKey = btn.getAttribute('data-picker-key');
+            if (!selectedType || !selectedKey) {
+                return;
+            }
+            applyControlSelection(selectedType, selectedKey);
+            showQuickPicker(selectedType, triggerEl);
+        });
+    });
+}
+
 function applyTheme(theme) {
     document.body.setAttribute('data-theme', theme);
     const btn = document.getElementById('themeToggleBtn');
@@ -454,22 +679,22 @@ function applyTheme(theme) {
 }
 
 function applyLayout(layoutMode) {
-    const mode = LAYOUT_MODES.includes(layoutMode) ? layoutMode : 'comfy';
+    const mode = 'compact';
     document.body.setAttribute('data-layout', mode);
     const layoutBtn = document.getElementById('layoutCycleBtn');
     const layoutModeLabel = document.getElementById('layoutModeLabel');
     if (layoutBtn) {
-        layoutBtn.textContent = LAYOUT_BUTTON_LABELS[mode] || 'C';
-        layoutBtn.title = `Layout: ${mode}`;
-        layoutBtn.setAttribute('aria-label', `Switch layout (current: ${mode})`);
+        layoutBtn.textContent = LAYOUT_BUTTON_LABELS[mode] || 'P';
+        layoutBtn.title = `Layout locked to ${mode}`;
+        layoutBtn.setAttribute('aria-label', `Layout locked to ${mode}`);
     }
     if (layoutModeLabel) {
-        layoutModeLabel.textContent = LAYOUT_NAME_LABELS[mode] || 'Comfy';
+        layoutModeLabel.textContent = LAYOUT_NAME_LABELS[mode] || 'Compact';
     }
 }
 
 function setLayout(layoutMode) {
-    const mode = LAYOUT_MODES.includes(layoutMode) ? layoutMode : 'comfy';
+    const mode = 'compact';
     localStorage.setItem(LAYOUT_KEY, mode);
     applyLayout(mode);
     Object.values(charts).forEach((chart) => {
@@ -483,10 +708,7 @@ function setLayout(layoutMode) {
 }
 
 function cycleLayoutMode() {
-    const current = getPreferredLayout();
-    const currentIndex = LAYOUT_MODES.indexOf(current);
-    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % LAYOUT_MODES.length : 0;
-    setLayout(LAYOUT_MODES[nextIndex]);
+    setLayout('compact');
 }
 
 function toggleTheme() {
@@ -559,28 +781,12 @@ function applyThemeFromSystemIfNeeded() {
 }
 
 function setupEventListeners() {
-    document.getElementById('backgroundCycleBtn').addEventListener('click', cycleBackgroundTheme);
-    document.getElementById('themeToggleBtn').addEventListener('click', toggleTheme);
-    document.getElementById('accentCycleBtn').addEventListener('click', cycleAccentTheme);
-    document.getElementById('fontCycleBtn').addEventListener('click', cycleFontPreset);
-    document.getElementById('fontSizeCycleBtn').addEventListener('click', cycleFontSizePreset);
+    document.getElementById('backgroundCycleBtn').addEventListener('click', (e) => showQuickPicker('background', e.currentTarget));
+    document.getElementById('themeToggleBtn').addEventListener('click', (e) => showQuickPicker('theme', e.currentTarget));
+    document.getElementById('accentCycleBtn').addEventListener('click', (e) => showQuickPicker('accent', e.currentTarget));
+    document.getElementById('fontCycleBtn').addEventListener('click', (e) => showQuickPicker('font', e.currentTarget));
+    document.getElementById('fontSizeCycleBtn').addEventListener('click', (e) => showQuickPicker('fontSize', e.currentTarget));
     document.getElementById('uiControlsToggleBtn').addEventListener('click', toggleQuickControls);
-
-    const layoutCycleBtn = document.getElementById('layoutCycleBtn');
-    if (layoutCycleBtn) {
-        layoutCycleBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            cycleLayoutMode();
-        });
-    }
-
-    const layoutModeLabel = document.getElementById('layoutModeLabel');
-    if (layoutModeLabel) {
-        layoutModeLabel.addEventListener('click', (e) => {
-            e.stopPropagation();
-            cycleLayoutMode();
-        });
-    }
 
     const refreshNowBtn = document.getElementById('refreshNowBtn');
     if (refreshNowBtn) {
@@ -592,12 +798,20 @@ function setupEventListeners() {
     document.addEventListener('click', (event) => {
         const wrap = document.querySelector('.ui-controls-wrap');
         const controls = document.getElementById('uiQuickControls');
+        const accountPicker = document.getElementById('accountPicker');
         if (!wrap || !controls || wrap.contains(event.target)) {
+            if (accountPicker && !accountPicker.contains(event.target)) {
+                closeAccountMenu();
+            }
             return;
         }
+        hideQuickPicker();
         if (!controls.classList.contains('is-collapsed')) {
             localStorage.setItem(QUICK_CONTROLS_COLLAPSED_KEY, '1');
             setQuickControlsCollapsed(true);
+        }
+        if (accountPicker && !accountPicker.contains(event.target)) {
+            closeAccountMenu();
         }
     });
 
@@ -610,10 +824,31 @@ function setupEventListeners() {
             localStorage.setItem(QUICK_CONTROLS_COLLAPSED_KEY, '1');
             setQuickControlsCollapsed(true);
         }
+        closeAccountMenu();
     });
+
+    const accountBtn = document.getElementById('accountSelectorBtn');
+    if (accountBtn) {
+        accountBtn.addEventListener('click', () => {
+            toggleAccountMenu();
+        });
+    }
 
     document.getElementById('accountSelector').addEventListener('change', (e) => {
         localStorage.setItem('selectedAccount', e.target.value);
+        const selector = e.target;
+        const selectorLabel = document.getElementById('accountSelectorLabel');
+        if (selectorLabel) {
+            const activeOption = selector.options[selector.selectedIndex];
+            selectorLabel.textContent = activeOption ? activeOption.textContent : 'All Accounts';
+        }
+        const selectorMenu = document.getElementById('accountSelectorMenu');
+        if (selectorMenu) {
+            selectorMenu.querySelectorAll('.account-option').forEach((btn) => {
+                const value = btn.getAttribute('data-account-value') || '';
+                btn.classList.toggle('is-active', value === selector.value);
+            });
+        }
         state.monthShift = 0;
         state.yearShift = 0;
         loadDashboard();
@@ -637,9 +872,17 @@ function setupEventListeners() {
         loadDashboard();
     });
 
-    document.getElementById('resetTradesFilterBtn').addEventListener('click', () => {
+    document.getElementById('monthResetFilterBtn').addEventListener('click', () => {
         state.activeTradeFilter = null;
-        state.tradesLimit = 10;
+        state.monthShift = 0;
+        state.tradesLimit = 50;
+        loadDashboard();
+    });
+
+    document.getElementById('yearResetFilterBtn').addEventListener('click', () => {
+        state.activeTradeFilter = null;
+        state.yearShift = 0;
+        state.tradesLimit = 50;
         loadDashboard();
     });
 
@@ -649,7 +892,7 @@ function setupEventListeners() {
         btn.textContent = state.combinePositions ? '❯' : '❮';
         btn.title = state.combinePositions ? 'Showing combined positions' : 'Showing individual trades';
         if (state.lastData) {
-            updateTradesTable(state.lastData.recent_trades);
+            updateTradesTable(getRecentTrades(state.lastData));
             updateTradeControls(state.lastData);
         }
     });
@@ -664,9 +907,23 @@ function setupEventListeners() {
         }
     });
 
-    document.getElementById('loadMoreTradesBtn').addEventListener('click', () => {
-        state.tradesLimit += 10;
-        loadDashboard();
+    document.getElementById('loadMoreTradesBtn').addEventListener('click', async () => {
+        state.tradesLimit += 50;
+        const selectedAccount = document.getElementById('accountSelector').value || localStorage.getItem('selectedAccount') || '';
+        const data = await fetchAnalytics(selectedAccount);
+        state.lastData = { ...(state.lastData || {}), ...data };
+        updateTradesTable(getRecentTrades(data));
+        updateTradeControls(data);
+    });
+
+    document.getElementById('combineExposureBtn').addEventListener('click', () => {
+        state.combineExposure = !state.combineExposure;
+        const btn = document.getElementById('combineExposureBtn');
+        btn.textContent = state.combineExposure ? '❯' : '❮';
+        btn.title = state.combineExposure ? 'Showing grouped by account exposure' : 'Showing account + symbol exposure';
+        if (state.lastData) {
+            updateExposureTable(state.lastData.positions || []);
+        }
     });
 
     document.querySelectorAll('[data-exposure-sort]').forEach((btn) => {
@@ -729,6 +986,11 @@ function setupEventListeners() {
     });
 
     themeMedia.addEventListener('change', applyThemeFromSystemIfNeeded);
+
+    window.addEventListener('resize', () => {
+        scheduleAutoFitOpenPositions();
+        scheduleAutoFitHistoricTrades();
+    });
 }
 
 async function loadAccounts() {
@@ -753,8 +1015,14 @@ async function loadAccountsIfNeeded(force = false) {
 
 function syncAccountSelector(accounts) {
     const selector = document.getElementById('accountSelector');
+    const selectorMenu = document.getElementById('accountSelectorMenu');
+    const selectorLabel = document.getElementById('accountSelectorLabel');
     const selected = localStorage.getItem('selectedAccount') || '';
-    selector.innerHTML = '<option value="">Aggregated (All Accounts)</option>';
+    selector.innerHTML = `<option value="">All Accounts (${accounts.length})</option>`;
+    const menuItems = [{
+        value: '',
+        label: `All Accounts (${accounts.length})`,
+    }];
 
     const now = Date.now();
     const healthThresholdMs = 5 * 60 * 1000;
@@ -762,15 +1030,40 @@ function syncAccountSelector(accounts) {
     accounts.forEach((acc) => {
         const option = document.createElement('option');
         option.value = acc.account_id;
-        const nickname = acc.nickname || acc.broker || acc.account_id;
+        const accountDisplay = buildAccountDisplay(acc.account_id, acc.nickname || acc.account_name, acc.broker);
         const lastSync = toNum(acc.last_sync_at || acc.last_ingest_received_at, 0);
         const isOnline = lastSync > 0 && (now - lastSync) < healthThresholdMs;
-        const statusDot = isOnline ? '🟢' : '🔴';
-        option.textContent = `${statusDot} ${acc.account_id} — ${nickname}`;
+        const statusMark = isOnline ? '🟢' : '🟥';
+        const labelText = `${statusMark} ${accountDisplay.idText}${accountDisplay.labelText ? ` - ${accountDisplay.labelText}` : ''}`;
+        option.textContent = labelText;
         selector.appendChild(option);
+        menuItems.push({ value: acc.account_id, label: labelText });
     });
 
     selector.value = selected;
+    if (!selector.value) {
+        selector.value = '';
+    }
+
+    if (selectorMenu) {
+        selectorMenu.innerHTML = menuItems.map((item) => `
+            <button class="account-option ${item.value === selector.value ? 'is-active' : ''}" type="button" data-account-value="${item.value}" title="${item.label}">${item.label}</button>
+        `).join('');
+
+        selectorMenu.querySelectorAll('.account-option').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const value = btn.getAttribute('data-account-value') || '';
+                selector.value = value;
+                selector.dispatchEvent(new Event('change', { bubbles: true }));
+                closeAccountMenu();
+            });
+        });
+    }
+
+    if (selectorLabel) {
+        const activeOption = selector.options[selector.selectedIndex];
+        selectorLabel.textContent = activeOption ? activeOption.textContent : `All Accounts (${accounts.length})`;
+    }
 }
 
 async function fetchAnalytics(accountId) {
@@ -798,18 +1091,18 @@ function updateStatusStrip(summary) {
     const systemStatusText = document.getElementById('systemStatusText');
     const systemStatusDot = document.getElementById('systemStatusDot');
     if (!systemStatusText || !systemStatusDot) return;
-    // Don't overwrite error state
-    if (String(systemStatusText.textContent || '').startsWith('Error:')) return;
-    // Reset to standard dot rendering
-    systemStatusDot.textContent = '';
-    systemStatusDot.style.background = '';
-    systemStatusDot.style.color = '';
-    systemStatusDot.classList.remove('status-dot--idle', 'status-dot--loading', 'status-dot--error');
-    systemStatusDot.classList.add('status-dot--ok');
-    systemStatusText.textContent = 'Healthy';
+    systemStatusText.textContent = UI_VERSION;
+    systemStatusDot.classList.remove('status-dot--idle', 'status-dot--loading', 'status-dot--error', 'status-dot--ok');
+    systemStatusDot.classList.add('status-dot--ok-pulse');
+    setTimeout(() => {
+        systemStatusDot.classList.remove('status-dot--ok-pulse');
+        systemStatusDot.classList.add('status-dot--ok');
+    }, 620);
 }
 
 function updateKpis(summary, periods, tradeMetrics, filteredSummary) {
+    const balanceEl = document.getElementById('balance');
+    const balanceMetaEl = document.getElementById('balanceMeta');
     const equityEl = document.getElementById('equity');
     const floatingEl = document.getElementById('floatingPnl');
     const equityMetaEl = document.getElementById('equityMeta');
@@ -823,6 +1116,16 @@ function updateKpis(summary, periods, tradeMetrics, filteredSummary) {
         : toNum(periods?.all_time?.pnl, 0);
     const equityBase = Math.max(Math.abs(toNum(summary.balance, 0) - rangePnl), 1);
     const equityPct = (rangePnl / equityBase) * 100;
+
+    if (balanceEl) {
+        balanceEl.textContent = formatMoney(summary.balance);
+        applyPnlClass(balanceEl, 0);
+    }
+
+    if (balanceMetaEl) {
+        balanceMetaEl.textContent = `Accounts ${toNum(summary.accounts_count)} · Open ${toNum(summary.open_positions)}`;
+        balanceMetaEl.className = 'label metric-card__meta';
+    }
 
     equityEl.textContent = formatMoney(summary.equity);
     floatingEl.textContent = formatMoney(summary.floating_pnl);
@@ -861,17 +1164,30 @@ function renderPeriodStats(periods) {
             <div class="metric-card">
                 <div class="label">${title}</div>
                 <div class="value ${pnlClass(p.pnl)}">${formatMoney(p.pnl)}</div>
-                <div class="label">Trades: ${p.trades_count} | Win rate: ${formatPct(p.win_rate_pct)}</div>
+                <div class="label period-meta period-meta--full">Trades ${p.trades_count} · Win ${formatPct(p.win_rate_pct)}</div>
+                <div class="label period-meta period-meta--short">T ${p.trades_count} · W ${formatPct(p.win_rate_pct)}</div>
             </div>
         `;
     }).join('');
 }
 
-function renderTradeMetrics(metrics) {
+function renderTradeMetrics(metrics, periods) {
     const grid = document.getElementById('tradeMetricsGrid');
+
+    // MoM win-rate trend: compare last30d vs all_time
+    let wrTrendHtml = '';
+    if (periods) {
+        const recent = toNum(periods.last30d?.win_rate_pct);
+        const baseline = toNum(periods.all_time?.win_rate_pct);
+        const delta = recent - baseline;
+        if (Math.abs(delta) >= 0.1) {
+            const arrow = delta > 0 ? '▲' : '▼';
+            const cls = delta > 0 ? 'pnl-positive' : 'pnl-negative';
+            wrTrendHtml = `<div class="label metric-card__trend ${cls}">${arrow} ${Math.abs(delta).toFixed(1)}% vs avg</div>`;
+        }
+    }
+
     const cards = [
-        ['Max Drawdown', formatMoney(metrics.max_drawdown), toNum(metrics.max_drawdown)],
-        ['Avg Hold Time', durationLabel(metrics.avg_hold_seconds), 0],
         ['Win Rate', formatPct(metrics.win_rate_pct), metrics.win_rate_pct],
         ['Profit Factor', Number(toNum(metrics.profit_factor)).toFixed(2), 0],
         ['Expectancy', formatMoney(metrics.expectancy), toNum(metrics.expectancy)],
@@ -880,23 +1196,24 @@ function renderTradeMetrics(metrics) {
         ['Average Loss', formatMoney(metrics.avg_loss), metrics.avg_loss],
         ['Max Win', formatMoney(metrics.max_win), metrics.max_win],
         ['Max Loss', formatMoney(metrics.max_loss), metrics.max_loss],
+        ['Max Drawdown', formatMoney(metrics.max_drawdown), toNum(metrics.max_drawdown)],
+        ['Avg Hold Time', durationLabel(metrics.avg_hold_seconds), 0],
     ];
 
     grid.classList.remove('metric-grid--dense-table');
 
-    grid.innerHTML = cards.map(([label, value, pnl]) => `
-        <div class="metric-card">
+    grid.innerHTML = cards.map(([label, value, pnl], idx) => `
+        <div class="metric-card ${idx < 2 ? 'metric-card--lead' : ''}">
             <div class="label">${label}</div>
             <div class="value ${label.includes('Hold') || label.includes('Rate') || label.includes('RR') ? '' : pnlClass(pnl)}">${value}</div>
+            ${label === 'Win Rate' ? wrTrendHtml : ''}
         </div>
     `).join('');
 }
 
 function renderDenseOverview(data) {
-    const tbody1 = document.getElementById('denseOverviewTable1');
-    const tbody2 = document.getElementById('denseOverviewTable2');
-    const tbody3 = document.getElementById('denseOverviewTable3');
-    if (!tbody1 || !tbody2 || !tbody3) {
+    const tbody = document.getElementById('denseOverviewTable');
+    if (!tbody) {
         return;
     }
 
@@ -927,23 +1244,116 @@ function renderDenseOverview(data) {
 
     const cols = 3;
     const rowCount = Math.ceil(items.length / cols);
-    const tbodies = [tbody1, tbody2, tbody3];
-    for (let c = 0; c < cols; c++) {
-        let html = '';
-        for (let r = 0; r < rowCount; r++) {
+    let html = '';
+    for (let r = 0; r < rowCount; r++) {
+        html += '<tr>';
+        for (let c = 0; c < cols; c++) {
             const item = items[r + c * rowCount];
             if (item) {
-                html += `<tr><td>${item[0]}</td><td>${item[1]}</td></tr>`;
+                html += `<td>${item[0]}</td><td>${item[1]}</td>`;
+            } else {
+                html += '<td></td><td></td>';
             }
         }
-        tbodies[c].innerHTML = html || '<tr><td colspan="2" style="text-align:center;">No data</td></tr>';
+        html += '</tr>';
     }
+    tbody.innerHTML = html;
+}
+
+function getRecentTrades(data) {
+    if (Array.isArray(data?.recent_trades)) {
+        return data.recent_trades;
+    }
+    if (Array.isArray(data?.trades)) {
+        return data.trades;
+    }
+    return [];
+}
+
+const POSITIONS_TABLE_PRIORITY_LEVELS = [7, 5, 6, 4, 3, 2];
+const TRADES_TABLE_PRIORITY_LEVELS = [7, 6, 5, 4, 3, 2];
+const tableAutoFitRaf = {
+    positions: 0,
+    trades: 0,
+};
+
+function getTableScrollHost(table) {
+    if (!table) {
+        return null;
+    }
+    return table.closest('.table-scroll') || table.parentElement;
+}
+
+function isTableOverflowing(table, scrollHost) {
+    if (!table || !scrollHost) {
+        return false;
+    }
+    return (scrollHost.scrollWidth - scrollHost.clientWidth) > 1 || (table.scrollWidth - scrollHost.clientWidth) > 1;
+}
+
+function setPriorityColumnsVisible(table, classPrefix, level, visible) {
+    if (!table) {
+        return;
+    }
+    table.querySelectorAll(`.${classPrefix}${level}`).forEach((el) => {
+        el.style.display = visible ? 'table-cell' : 'none';
+    });
+}
+
+function autoFitPriorityColumns(tableBodyId, classPrefix, priorityLevels) {
+    const tableBody = document.getElementById(tableBodyId);
+    if (!tableBody) {
+        return;
+    }
+    const table = tableBody.closest('table');
+    if (!table) {
+        return;
+    }
+    const scrollHost = getTableScrollHost(table);
+    if (!scrollHost) {
+        return;
+    }
+
+    for (const level of priorityLevels) {
+        setPriorityColumnsVisible(table, classPrefix, level, true);
+    }
+
+    void table.offsetWidth;
+
+    for (const level of priorityLevels) {
+        if (!isTableOverflowing(table, scrollHost)) {
+            break;
+        }
+        setPriorityColumnsVisible(table, classPrefix, level, false);
+        void table.offsetWidth;
+    }
+}
+
+function scheduleAutoFitOpenPositions() {
+    if (tableAutoFitRaf.positions) {
+        cancelAnimationFrame(tableAutoFitRaf.positions);
+    }
+    tableAutoFitRaf.positions = requestAnimationFrame(() => {
+        tableAutoFitRaf.positions = 0;
+        autoFitPriorityColumns('positionsTable', 'col-pos-prio-', POSITIONS_TABLE_PRIORITY_LEVELS);
+    });
+}
+
+function scheduleAutoFitHistoricTrades() {
+    if (tableAutoFitRaf.trades) {
+        cancelAnimationFrame(tableAutoFitRaf.trades);
+    }
+    tableAutoFitRaf.trades = requestAnimationFrame(() => {
+        tableAutoFitRaf.trades = 0;
+        autoFitPriorityColumns('tradesTable', 'col-trades-prio-', TRADES_TABLE_PRIORITY_LEVELS);
+    });
 }
 
 function updatePositionsTable(positions) {
     const tbody = document.getElementById('positionsTable');
     if (!positions || positions.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No open positions</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;">No open positions</td></tr>';
+        scheduleAutoFitOpenPositions();
         return;
     }
 
@@ -978,16 +1388,24 @@ function updatePositionsTable(positions) {
                 ? (totalSize > 0 ? g.children.reduce((s, p) => s + toNum(p.avg_tp || 0) * toNum(p.size), 0) / totalSize : null)
                 : null;
             const earliestOpen = Math.min(...g.children.map(p => toNum(p.open_time_ms)).filter(t => t > 0));
+            const accounts = [...new Set(g.children.map((p) => String(p.account_id || '-')))];
             return {
                 _combined: true,
                 _children: g.children,
+                _accountCount: accounts.length,
+                account_id: accounts.length === 1 ? accounts[0] : '',
                 symbol: g.symbol,
+                direction: g.children[0]?.direction || '-',
                 size: totalSize,
                 entry_price: avgEntry,
                 current_price: avgCurrent,
                 unrealized_pnl: totalPnl,
                 avg_sl: avgSl,
                 avg_tp: avgTp,
+                _entryDecimals: inferPriceDecimals(g.children, 'entry_price'),
+                _currentDecimals: inferPriceDecimals(g.children, 'current_price'),
+                _slDecimals: inferPriceDecimals(g.children, 'avg_sl'),
+                _tpDecimals: inferPriceDecimals(g.children, 'avg_tp'),
                 open_time_ms: earliestOpen === Infinity ? 0 : earliestOpen,
             };
         });
@@ -997,42 +1415,39 @@ function updatePositionsTable(positions) {
         const openMs = toNum(pos.open_time_ms);
         const ageSec = openMs > 0 ? Math.max(0, (nowMs - openMs) / 1000) : 0;
         const ageText = openMs > 0 ? durationLabel(ageSec) : '-';
-        const childClass = isChild ? ' class="pos-combine-child"' : '';
+        const side = String(pos.direction || '-').toUpperCase();
+        const slMoney = pos.avg_sl !== null ? (toNum(pos.avg_sl) - toNum(pos.entry_price)) * toNum(pos.size) : null;
+        const tpMoney = pos.avg_tp !== null ? (toNum(pos.avg_tp) - toNum(pos.entry_price)) * toNum(pos.size) : null;
+        const childClass = isChild ? ` class="pos-combine-child" data-group-symbol="${normalizeSymbol(pos.symbol)}"` : '';
         const symbolCell = pos._combined
-            ? `<td class="pos-combine-toggle" title="Click to expand">\u25B6 ${pos.symbol} (${pos._children.length})</td>`
-            : `<td>${pos.symbol}</td>`;
+            ? `<td class="pos-combine-toggle" data-group-symbol="${normalizeSymbol(pos.symbol)}" title="Click to expand">\u25B6 ${pos.symbol} (${pos._children.length})</td>`
+            : `<td>${isChild ? (pos.account_id || '-') : pos.symbol}</td>`;
+        const entryDecimals = pos._entryDecimals || inferPriceDecimals([pos], 'entry_price');
+        const currentDecimals = pos._currentDecimals || inferPriceDecimals([pos], 'current_price');
+        const slDecimals = pos._slDecimals || inferPriceDecimals([pos], 'avg_sl');
+        const tpDecimals = pos._tpDecimals || inferPriceDecimals([pos], 'avg_tp');
         return `
         <tr${childClass}>
             ${symbolCell}
-            <td>${Number(pos.size || 0).toFixed(2)}</td>
-            <td>${formatPrice(pos.entry_price)}</td>
-            <td>${pos.current_price !== null ? formatPrice(pos.current_price) : '-'}</td>
+            <td><span class="dir-badge ${side === 'BUY' ? 'dir-buy' : side === 'SELL' ? 'dir-sell' : ''}">${side}</span></td>
             <td class="${pnlClass(pos.unrealized_pnl || 0)}">${formatMoney(pos.unrealized_pnl || 0)}</td>
-            <td>${pos.avg_sl !== null ? formatPrice(pos.avg_sl) : '-'}</td>
-            <td>${pos.avg_tp !== null ? formatPrice(pos.avg_tp) : '-'}</td>
-            <td>${ageText}</td>
+            <td class="col-pos-prio-2">${ageText}</td>
+            <td class="col-pos-prio-3">${formatPrice(pos.entry_price, entryDecimals)}</td>
+            <td class="col-pos-prio-4">${pos.current_price !== null ? formatPrice(pos.current_price, currentDecimals) : '-'}</td>
+            <td class="col-pos-prio-5">${pos.avg_sl !== null ? formatPrice(pos.avg_sl, slDecimals) : '-'}</td>
+            <td class="col-pos-prio-5">${pos.avg_tp !== null ? formatPrice(pos.avg_tp, tpDecimals) : '-'}</td>
+            <td class="col-pos-prio-6 ${pnlClass(slMoney || 0)}">${slMoney === null ? '-' : formatMoney(slMoney)}</td>
+            <td class="col-pos-prio-6 ${pnlClass(tpMoney || 0)}">${tpMoney === null ? '-' : formatMoney(tpMoney)}</td>
+            <td class="col-pos-prio-7"><span class="account-tag">${pos.account_id || (pos._accountCount ? `${pos._accountCount} accts` : '-')}</span></td>
         </tr>
     `;
     };
 
     if (!state.combineOpenPositions) {
         tbody.innerHTML = positions.map((pos) => {
-            const openMs = toNum(pos.open_time_ms);
-            const ageSec = openMs > 0 ? Math.max(0, (nowMs - openMs) / 1000) : 0;
-            const ageText = openMs > 0 ? durationLabel(ageSec) : '-';
-            return `
-            <tr>
-                <td>${pos.symbol}</td>
-                <td>${Number(pos.size || 0).toFixed(2)}</td>
-                <td>${formatPrice(pos.entry_price)}</td>
-                <td>${pos.current_price !== null ? formatPrice(pos.current_price) : '-'}</td>
-                <td class="${pnlClass(pos.unrealized_pnl || 0)}">${formatMoney(pos.unrealized_pnl || 0)}</td>
-                <td>${pos.avg_sl !== null ? formatPrice(pos.avg_sl) : '-'}</td>
-                <td>${pos.avg_tp !== null ? formatPrice(pos.avg_tp) : '-'}</td>
-                <td>${ageText}</td>
-            </tr>
-        `;
+            return renderPosRow(pos, false);
         }).join('');
+        scheduleAutoFitOpenPositions();
         return;
     }
 
@@ -1048,13 +1463,20 @@ function updatePositionsTable(positions) {
     tbody.innerHTML = html;
 
     tbody.querySelectorAll('.pos-combine-toggle').forEach((td) => {
-        td.addEventListener('click', () => {
+        td.addEventListener('click', (event) => {
+            event.preventDefault();
             const parentRow = td.closest('tr');
+            const symbol = td.getAttribute('data-group-symbol');
             let sibling = parentRow.nextElementSibling;
             const isCurrentlyHidden = sibling && sibling.classList.contains('pos-combine-child') && sibling.style.display === 'none';
             while (sibling && sibling.classList.contains('pos-combine-child')) {
                 sibling.style.display = isCurrentlyHidden ? '' : 'none';
                 sibling = sibling.nextElementSibling;
+            }
+            if (isCurrentlyHidden) {
+                state.expandedPositionGroups.add(symbol);
+            } else {
+                state.expandedPositionGroups.delete(symbol);
             }
             const count = td.textContent.trim().replace(/^[\u25B6\u25BC]\s*/, '');
             td.textContent = isCurrentlyHidden ? `\u25BC ${count}` : `\u25B6 ${count}`;
@@ -1062,8 +1484,20 @@ function updatePositionsTable(positions) {
     });
 
     tbody.querySelectorAll('.pos-combine-child').forEach((row) => {
-        row.style.display = 'none';
+        const symbol = row.getAttribute('data-group-symbol');
+        row.style.display = state.expandedPositionGroups.has(symbol) ? '' : 'none';
     });
+
+    // Update toggle arrows for pre-expanded groups
+    tbody.querySelectorAll('.pos-combine-toggle').forEach((td) => {
+        const symbol = td.getAttribute('data-group-symbol');
+        if (state.expandedPositionGroups.has(symbol)) {
+            const count = td.textContent.trim().replace(/^[\u25B6\u25BC]\s*/, '');
+            td.textContent = `\u25BC ${count}`;
+        }
+    });
+
+    scheduleAutoFitOpenPositions();
 }
 
 const SYMBOL_ALIASES = {
@@ -1166,8 +1600,11 @@ function combineOverlappingTrades(trades) {
             : 0;
         const firstOpen = Math.min(...g.children.map(c => toNum(c.entry_time_ms)));
         const lastClose = Math.max(...g.children.map(c => toNum(c.exit_time_ms) || toNum(c.entry_time_ms)));
+        const entryDecimals = inferPriceDecimals(g.children, 'entry_price');
+        const exitDecimals = inferPriceDecimals(g.children, 'exit_price');
         const accounts = [...new Set(g.children.map(c => c.account_id).filter(Boolean))];
-        const result = totalPnl > 0 ? 'win' : totalPnl < 0 ? 'loss' : 'breakeven';
+        const beTol = state.beTolerance || 0;
+        const result = totalPnl > beTol ? 'win' : totalPnl < -beTol ? 'loss' : 'breakeven';
         return {
             _combined: true,
             _children: g.children,
@@ -1180,6 +1617,8 @@ function combineOverlappingTrades(trades) {
             size: totalSize,
             profit: totalPnl,
             result,
+            _entryDecimals: entryDecimals,
+            _exitDecimals: exitDecimals,
             entry_time_ms: firstOpen,
             exit_time_ms: lastClose,
             duration_sec: (lastClose - firstOpen) / 1000,
@@ -1198,7 +1637,8 @@ function updateTradesTable(trades) {
     }
 
     if (rows.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;">No trades</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;">No trades</td></tr>';
+        scheduleAutoFitHistoricTrades();
         return;
     }
 
@@ -1225,24 +1665,25 @@ function updateTradesTable(trades) {
         const closeTime = formatDateTimeMs(trade.exit_time_ms);
         const accountLabel = trade.account_id ? String(trade.account_id) : '-';
         const duration = durationLabel(trade.duration_sec);
-        const toggleCol = trade._combined
-            ? `<td class="combine-toggle" title="Click to expand">▶ ${trade._children.length}</td>`
-            : '<td></td>';
-        const childClass = isChild ? ' class="combine-child"' : '';
+        const childClass = isChild ? ` class="combine-child" data-group-symbol="${normalizeSymbol(trade.symbol)}"` : '';
+        const symbolCell = trade._combined
+            ? `<td class="combine-toggle" data-group-symbol="${normalizeSymbol(trade.symbol)}" title="Click to expand">▶ ${trade.symbol} (${trade._children.length})</td>`
+            : `<td>${isChild ? `${trade.symbol} • ${accountLabel}` : trade.symbol}</td>`;
+        const entryDecimals = trade._entryDecimals || inferPriceDecimals([trade], 'entry_price');
+        const exitDecimals = trade._exitDecimals || inferPriceDecimals([trade], 'exit_price');
         return `
         <tr${childClass}>
-            ${isChild ? '<td></td>' : toggleCol}
-            <td><span class="account-tag">${accountLabel}</span></td>
-            <td>${trade.symbol}</td>
+            ${symbolCell}
             <td>${dirBadge(trade.direction || deriveDirection(trade))}</td>
-            <td>${formatPrice(trade.entry_price)}</td>
-            <td>${trade.exit_price !== null ? formatPrice(trade.exit_price) : '-'}</td>
-            <td>${Number(trade.size || 0).toFixed(2)}</td>
             <td class="${pnlClass(trade.profit || 0)}">${formatMoney(trade.profit || 0)}</td>
-            <td>${trade.result || '-'}</td>
-            <td>${openTime}</td>
-            <td>${closeTime}</td>
-            <td>${duration}</td>
+            <td class="col-trades-prio-7"><span class="account-tag">${accountLabel}</span></td>
+            <td class="col-trades-prio-3">${formatPrice(trade.entry_price, entryDecimals)}</td>
+            <td class="col-trades-prio-4">${trade.exit_price !== null ? formatPrice(trade.exit_price, exitDecimals) : '-'}</td>
+            <td class="col-trades-prio-5">${Number(trade.size || 0).toFixed(2)}</td>
+            <td class="col-trades-prio-6">${trade.result || '-'}</td>
+            <td class="col-trades-prio-2">${openTime}</td>
+            <td class="col-trades-prio-2">${closeTime}</td>
+            <td class="col-trades-prio-7">${duration}</td>
         </tr>
     `;
     };
@@ -1259,45 +1700,135 @@ function updateTradesTable(trades) {
     tbody.innerHTML = html;
 
     tbody.querySelectorAll('.combine-toggle').forEach((td) => {
-        td.addEventListener('click', () => {
+        td.addEventListener('click', (event) => {
+            event.preventDefault();
             const parentRow = td.closest('tr');
+            const symbol = td.getAttribute('data-group-symbol');
             let sibling = parentRow.nextElementSibling;
             const isCurrentlyHidden = sibling && sibling.classList.contains('combine-child') && sibling.style.display === 'none';
             while (sibling && sibling.classList.contains('combine-child')) {
                 sibling.style.display = isCurrentlyHidden ? '' : 'none';
                 sibling = sibling.nextElementSibling;
             }
-            const count = td.textContent.trim().replace(/^[▶▼]\s*/, '');
-            td.textContent = isCurrentlyHidden ? `▼ ${count}` : `▶ ${count}`;
+            if (isCurrentlyHidden) {
+                state.expandedTradeGroups.add(symbol);
+            } else {
+                state.expandedTradeGroups.delete(symbol);
+            }
+            const label = td.textContent.trim().replace(/^[▶▼]\s*/, '');
+            td.textContent = isCurrentlyHidden ? `▼ ${label}` : `▶ ${label}`;
         });
     });
 
     tbody.querySelectorAll('.combine-child').forEach((row) => {
-        row.style.display = 'none';
+        const symbol = row.getAttribute('data-group-symbol');
+        row.style.display = state.expandedTradeGroups.has(symbol) ? '' : 'none';
     });
+
+    tbody.querySelectorAll('.combine-toggle').forEach((td) => {
+        const symbol = td.getAttribute('data-group-symbol');
+        if (state.expandedTradeGroups.has(symbol)) {
+            const label = td.textContent.trim().replace(/^[▶▼]\s*/, '');
+            td.textContent = `▼ ${label}`;
+        }
+    });
+
+    scheduleAutoFitHistoricTrades();
 }
 
-function updateExposureTable(exposureRows) {
+function updateExposureTable(positions) {
     const tbody = document.getElementById('exposureTable');
-    const rows = Array.isArray(exposureRows) ? [...exposureRows] : [];
-    rows.sort((a, b) => {
-        if (state.exposureSort.key === 'symbol') {
-            const cmp = String(a.symbol || '').localeCompare(String(b.symbol || ''));
-            return state.exposureSort.direction === 'asc' ? cmp : -cmp;
-        }
-        const diff = toNum(a.size) - toNum(b.size);
-        return state.exposureSort.direction === 'asc' ? diff : -diff;
-    });
+    const source = Array.isArray(positions) ? positions : [];
 
-    if (rows.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;">No exposure</td></tr>';
+    if (source.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No exposure</td></tr>';
         return;
     }
 
+    // Always group by symbol first
+    const symbolGroups = new Map();
+    source.forEach((p) => {
+        const sym = normalizeSymbol(p.symbol);
+        if (!symbolGroups.has(sym)) symbolGroups.set(sym, []);
+        symbolGroups.get(sym).push(p);
+    });
+
+    const totalSize = source.reduce((s, p) => s + Math.abs(toNum(p.size)), 0);
+    let rows = [];
+
+    for (const [sym, posArr] of symbolGroups) {
+        const symSize = posArr.reduce((s, p) => s + Math.abs(toNum(p.size)), 0);
+        const accounts = [...new Set(posArr.map((p) => String(p.account_id || '-')))];
+
+        // Symbol total row always present
+        rows.push({
+            isSymbol: true,
+            symbol: sym,
+            size: symSize,
+            pct: totalSize > 0 ? (symSize / totalSize) * 100 : 0,
+            account: accounts.length === 1 ? accounts[0] : `${accounts.length} accts`,
+            hasChildren: !state.combineExposure && accounts.length > 1,
+        });
+
+        // When ungrouped, show per-account breakdown
+        if (!state.combineExposure) {
+            const acctMap = new Map();
+            posArr.forEach((p) => {
+                const acct = String(p.account_id || '-');
+                acctMap.set(acct, (acctMap.get(acct) || 0) + Math.abs(toNum(p.size)));
+            });
+            if (acctMap.size > 1) {
+                for (const [acct, sz] of acctMap) {
+                    rows.push({
+                        isSymbol: false,
+                        symbol: '',
+                        size: sz,
+                        pct: totalSize > 0 ? (sz / totalSize) * 100 : 0,
+                        account: acct,
+                    });
+                }
+            }
+        }
+    }
+
+    // Sort symbol groups
+    rows.sort((a, b) => {
+        if (a.isSymbol && b.isSymbol) {
+            if (state.exposureSort.key === 'symbol') {
+                const cmp = a.symbol.localeCompare(b.symbol);
+                return state.exposureSort.direction === 'asc' ? cmp : -cmp;
+            }
+            const diff = a.size - b.size;
+            return state.exposureSort.direction === 'asc' ? diff : -diff;
+        }
+        return 0;
+    });
+
+    // Re-sort: keep children after their parent symbol
+    const sorted = [];
+    const symbolOrder = rows.filter((r) => r.isSymbol);
+    symbolOrder.sort((a, b) => {
+        if (state.exposureSort.key === 'symbol') {
+            const cmp = a.symbol.localeCompare(b.symbol);
+            return state.exposureSort.direction === 'asc' ? cmp : -cmp;
+        }
+        const diff = a.size - b.size;
+        return state.exposureSort.direction === 'asc' ? diff : -diff;
+    });
+    for (const sym of symbolOrder) {
+        sorted.push(sym);
+        rows.filter((r) => !r.isSymbol && rows.indexOf(r) > rows.indexOf(sym) &&
+            (rows.findIndex((s, i) => i > rows.indexOf(sym) && s.isSymbol) === -1 ||
+             rows.indexOf(r) < rows.findIndex((s, i) => i > rows.indexOf(sym) && s.isSymbol)))
+            .forEach((r) => sorted.push(r));
+    }
+
     tbody.innerHTML = rows.map((row) => `
-        <tr>
-            <td>${row.symbol || '-'}</td>
+        <tr class="${row.isSymbol ? 'exposure-symbol-row' : 'exposure-child-row'}">
+            <td>${row.isSymbol ? row.symbol : ''}</td>
             <td>${toNum(row.size).toFixed(2)}</td>
+            <td>${formatPct(row.pct)}</td>
+            <td><span class="account-tag">${row.account || '-'}</span></td>
         </tr>
     `).join('');
 }
@@ -1305,13 +1836,13 @@ function updateExposureTable(exposureRows) {
 function updateTradeControls(data) {
     const filterLabel = document.getElementById('tradesFilterLabel');
     const countInfo = document.getElementById('tradesCountInfo');
-    const resetBtn = document.getElementById('resetTradesFilterBtn');
     const loadMoreBtn = document.getElementById('loadMoreTradesBtn');
 
     filterLabel.textContent = state.activeTradeFilter ? `Filter: ${state.activeTradeFilter.label}` : 'Filter: None';
-    countInfo.textContent = `Showing ${toNum(data.trades_returned)} of ${toNum(data.trades_total_matching)} trades`;
-    resetBtn.disabled = !state.activeTradeFilter;
-    loadMoreBtn.disabled = toNum(data.trades_returned) >= toNum(data.trades_total_matching);
+    const returned = toNum(data.trades_returned, getRecentTrades(data).length);
+    const total = toNum(data.trades_total_matching, getRecentTrades(data).length);
+    countInfo.textContent = `Showing ${returned} of ${total} trades`;
+    loadMoreBtn.disabled = returned >= total;
 }
 
 function setDayFilter(year, month, day) {
@@ -1322,7 +1853,7 @@ function setDayFilter(year, month, day) {
         toMs: to,
         label: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
     };
-    state.tradesLimit = 10;
+    state.tradesLimit = 50;
     loadDashboard();
 }
 
@@ -1334,7 +1865,7 @@ function setMonthFilter(year, month) {
         toMs: to,
         label: `${year}-${String(month).padStart(2, '0')}`,
     };
-    state.tradesLimit = 10;
+    state.tradesLimit = 50;
     loadDashboard();
 }
 
@@ -1371,11 +1902,39 @@ function buildBarDataset(label, values, positive, negative, neutral) {
     };
 }
 
+function buildWinRateDataset(label, values, accent) {
+    return {
+        label,
+        data: values,
+        backgroundColor: values.map(() => `rgba(${getChartColorVar('--accent-rgb') || '47, 143, 98'}, 0.32)`),
+        borderColor: values.map(() => accent),
+        borderWidth: 1,
+        borderRadius: 8,
+        borderSkipped: false,
+        categoryPercentage: 0.72,
+        barPercentage: 0.9,
+        maxBarThickness: 22,
+    };
+}
+
+function toChartSignature(parts) {
+    return JSON.stringify(parts);
+}
+
+function shouldUpdateChart(key, signature) {
+    if (chartSignatures[key] === signature) {
+        return false;
+    }
+    chartSignatures[key] = signature;
+    return true;
+}
+
 function buildBarChartOptions(text, labelCount = 0) {
     const chartFont = getChartFontSpec();
     return {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: { mode: 'nearest', intersect: false, axis: 'x' },
         layout: {
             padding: { left: 10, right: 18, top: 8, bottom: 18 },
         },
@@ -1436,7 +1995,7 @@ function positionDistLabels(trackEl, segments) {
 
         const text = document.createElement('span');
         text.className = 'dist-label-text';
-        text.textContent = `${seg.count} ${seg.letter} (${seg.pct.toFixed(1)}%)`;
+        text.textContent = seg.labelText || `${seg.count} ${seg.letter} (${seg.pct.toFixed(1)}%)`;
 
         label.appendChild(dot);
         label.appendChild(text);
@@ -1611,6 +2170,87 @@ function updateDistributionProgress(wins, losses, neutralCount, directionalOutco
     ]);
 }
 
+function updateSymbolPanels(symbolStats) {
+    const pnlPanel = document.getElementById('symbolPnlPanel');
+    const wrPanel = document.getElementById('symbolWrPanel');
+    if (!pnlPanel || !wrPanel || !Array.isArray(symbolStats) || symbolStats.length === 0) {
+        if (pnlPanel) pnlPanel.innerHTML = '';
+        if (wrPanel) wrPanel.innerHTML = '';
+        return;
+    }
+
+    const renderDistBlock = (symbol, wins, losses, total, headerMeta, segments) => {
+        const neutralCount = Math.max(0, total - wins - losses);
+        const wPct = total > 0 ? (wins / total) * 100 : 0;
+        const lPct = total > 0 ? (losses / total) * 100 : 0;
+        const nPct = total > 0 ? (neutralCount / total) * 100 : 100;
+        return {
+            html: `
+            <div class="distribution-block">
+                <div class="distribution-block-head">
+                    <span class="distribution-block-title">${symbol}</span>
+                    <span class="distribution-block-meta">${headerMeta}</span>
+                </div>
+                <div class="distribution-track" role="img" aria-label="${symbol} distribution">
+                    ${wins > 0 ? `<div class="distribution-segment distribution-segment--wins" style="width:${wPct}%"></div>` : ''}
+                    ${losses > 0 ? `<div class="distribution-segment distribution-segment--losses" style="width:${lPct}%"></div>` : ''}
+                    ${neutralCount > 0 ? `<div class="distribution-segment distribution-segment--neutral" style="width:${nPct}%"></div>` : ''}
+                </div>
+            </div>`,
+            segments: segments || [
+                { pct: wPct, count: wins, letter: 'W', visible: wins > 0 },
+                { pct: lPct, count: losses, letter: 'L', visible: losses > 0 },
+                { pct: nPct, count: neutralCount, letter: 'BE', visible: neutralCount > 0 },
+            ],
+        };
+    };
+
+    const applyLabels = (panel, blocks) => {
+        const tracks = panel.querySelectorAll('.distribution-track');
+        tracks.forEach((track, idx) => {
+            if (blocks[idx]) positionDistLabels(track, blocks[idx].segments);
+        });
+    };
+
+    // PnL panel — sorted by PnL, labels show money amounts
+    const byPnl = symbolStats.slice().sort((a, b) => b.pnl - a.pnl);
+    const pnlBlocks = byPnl.map((s) => {
+        const neutralCount = Math.max(0, s.trades - s.wins - s.losses);
+        const wPct = s.trades > 0 ? (s.wins / s.trades) * 100 : 0;
+        const lPct = s.trades > 0 ? (s.losses / s.trades) * 100 : 0;
+        const nPct = s.trades > 0 ? (neutralCount / s.trades) * 100 : 100;
+        return renderDistBlock(s.symbol, s.wins, s.losses, s.trades,
+            `${formatMoney(s.pnl)} · ${s.trades} trades`,
+            [
+                { pct: wPct, count: s.wins, letter: 'W', visible: s.wins > 0, labelText: `${s.wins} W (${formatMoney(s.win_pnl || 0)})` },
+                { pct: lPct, count: s.losses, letter: 'L', visible: s.losses > 0, labelText: `${s.losses} L (${formatMoney(s.loss_pnl || 0)})` },
+                { pct: nPct, count: neutralCount, letter: 'BE', visible: neutralCount > 0, labelText: `${neutralCount} BE (${formatMoney(s.be_pnl || 0)})` },
+            ]
+        );
+    });
+    pnlPanel.innerHTML = pnlBlocks.map((b) => b.html).join('');
+    applyLabels(pnlPanel, pnlBlocks);
+
+    // Win Rate panel — sorted by win rate, labels show percentages
+    const byWr = symbolStats.slice().sort((a, b) => b.win_rate_pct - a.win_rate_pct);
+    const wrBlocks = byWr.map((s) => {
+        const neutralCount = Math.max(0, s.trades - s.wins - s.losses);
+        const wPct = s.trades > 0 ? (s.wins / s.trades) * 100 : 0;
+        const lPct = s.trades > 0 ? (s.losses / s.trades) * 100 : 0;
+        const nPct = s.trades > 0 ? (neutralCount / s.trades) * 100 : 100;
+        return renderDistBlock(s.symbol, s.wins, s.losses, s.trades,
+            `WR ${formatPct(s.win_rate_pct)} · ${s.trades} trades`,
+            [
+                { pct: wPct, count: s.wins, letter: 'W', visible: s.wins > 0, labelText: `${s.wins} W (${wPct.toFixed(1)}%)` },
+                { pct: lPct, count: s.losses, letter: 'L', visible: s.losses > 0, labelText: `${s.losses} L (${lPct.toFixed(1)}%)` },
+                { pct: nPct, count: neutralCount, letter: 'BE', visible: neutralCount > 0, labelText: `${neutralCount} BE (${nPct.toFixed(1)}%)` },
+            ]
+        );
+    });
+    wrPanel.innerHTML = wrBlocks.map((b) => b.html).join('');
+    applyLabels(wrPanel, wrBlocks);
+}
+
 function updateCharts(data) {
     const positive = getChartColorVar('--pnl-positive');
     const negative = getChartColorVar('--pnl-negative');
@@ -1620,6 +2260,7 @@ function updateCharts(data) {
     const accent = getChartColorVar('--accent');
     const accentRgb = getChartColorVar('--accent-rgb') || '47, 143, 98';
     const floatingPointColor = '#ff8a00';
+    const styleSignature = `${text}|${accent}|${accentRgb}|${chartFont.family}|${chartFont.size}`;
 
     const tradePnlCurveRows = Array.isArray(data.trade_pnl_curve) ? data.trade_pnl_curve : [];
     const floatingPnl = toNum(data.summary?.floating_pnl);
@@ -1632,8 +2273,9 @@ function updateCharts(data) {
     const visibleBaseCurveRows = baseCurveRows.slice(-MAX_PNL_CURVE_POINTS);
     const mainCurveRows = visibleBaseCurveRows.slice();
     const lastBaseValue = mainCurveRows.length > 0 ? toNum(mainCurveRows[mainCurveRows.length - 1].cumulative_pnl) : 0;
+    const floatingTs = mainCurveRows.length > 0 ? toNum(mainCurveRows[mainCurveRows.length - 1].ts, Date.now()) + 1 : Date.now();
     mainCurveRows.push({
-        ts: Date.now(),
+        ts: floatingTs,
         cumulative_pnl: lastBaseValue + floatingPnl,
     });
 
@@ -1652,7 +2294,7 @@ function updateCharts(data) {
     );
     const pnlCurveTitle = document.getElementById('pnlCurveTitle');
     if (pnlCurveTitle) {
-        pnlCurveTitle.textContent = `PnL Curve (Latest ${MAX_PNL_CURVE_POINTS} Points, Last Includes Floating PnL)`;
+        pnlCurveTitle.textContent = 'PnL Curve';
     }
 
     if (!charts.pnlCurve) {
@@ -1677,6 +2319,7 @@ function updateCharts(data) {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                interaction: { mode: 'nearest', intersect: false, axis: 'x' },
                 layout: {
                     padding: { left: 10, right: 18, top: 8, bottom: 18 },
                 },
@@ -1714,25 +2357,28 @@ function updateCharts(data) {
             },
         });
     } else {
-        charts.pnlCurve.config.type = mainCurveType;
-        charts.pnlCurve.data.labels = mainCurveLabels;
-        charts.pnlCurve.data.datasets[0].label = mainCurveLabel;
-        charts.pnlCurve.data.datasets[0].data = mainCurveValues;
-        charts.pnlCurve.data.datasets[0].borderColor = accent;
-        charts.pnlCurve.data.datasets[0].backgroundColor = `rgba(${accentRgb}, 0.12)`;
-        charts.pnlCurve.data.datasets[0].pointRadius = mainCurvePointRadiusByIndex;
-        charts.pnlCurve.data.datasets[0].pointHoverRadius = mainCurvePointRadiusByIndex.map((r) => r + 1);
-        charts.pnlCurve.data.datasets[0].pointBackgroundColor = mainCurvePointBackgroundColor;
-        charts.pnlCurve.data.datasets[0].pointBorderColor = mainCurvePointBorderColor;
-        charts.pnlCurve.data.datasets[0].fill = mainCurveFill;
-        charts.pnlCurve.data.datasets[0].showLine = mainCurveType !== 'scatter';
-        charts.pnlCurve.options.plugins.legend.labels.color = text;
-        charts.pnlCurve.options.plugins.legend.labels.font = chartFont;
-        charts.pnlCurve.options.scales.x.ticks.color = text;
-        charts.pnlCurve.options.scales.x.ticks.font = chartFont;
-        charts.pnlCurve.options.scales.y.ticks.color = text;
-        charts.pnlCurve.options.scales.y.ticks.font = chartFont;
-        charts.pnlCurve.update('none');
+        const curveSig = toChartSignature([mainCurveLabels, mainCurveValues, mainCurvePointRadiusByIndex, styleSignature]);
+        if (shouldUpdateChart('pnlCurve', curveSig)) {
+            charts.pnlCurve.config.type = mainCurveType;
+            charts.pnlCurve.data.labels = mainCurveLabels;
+            charts.pnlCurve.data.datasets[0].label = mainCurveLabel;
+            charts.pnlCurve.data.datasets[0].data = mainCurveValues;
+            charts.pnlCurve.data.datasets[0].borderColor = accent;
+            charts.pnlCurve.data.datasets[0].backgroundColor = `rgba(${accentRgb}, 0.12)`;
+            charts.pnlCurve.data.datasets[0].pointRadius = mainCurvePointRadiusByIndex;
+            charts.pnlCurve.data.datasets[0].pointHoverRadius = mainCurvePointRadiusByIndex.map((r) => r + 1);
+            charts.pnlCurve.data.datasets[0].pointBackgroundColor = mainCurvePointBackgroundColor;
+            charts.pnlCurve.data.datasets[0].pointBorderColor = mainCurvePointBorderColor;
+            charts.pnlCurve.data.datasets[0].fill = mainCurveFill;
+            charts.pnlCurve.data.datasets[0].showLine = mainCurveType !== 'scatter';
+            charts.pnlCurve.options.plugins.legend.labels.color = text;
+            charts.pnlCurve.options.plugins.legend.labels.font = chartFont;
+            charts.pnlCurve.options.scales.x.ticks.color = text;
+            charts.pnlCurve.options.scales.x.ticks.font = chartFont;
+            charts.pnlCurve.options.scales.y.ticks.color = text;
+            charts.pnlCurve.options.scales.y.ticks.font = chartFont;
+            charts.pnlCurve.update('none');
+        }
     }
 
     const wins = toNum(data.filtered_distribution?.wins);
@@ -1781,25 +2427,83 @@ function updateCharts(data) {
             },
         });
     } else {
-        charts.dailyPnl.data.labels = dailyLabels;
-        charts.dailyPnl.data.datasets[0].data = dailyValues;
-        charts.dailyPnl.data.datasets[0].backgroundColor = dailyValues.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
-        charts.dailyPnl.options.scales.x.ticks.color = text;
-        charts.dailyPnl.options.scales.x.ticks.font = chartFont;
-        charts.dailyPnl.options.scales.y.ticks.color = text;
-        charts.dailyPnl.options.scales.y.ticks.font = chartFont;
-        charts.dailyPnl.options.scales.x.ticks.maxTicksLimit = maxTicksForCount(dailyLabels.length);
-        charts.dailyPnl.options.plugins.tooltip = {
-            callbacks: {
-                title: (items) => {
-                    if (!items.length) {
-                        return '';
-                    }
-                    return dailyRawLabels[items[0].dataIndex] || '';
+        const dailyPnlSig = toChartSignature([dailyLabels, dailyValues, styleSignature, state.activeTradeFilter?.label || 'all']);
+        if (shouldUpdateChart('dailyPnl', dailyPnlSig)) {
+            charts.dailyPnl.data.labels = dailyLabels;
+            charts.dailyPnl.data.datasets[0].data = dailyValues;
+            charts.dailyPnl.data.datasets[0].backgroundColor = dailyValues.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
+            charts.dailyPnl.options.scales.x.ticks.color = text;
+            charts.dailyPnl.options.scales.x.ticks.font = chartFont;
+            charts.dailyPnl.options.scales.y.ticks.color = text;
+            charts.dailyPnl.options.scales.y.ticks.font = chartFont;
+            charts.dailyPnl.options.scales.x.ticks.maxTicksLimit = maxTicksForCount(dailyLabels.length);
+            charts.dailyPnl.options.plugins.tooltip = {
+                callbacks: {
+                    title: (items) => {
+                        if (!items.length) {
+                            return '';
+                        }
+                        return dailyRawLabels[items[0].dataIndex] || '';
+                    },
+                },
+            };
+            charts.dailyPnl.update('none');
+        }
+    }
+
+    const dailyWrRows = state.activeTradeFilter
+        ? (Array.isArray(data.daily_win_rate_filtered) ? data.daily_win_rate_filtered : [])
+        : ((Array.isArray(data.daily_win_rate_all_time) && data.daily_win_rate_all_time.length > 0)
+            ? data.daily_win_rate_all_time
+            : (Array.isArray(data.daily_win_rate_filtered) ? data.daily_win_rate_filtered : []));
+    const dailyWrRawLabels = dailyWrRows.map((r) => r.date || '');
+    const dailyWrLabels = dailyWrRawLabels.map((d) => formatIsoDateShort(d));
+    const dailyWrValues = dailyWrRows.map((r) => toNum(r.win_rate_pct));
+    const dailyWrTitle = document.getElementById('dailyWrChartTitle');
+    if (dailyWrTitle) {
+        dailyWrTitle.textContent = state.activeTradeFilter
+            ? `Daily Win Rate (${state.activeTradeFilter.label})`
+            : 'Daily Win Rate (All Time)';
+    }
+
+    if (!charts.dailyWr) {
+        charts.dailyWr = new Chart(document.getElementById('dailyWrChart'), {
+            type: 'bar',
+            data: {
+                labels: dailyWrLabels,
+                datasets: [buildWinRateDataset('Win Rate', dailyWrValues, accent)],
+            },
+            options: {
+                ...buildBarChartOptions(text, dailyWrLabels.length),
+                scales: {
+                    ...buildBarChartOptions(text, dailyWrLabels.length).scales,
+                    y: {
+                        ...buildBarChartOptions(text, dailyWrLabels.length).scales.y,
+                        min: 0,
+                        max: 100,
+                        ticks: {
+                            color: text,
+                            font: chartFont,
+                            callback: (v) => `${v}%`,
+                        },
+                    },
                 },
             },
-        };
-        charts.dailyPnl.update();
+        });
+    } else {
+        const dailyWrSig = toChartSignature([dailyWrLabels, dailyWrValues, styleSignature, state.activeTradeFilter?.label || 'all']);
+        if (shouldUpdateChart('dailyWr', dailyWrSig)) {
+            charts.dailyWr.data.labels = dailyWrLabels;
+            charts.dailyWr.data.datasets[0].data = dailyWrValues;
+            charts.dailyWr.data.datasets[0].backgroundColor = dailyWrValues.map(() => `rgba(${accentRgb}, 0.32)`);
+            charts.dailyWr.data.datasets[0].borderColor = dailyWrValues.map(() => accent);
+            charts.dailyWr.options.scales.x.ticks.color = text;
+            charts.dailyWr.options.scales.x.ticks.font = chartFont;
+            charts.dailyWr.options.scales.y.ticks.color = text;
+            charts.dailyWr.options.scales.y.ticks.font = chartFont;
+            charts.dailyWr.options.scales.x.ticks.maxTicksLimit = maxTicksForCount(dailyWrLabels.length);
+            charts.dailyWr.update('none');
+        }
     }
 
     // PnL by Day of Week
@@ -1819,13 +2523,55 @@ function updateCharts(data) {
             options: buildBarChartOptions(text, dayOfWeekLabels.length),
         });
     } else {
-        charts.pnlByDayOfWeek.data.datasets[0].data = dayOfWeekPnL;
-        charts.pnlByDayOfWeek.data.datasets[0].backgroundColor = dayOfWeekPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
-        charts.pnlByDayOfWeek.options.scales.x.ticks.color = text;
-        charts.pnlByDayOfWeek.options.scales.x.ticks.font = chartFont;
-        charts.pnlByDayOfWeek.options.scales.y.ticks.color = text;
-        charts.pnlByDayOfWeek.options.scales.y.ticks.font = chartFont;
-        charts.pnlByDayOfWeek.update();
+        const dayPnlSig = toChartSignature([dayOfWeekPnL, styleSignature]);
+        if (shouldUpdateChart('pnlByDayOfWeek', dayPnlSig)) {
+            charts.pnlByDayOfWeek.data.datasets[0].data = dayOfWeekPnL;
+            charts.pnlByDayOfWeek.data.datasets[0].backgroundColor = dayOfWeekPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
+            charts.pnlByDayOfWeek.options.scales.x.ticks.color = text;
+            charts.pnlByDayOfWeek.options.scales.x.ticks.font = chartFont;
+            charts.pnlByDayOfWeek.options.scales.y.ticks.color = text;
+            charts.pnlByDayOfWeek.options.scales.y.ticks.font = chartFont;
+            charts.pnlByDayOfWeek.update('none');
+        }
+    }
+
+    const dayOfWeekWrRows = Array.isArray(data.win_rate_by_day_of_week) ? data.win_rate_by_day_of_week : [];
+    const dayOfWeekWr = Array(7).fill(0);
+    dayOfWeekWrRows.forEach((row) => {
+        if (row.day_of_week >= 0 && row.day_of_week <= 6) dayOfWeekWr[row.day_of_week] = toNum(row.win_rate_pct);
+    });
+    if (!charts.wrByDayOfWeek) {
+        charts.wrByDayOfWeek = new Chart(document.getElementById('wrByDayOfWeekChart'), {
+            type: 'bar',
+            data: {
+                labels: dayOfWeekLabels,
+                datasets: [buildWinRateDataset('Win Rate', dayOfWeekWr, accent)],
+            },
+            options: {
+                ...buildBarChartOptions(text, dayOfWeekLabels.length),
+                scales: {
+                    ...buildBarChartOptions(text, dayOfWeekLabels.length).scales,
+                    y: {
+                        ...buildBarChartOptions(text, dayOfWeekLabels.length).scales.y,
+                        min: 0,
+                        max: 100,
+                        ticks: { color: text, font: chartFont, callback: (v) => `${v}%` },
+                    },
+                },
+            },
+        });
+    } else {
+        const dayWrSig = toChartSignature([dayOfWeekWr, styleSignature]);
+        if (shouldUpdateChart('wrByDayOfWeek', dayWrSig)) {
+            charts.wrByDayOfWeek.data.datasets[0].data = dayOfWeekWr;
+            charts.wrByDayOfWeek.data.datasets[0].backgroundColor = dayOfWeekWr.map(() => `rgba(${accentRgb}, 0.32)`);
+            charts.wrByDayOfWeek.data.datasets[0].borderColor = dayOfWeekWr.map(() => accent);
+            charts.wrByDayOfWeek.options.scales.x.ticks.color = text;
+            charts.wrByDayOfWeek.options.scales.x.ticks.font = chartFont;
+            charts.wrByDayOfWeek.options.scales.y.ticks.color = text;
+            charts.wrByDayOfWeek.options.scales.y.ticks.font = chartFont;
+            charts.wrByDayOfWeek.update('none');
+        }
     }
 
     // PnL by Hour of Day
@@ -1845,13 +2591,55 @@ function updateCharts(data) {
             options: buildBarChartOptions(text, hourOfDayLabels.length),
         });
     } else {
-        charts.pnlByHourOfDay.data.datasets[0].data = hourOfDayPnL;
-        charts.pnlByHourOfDay.data.datasets[0].backgroundColor = hourOfDayPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
-        charts.pnlByHourOfDay.options.scales.x.ticks.color = text;
-        charts.pnlByHourOfDay.options.scales.x.ticks.font = chartFont;
-        charts.pnlByHourOfDay.options.scales.y.ticks.color = text;
-        charts.pnlByHourOfDay.options.scales.y.ticks.font = chartFont;
-        charts.pnlByHourOfDay.update();
+        const hourPnlSig = toChartSignature([hourOfDayPnL, styleSignature]);
+        if (shouldUpdateChart('pnlByHourOfDay', hourPnlSig)) {
+            charts.pnlByHourOfDay.data.datasets[0].data = hourOfDayPnL;
+            charts.pnlByHourOfDay.data.datasets[0].backgroundColor = hourOfDayPnL.map((v) => v > 0 ? positive : v < 0 ? negative : neutral);
+            charts.pnlByHourOfDay.options.scales.x.ticks.color = text;
+            charts.pnlByHourOfDay.options.scales.x.ticks.font = chartFont;
+            charts.pnlByHourOfDay.options.scales.y.ticks.color = text;
+            charts.pnlByHourOfDay.options.scales.y.ticks.font = chartFont;
+            charts.pnlByHourOfDay.update('none');
+        }
+    }
+
+    const hourOfDayWrRows = Array.isArray(data.win_rate_by_hour_of_day) ? data.win_rate_by_hour_of_day : [];
+    const hourOfDayWr = Array(24).fill(0);
+    hourOfDayWrRows.forEach((row) => {
+        if (row.hour_of_day >= 0 && row.hour_of_day <= 23) hourOfDayWr[row.hour_of_day] = toNum(row.win_rate_pct);
+    });
+    if (!charts.wrByHourOfDay) {
+        charts.wrByHourOfDay = new Chart(document.getElementById('wrByHourOfDayChart'), {
+            type: 'bar',
+            data: {
+                labels: hourOfDayLabels,
+                datasets: [buildWinRateDataset('Win Rate', hourOfDayWr, accent)],
+            },
+            options: {
+                ...buildBarChartOptions(text, hourOfDayLabels.length),
+                scales: {
+                    ...buildBarChartOptions(text, hourOfDayLabels.length).scales,
+                    y: {
+                        ...buildBarChartOptions(text, hourOfDayLabels.length).scales.y,
+                        min: 0,
+                        max: 100,
+                        ticks: { color: text, font: chartFont, callback: (v) => `${v}%` },
+                    },
+                },
+            },
+        });
+    } else {
+        const hourWrSig = toChartSignature([hourOfDayWr, styleSignature]);
+        if (shouldUpdateChart('wrByHourOfDay', hourWrSig)) {
+            charts.wrByHourOfDay.data.datasets[0].data = hourOfDayWr;
+            charts.wrByHourOfDay.data.datasets[0].backgroundColor = hourOfDayWr.map(() => `rgba(${accentRgb}, 0.32)`);
+            charts.wrByHourOfDay.data.datasets[0].borderColor = hourOfDayWr.map(() => accent);
+            charts.wrByHourOfDay.options.scales.x.ticks.color = text;
+            charts.wrByHourOfDay.options.scales.x.ticks.font = chartFont;
+            charts.wrByHourOfDay.options.scales.y.ticks.color = text;
+            charts.wrByHourOfDay.options.scales.y.ticks.font = chartFont;
+            charts.wrByHourOfDay.update('none');
+        }
     }
 
     const scatterTrades = Array.isArray(data.trade_duration_scatter) ? data.trade_duration_scatter : [];
@@ -1862,7 +2650,7 @@ function updateCharts(data) {
             : 'PnL by Trade Duration (All Trades)';
     }
 
-    const scatterPoints = scatterTrades.map((t) => ({ x: toNum(t.duration_min), y: toNum(t.profit) }));
+    const scatterPoints = scatterTrades.map((t) => ({ x: toNum(t.duration_sec), y: toNum(t.profit) }));
 
     const durationChartData = {
         datasets: [
@@ -1879,6 +2667,7 @@ function updateCharts(data) {
     const durationOptions = {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: { mode: 'nearest', intersect: false },
         layout: {
             padding: { left: 10, right: 18, top: 8, bottom: 18 },
         },
@@ -1888,9 +2677,7 @@ function updateCharts(data) {
                 callbacks: {
                     label: (ctx) => {
                         const p = ctx.raw;
-                        const mins = toNum(p.x);
-                        const dur = mins >= 60 ? `${(mins / 60).toFixed(1)}h` : `${Math.round(mins)}m`;
-                        return `Duration: ${dur}  PnL: $${toNum(p.y).toFixed(2)}`;
+                        return `Duration: ${formatDurationTooltip(p.x)}  PnL: $${toNum(p.y).toFixed(2)}`;
                     },
                 },
             },
@@ -1898,12 +2685,12 @@ function updateCharts(data) {
         scales: {
             x: {
                 type: 'linear',
-                title: { display: true, text: 'Duration (min)', color: text, font: chartFont },
-                ticks: { color: text, font: chartFont },
+                title: { display: false },
+                ticks: { color: text, font: chartFont, callback: (v) => formatDurationTick(v) },
                 grid: { display: false },
             },
             y: {
-                title: { display: true, text: 'PnL ($)', color: text, font: chartFont },
+                title: { display: false },
                 ticks: {
                     color: text,
                     font: chartFont,
@@ -1924,9 +2711,60 @@ function updateCharts(data) {
             options: durationOptions,
         });
     } else {
-        charts.durationWinRate.data = durationChartData;
-        charts.durationWinRate.options = durationOptions;
-        charts.durationWinRate.update();
+        const durationPnlSig = toChartSignature([scatterPoints, styleSignature, state.activeTradeFilter?.label || 'all']);
+        if (shouldUpdateChart('durationWinRate', durationPnlSig)) {
+            charts.durationWinRate.data.datasets[0].data = scatterPoints;
+            charts.durationWinRate.data.datasets[0].backgroundColor = scatterPoints.map((p) => p.y >= 0 ? positive : negative);
+            charts.durationWinRate.options.scales.x.ticks.color = text;
+            charts.durationWinRate.options.scales.x.ticks.font = chartFont;
+            charts.durationWinRate.options.scales.y.ticks.color = text;
+            charts.durationWinRate.options.scales.y.ticks.font = chartFont;
+            charts.durationWinRate.update('none');
+        }
+    }
+
+    const durationWrRows = Array.isArray(data.win_rate_by_trade_duration) ? data.win_rate_by_trade_duration : [];
+    const durationWrLabels = durationWrRows.map((row) => row.label || 'N/A');
+    const durationWrValues = durationWrRows.map((row) => toNum(row.win_rate_pct));
+    const durationWrTitle = document.getElementById('durationWrChartTitle');
+    if (durationWrTitle) {
+        durationWrTitle.textContent = state.activeTradeFilter
+            ? `Win Rate by Trade Duration (${state.activeTradeFilter.label})`
+            : 'Win Rate by Trade Duration (All Trades)';
+    }
+    if (!charts.durationWr) {
+        charts.durationWr = new Chart(document.getElementById('durationWrChart'), {
+            type: 'bar',
+            data: {
+                labels: durationWrLabels,
+                datasets: [buildWinRateDataset('Win Rate', durationWrValues, accent)],
+            },
+            options: {
+                ...buildBarChartOptions(text, durationWrLabels.length),
+                scales: {
+                    ...buildBarChartOptions(text, durationWrLabels.length).scales,
+                    y: {
+                        ...buildBarChartOptions(text, durationWrLabels.length).scales.y,
+                        min: 0,
+                        max: 100,
+                        ticks: { color: text, font: chartFont, callback: (v) => `${v}%` },
+                    },
+                },
+            },
+        });
+    } else {
+        const durationWrSig = toChartSignature([durationWrLabels, durationWrValues, styleSignature, state.activeTradeFilter?.label || 'all']);
+        if (shouldUpdateChart('durationWr', durationWrSig)) {
+            charts.durationWr.data.labels = durationWrLabels;
+            charts.durationWr.data.datasets[0].data = durationWrValues;
+            charts.durationWr.data.datasets[0].backgroundColor = durationWrValues.map(() => `rgba(${accentRgb}, 0.32)`);
+            charts.durationWr.data.datasets[0].borderColor = durationWrValues.map(() => accent);
+            charts.durationWr.options.scales.x.ticks.color = text;
+            charts.durationWr.options.scales.x.ticks.font = chartFont;
+            charts.durationWr.options.scales.y.ticks.color = text;
+            charts.durationWr.options.scales.y.ticks.font = chartFont;
+            charts.durationWr.update('none');
+        }
     }
 
     const histogram = data.pnl_histogram || {};
@@ -1975,6 +2813,7 @@ function updateCharts(data) {
     const histogramOptions = {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: { mode: 'nearest', intersect: false, axis: 'x' },
         layout: {
             padding: { left: 10, right: 18, top: 8, bottom: 18 },
         },
@@ -2022,15 +2861,63 @@ function updateCharts(data) {
             options: histogramOptions,
         });
     } else {
-        charts.pnlHistogram.data = histogramChartData;
-        charts.pnlHistogram.options = histogramOptions;
-        charts.pnlHistogram.update();
+        const histogramSig = toChartSignature([binLabels, bins.map((b) => b.count), normalCurve.map((p) => p.expected_count), styleSignature]);
+        if (shouldUpdateChart('pnlHistogram', histogramSig)) {
+            charts.pnlHistogram.data.labels = binLabels;
+            charts.pnlHistogram.data.datasets[0].data = bins.map((b) => b.count);
+            charts.pnlHistogram.data.datasets[0].backgroundColor = barColors;
+            charts.pnlHistogram.data.datasets[0].borderColor = barColors;
+            charts.pnlHistogram.data.datasets[1].data = normalCurve.map((p) => p.expected_count);
+            charts.pnlHistogram.data.datasets[1].borderColor = text;
+            charts.pnlHistogram.options.scales.x.ticks.color = text;
+            charts.pnlHistogram.options.scales.x.ticks.font = chartFont;
+            charts.pnlHistogram.options.scales.y.ticks.color = text;
+            charts.pnlHistogram.options.scales.y.ticks.font = chartFont;
+            charts.pnlHistogram.update('none');
+        }
     }
 }
 
+function applyCalendarCenterLabelWidth() {
+    const monthLabel = document.getElementById('monthCalendarTitle');
+    if (!monthLabel) {
+        return;
+    }
+
+    const computed = window.getComputedStyle(monthLabel);
+    const font = `${computed.fontWeight} ${computed.fontSize} ${computed.fontFamily}`;
+    const padLeft = parseFloat(computed.paddingLeft) || 0;
+    const padRight = parseFloat(computed.paddingRight) || 0;
+
+    const measureCanvas = document.createElement('canvas');
+    const ctx = measureCanvas.getContext('2d');
+    if (!ctx) {
+        return;
+    }
+
+    ctx.font = font;
+    const formatter = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' });
+    let maxTextWidth = 0;
+
+    for (let month = 0; month < 12; month += 1) {
+        const candidate = formatter.format(new Date(2099, month, 1));
+        maxTextWidth = Math.max(maxTextWidth, ctx.measureText(candidate).width);
+    }
+
+    const fallbackWidth = 136;
+    const fixedWidth = Math.max(fallbackWidth, Math.ceil(maxTextWidth + padLeft + padRight + 2));
+    document.documentElement.style.setProperty('--calendar-center-label-width', `${fixedWidth}px`);
+}
+
 function renderMonthlyCalendar(monthly) {
-    document.getElementById('monthCalendarTitle').textContent = monthly.title;
+    applyCalendarCenterLabelWidth();
+    const monthDate = new Date(monthly.year, Math.max(0, monthly.month - 1), 1);
+    document.getElementById('monthCalendarTitle').textContent = monthDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
     const target = document.getElementById('monthCalendar');
+    const weekRows = Math.max(5, Math.ceil((toNum(monthly.first_weekday) + (monthly.days?.length || 0)) / 7));
+    target.style.setProperty('--month-calendar-week-rows', String(weekRows));
+    const compact = window.innerWidth < 1200;
+    const tight = window.innerWidth < 940;
 
     const cells = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => `<div class="calendar-dow">${day}</div>`);
     for (let i = 0; i < monthly.first_weekday; i += 1) {
@@ -2040,11 +2927,14 @@ function renderMonthlyCalendar(monthly) {
     monthly.days.forEach((d) => {
         const canFilter = toNum(d.trades) > 0;
         const isMuted = toNum(d.trades) === 0 && toNum(d.pnl) === 0;
+        const pnlText = compact ? `$ ${toNum(d.pnl).toFixed(0)}` : formatMoney(d.pnl);
+        const winRateText = Number.isFinite(toNum(d.win_rate_pct, NaN)) ? ` · W ${formatPct(d.win_rate_pct)}` : '';
+        const tradesText = tight ? '' : `${d.trades}t${winRateText}`;
         cells.push(`
             <div class="calendar-cell ${canFilter ? 'filterable' : ''} ${isMuted ? 'muted' : ''}" ${canFilter ? `data-day="${d.day}" data-month="${monthly.month}" data-year="${monthly.year}"` : ''}>
                 <div class="day">${d.day}</div>
-                <div class="${pnlClass(d.pnl)}">${formatMoney(d.pnl)}</div>
-                <div>${d.trades} trades</div>
+                <div class="calendar-pnl ${pnlClass(d.pnl)}">${pnlText}</div>
+                <div class="calendar-trades">${tradesText}</div>
             </div>
         `);
     });
@@ -2053,18 +2943,20 @@ function renderMonthlyCalendar(monthly) {
 }
 
 function renderYearlyCalendar(yearly) {
-    document.getElementById('yearCalendarTitle').textContent = yearly.title;
+    applyCalendarCenterLabelWidth();
+    document.getElementById('yearCalendarTitle').textContent = String(yearly.year);
     const target = document.getElementById('yearCalendar');
 
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     target.innerHTML = yearly.months.map((m) => {
         const canFilter = toNum(m.trades) > 0;
         const isMuted = toNum(m.trades) === 0 && toNum(m.pnl) === 0;
+        const wrText = Number.isFinite(toNum(m.win_rate_pct, NaN)) ? `W ${formatPct(m.win_rate_pct)}` : '';
         return `
         <div class="year-card ${canFilter ? 'filterable' : ''} ${isMuted ? 'muted' : ''}" ${canFilter ? `data-month="${m.month}" data-year="${yearly.year}"` : ''}>
             <div class="month">${monthNames[m.month - 1]}</div>
             <div class="${pnlClass(m.pnl)}">${formatMoney(m.pnl)}</div>
-            <div>${m.trades} trades</div>
+            <div class="year-card__meta">${m.trades}t${wrText ? ' · ' + wrText : ''}</div>
         </div>
     `;
     }).join('');
@@ -2085,26 +2977,26 @@ function setLoadState(loading, errorMessage = '') {
 
     const applyHealthyState = () => {
         systemStatus.classList.remove('status-error');
-        systemStatusDot.classList.remove('status-dot--idle', 'status-dot--loading', 'status-dot--ok', 'status-dot--error');
+        systemStatusDot.classList.remove('status-dot--idle', 'status-dot--loading', 'status-dot--ok', 'status-dot--ok-pulse', 'status-dot--error');
         systemStatusDot.classList.add('status-dot--ok');
-        systemStatusText.textContent = 'Healthy';
+        systemStatusText.textContent = UI_VERSION;
     };
 
     if (errorMessage) {
         systemStatus.classList.remove('status-error');
-        systemStatusDot.classList.remove('status-dot--idle', 'status-dot--loading', 'status-dot--ok', 'status-dot--error');
+        systemStatusDot.classList.remove('status-dot--idle', 'status-dot--loading', 'status-dot--ok', 'status-dot--ok-pulse', 'status-dot--error');
         systemStatus.classList.add('status-error');
         systemStatusDot.classList.add('status-dot--error');
-        systemStatusText.textContent = `Error: ${errorMessage}`;
+        systemStatusText.textContent = UI_VERSION;
         return;
     }
 
     if (loading) {
         state.statusLoadingSince = Date.now();
         systemStatus.classList.remove('status-error');
-        systemStatusDot.classList.remove('status-dot--idle', 'status-dot--loading', 'status-dot--ok', 'status-dot--error');
+        systemStatusDot.classList.remove('status-dot--idle', 'status-dot--loading', 'status-dot--ok', 'status-dot--ok-pulse', 'status-dot--error');
         systemStatusDot.classList.add('status-dot--loading');
-        systemStatusText.textContent = 'Healthy';
+        systemStatusText.textContent = UI_VERSION;
         return;
     }
 
@@ -2118,18 +3010,35 @@ function setLoadState(loading, errorMessage = '') {
 }
 
 function renderDashboard(data) {
+    state.beTolerance = toNum(data.be_tolerance, 0);
     updateStatusStrip(data.summary);
     updateKpis(data.summary, data.periods, data.trade_metrics, data.filtered_summary);
     renderPeriodStats(data.periods);
-    renderTradeMetrics(data.trade_metrics);
-    renderDenseOverview(data);
+    renderTradeMetrics(data.trade_metrics, data.periods);
     updatePositionsTable(data.positions);
-    updateExposureTable(data.symbol_exposure);
-    updateTradesTable(data.recent_trades);
+    updateExposureTable(data.positions);
+    updateTradesTable(getRecentTrades(data));
     updateTradeControls(data);
+    updateSymbolPanels(data.symbol_stats);
     updateCharts(data);
-    renderMonthlyCalendar(data.calendars.monthly);
-    renderYearlyCalendar(data.calendars.yearly);
+    if (data?.calendars?.monthly) {
+        renderMonthlyCalendar(data.calendars.monthly);
+    }
+    if (data?.calendars?.yearly) {
+        renderYearlyCalendar(data.calendars.yearly);
+    }
+
+    const hasTradeFilter = Boolean(state.activeTradeFilter);
+    const monthNeedsReset = hasTradeFilter || state.monthShift !== 0;
+    const yearNeedsReset = hasTradeFilter || state.yearShift !== 0;
+    const monthResetBtn = document.getElementById('monthResetFilterBtn');
+    const yearResetBtn = document.getElementById('yearResetFilterBtn');
+    if (monthResetBtn) {
+        monthResetBtn.classList.toggle('is-filter-reset-off', !monthNeedsReset);
+    }
+    if (yearResetBtn) {
+        yearResetBtn.classList.toggle('is-filter-reset-off', !yearNeedsReset);
+    }
 }
 
 function simpleDataFingerprint(data) {
@@ -2160,12 +3069,9 @@ async function loadDashboard() {
 
         const selectedAccount = document.getElementById('accountSelector').value || localStorage.getItem('selectedAccount') || '';
         const data = await fetchAnalytics(selectedAccount);
-        const fingerprint = simpleDataFingerprint(data);
-        if (fingerprint !== state.lastDataHash) {
-            state.lastData = data;
-            state.lastDataHash = fingerprint;
-            renderDashboard(data);
-        }
+        state.lastData = data;
+        state.lastDataHash = simpleDataFingerprint(data);
+        renderDashboard(data);
         updateLastUpdatedLabel(Date.now());
         setLoadState(false);
     } catch (error) {
@@ -2188,6 +3094,7 @@ function startAutoRefresh(interval) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    localStorage.setItem(LAYOUT_KEY, 'compact');
     applyTheme(getPreferredTheme());
     applyLayout(getPreferredLayout());
     applyBackgroundTheme(getPreferredBackground());

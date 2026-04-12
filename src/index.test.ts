@@ -15,7 +15,7 @@ vi.mock('./db/bootstrap.js', () => ({
 }));
 
 vi.mock('./db/queries.js', () => ({
-  accountQueries: { findById: vi.fn(), list: vi.fn(), ensureByAccountNumber: vi.fn(), updateWatermarks: vi.fn(), updateIngestionState: vi.fn(), updateNickname: vi.fn() },
+  accountQueries: { findById: vi.fn(), list: vi.fn(), ensureByAccountNumber: vi.fn(), updateWatermarks: vi.fn(), updateIngestionState: vi.fn(), updateNickname: vi.fn(), updateIdentity: vi.fn() },
   positionQueries: { findByAccount: vi.fn(), deleteByAccount: vi.fn(), upsertPosition: vi.fn() },
   tradeQueries: {
     findRecentByAccount: vi.fn(), findByExitRange: vi.fn(), insertTrade: vi.fn(),

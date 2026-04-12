@@ -142,8 +142,19 @@ public:
          }
       }
 
-      // UltraTrader mode: always push both live positions and closed history every sync interval.
-      bool include_history = true;
+      // Skip sync if nothing changed since last successful push,
+      // but still send at least once per 60s to keep online status alive.
+      bool payload_unchanged = (live_payload_hash == s_last_live_payload_hash && live_payload_hash != 0
+                                && history_hash == s_last_ack_history_hash);
+      long since_last_push_ms = (s_last_live_payload_sent_ms > 0) ? (timestamp_ms - s_last_live_payload_sent_ms) : 60001;
+      if(payload_unchanged && since_last_push_ms < 60000) {
+         if(s_debug_log)
+            Print("[DashboardConnector] Payload unchanged, skipping sync");
+         s_last_sync_ms = now_ms;
+         return false;
+      }
+
+      bool include_history = (history_hash != s_last_ack_history_hash);
 
       string payload = BuildPayload(
          timestamp_ms,

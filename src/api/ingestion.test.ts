@@ -10,6 +10,7 @@ vi.mock('../db/queries.js', () => ({
     updateWatermarks: vi.fn(),
     updateIngestionState: vi.fn(),
     updateNickname: vi.fn(),
+    updateIdentity: vi.fn(),
   },
   positionQueries: {
     deleteByAccount: vi.fn(),
@@ -158,6 +159,33 @@ describe('POST /api/ingestion', () => {
       .set('X-Signature-Timestamp', String(ts))
       .send(payload);
     expect(tradeQueries.insertTrade).toHaveBeenCalled();
+  });
+
+  it('persists incoming account display name for existing account id', async () => {
+    const app = makeSignedApp();
+    const ts = Date.now();
+    const { sig } = signRequest('662240', ts);
+    const payload = {
+      ...validPayload,
+      account: {
+        ...validPayload.account,
+        nickname: 'My Broker Name',
+      },
+    };
+
+    await request(app)
+      .post('/api/ingestion')
+      .set('Authorization', `HMAC-SHA256 ${sig}`)
+      .set('X-Signature-Timestamp', String(ts))
+      .send(payload);
+
+    expect(accountQueries.updateIdentity).toHaveBeenCalledWith(
+      '662240',
+      expect.objectContaining({
+        nickname: 'My Broker Name',
+        account_name: 'My Broker Name',
+      })
+    );
   });
 
   it('returns 403 on account secret mismatch', async () => {
