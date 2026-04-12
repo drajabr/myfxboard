@@ -116,3 +116,4 @@ The script finds terminals, asks for confirmation, and deploys the EA to all dis
 	http://localhost:3000/health
 
 The Docker health check uses readiness, so a healthy container now means the API can reach PostgreSQL.
+ 
