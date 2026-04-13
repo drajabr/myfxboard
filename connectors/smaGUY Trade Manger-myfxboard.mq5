@@ -124,9 +124,9 @@ public:
       string closed_trades_json = BuildClosedTradesJson(latest_closed_time_ms, latest_closed_deal_id);
       string account_json = BuildAccountJson();
 
-      // Hash only structural/stable fields — intentionally excludes tick-volatile values
-      // (position pnl, equity, margin) so the skip guard is not defeated on every tick.
-      uint live_payload_hash = HashPayload(BuildStructuralHashKey(latest_closed_time_ms));
+      // Hash live positions and account data to detect any PnL/equity/balance changes.
+      // This ensures sync is sent whenever position PnL, equity, or balance updates.
+      uint live_payload_hash = HashPayload(positions_json + "|acct:" + account_json + "|ct:" + StringFormat("%lld", latest_closed_time_ms));
       string history_hash = StringFormat("%u", HashPayload(closed_trades_json));
 
       if(!s_startup_health_checked) {
