@@ -10,6 +10,7 @@ services:
       POSTGRES_PASSWORD: dashboard_pass
       POSTGRES_DB: myfxboard
       POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/migrations:/docker-entrypoint-initdb.d
