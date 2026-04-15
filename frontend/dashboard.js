@@ -9,6 +9,8 @@ const LAYOUT_KEY = 'layoutPreference';
 const UI_VERSION = 'v1.6';
 const DASHBOARD_REFRESH_MS = 30000;
 const ACCOUNTS_REFRESH_MS = 60000;
+const LIVE_STREAM_MIN_EMIT_MS = 50;
+const LIVE_STREAM_BUFFER_MS = 1000;
 const LAYOUT_MODES = ['default', 'live', 'historic'];
 const MAX_PNL_CURVE_POINTS = 180;
 const LAYOUT_BUTTON_LABELS = {
@@ -143,6 +145,9 @@ const state = {
     statusLoadingSince: 0,
     statusSettleTimer: null,
     activeQuickPicker: null,
+    livePnlBuffer: [],
+    livePnlPumpTimer: null,
+    livePositionValues: new Map(),
     beTolerance: 0,
 };
 
@@ -165,6 +170,8 @@ const chartSignatures = {};
 
 const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
 let deferredInstallPrompt = null;
+const numericTweenRaf = new WeakMap();
+const numericFlashTimer = new WeakMap();
 
 function formatMoney(value) {
     return `$ ${Number(value || 0).toFixed(2)}`;
@@ -203,6 +210,68 @@ function inferPriceDecimals(rows, key, fallback = 5) {
 function toNum(value, fallback = 0) {
     const n = Number(value);
     return Number.isFinite(n) ? n : fallback;
+}
+
+function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+}
+
+function animateNumericText(el, nextValue, formatter, durationMs = 220) {
+    if (!el) {
+        return;
+    }
+
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const toValue = toNum(nextValue, 0);
+    const fromValue = toNum(el.dataset.animValue, toValue);
+    const diff = toValue - fromValue;
+
+    const prevRaf = numericTweenRaf.get(el);
+    if (prevRaf) {
+        cancelAnimationFrame(prevRaf);
+    }
+
+    const prevTimer = numericFlashTimer.get(el);
+    if (prevTimer) {
+        clearTimeout(prevTimer);
+    }
+
+    el.classList.remove('live-num-up', 'live-num-down');
+    if (diff !== 0) {
+        el.classList.add(diff > 0 ? 'live-num-up' : 'live-num-down');
+        const timer = setTimeout(() => {
+            el.classList.remove('live-num-up', 'live-num-down');
+        }, durationMs + 40);
+        numericFlashTimer.set(el, timer);
+    }
+
+    if (prefersReducedMotion || Math.abs(diff) < 0.0000001) {
+        el.textContent = formatter(toValue);
+        el.dataset.animValue = String(toValue);
+        return;
+    }
+
+    const startedAt = performance.now();
+    const tick = (now) => {
+        const elapsed = now - startedAt;
+        const t = Math.max(0, Math.min(1, elapsed / durationMs));
+        const eased = easeOutCubic(t);
+        const currentValue = fromValue + (diff * eased);
+        el.textContent = formatter(currentValue);
+
+        if (t < 1) {
+            const raf = requestAnimationFrame(tick);
+            numericTweenRaf.set(el, raf);
+            return;
+        }
+
+        el.textContent = formatter(toValue);
+        el.dataset.animValue = String(toValue);
+        numericTweenRaf.delete(el);
+    };
+
+    const raf = requestAnimationFrame(tick);
+    numericTweenRaf.set(el, raf);
 }
 
 function estimatePositionTargetPnl(position, targetPrice) {
@@ -618,13 +687,16 @@ function applyControlSelection(type, key) {
     }
 }
 
-function showQuickPicker(type, triggerEl) {
+function showQuickPicker(type, triggerEl, action = {}) {
     const picker = document.getElementById('quickControlPicker');
     if (!picker) {
         return;
     }
 
-    if (state.activeQuickPicker === type && !picker.classList.contains('is-collapsed')) {
+    const forceRefresh = Boolean(action.forceRefresh);
+    const isOpenSamePicker = state.activeQuickPicker === type && !picker.classList.contains('is-collapsed');
+
+    if (isOpenSamePicker && !forceRefresh) {
         hideQuickPicker();
         return;
     }
@@ -723,8 +795,13 @@ function showQuickPicker(type, triggerEl) {
             if (!selectedType || !selectedKey) {
                 return;
             }
+            const isSameSelection = selectedKey === activeKey;
             applyControlSelection(selectedType, selectedKey);
-            showQuickPicker(selectedType, triggerEl);
+            showQuickPicker(selectedType, triggerEl, {
+                source: 'option',
+                key: selectedKey,
+                forceRefresh: !isSameSelection,
+            });
         });
     });
 }
@@ -1253,8 +1330,8 @@ function updateKpis(summary, periods, tradeMetrics, filteredSummary) {
         balanceMetaEl.className = 'label metric-card__meta';
     }
 
-    equityEl.textContent = formatMoney(summary.equity);
-    floatingEl.textContent = formatMoney(summary.floating_pnl);
+    animateNumericText(equityEl, toNum(summary.equity, 0), formatMoney);
+    animateNumericText(floatingEl, toNum(summary.floating_pnl, 0), formatMoney);
 
     if (floatingMetaEl) {
         floatingMetaEl.textContent = formatDeltaPct(floatingPct);
@@ -1477,8 +1554,11 @@ function scheduleAutoFitHistoricTrades() {
 
 function updatePositionsTable(positions) {
     const tbody = document.getElementById('positionsTable');
+    const prevPositionValues = state.livePositionValues || new Map();
+    const nextPositionValues = new Map();
     if (!positions || positions.length === 0) {
         tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;">No open positions</td></tr>';
+        state.livePositionValues = nextPositionValues;
         scheduleAutoFitOpenPositions();
         return;
     }
@@ -1579,6 +1659,23 @@ function updatePositionsTable(positions) {
         const currentDecimals = pos._currentDecimals || inferPriceDecimals([pos], 'current_price');
         const slDecimals = pos._slDecimals || inferPriceDecimals([pos], 'avg_sl');
         const tpDecimals = pos._tpDecimals || inferPriceDecimals([pos], 'avg_tp');
+        const rowKey = pos._combined
+            ? `combined|${normalizeSymbol(pos.symbol)}`
+            : `${normalizeSymbol(pos.symbol)}|${String(pos.account_id || '-')}|${String(pos.direction || '-')}`
+              + `|${String(toNum(pos.open_time_ms, 0))}|${String(toNum(pos.size, 0))}`;
+        const currentValue = pos.current_price !== null ? toNum(pos.current_price, NaN) : NaN;
+        const pnlValue = toNum(pos.unrealized_pnl || 0);
+        const previous = prevPositionValues.get(rowKey);
+        const currentClass = Number.isFinite(currentValue) && previous && Number.isFinite(previous.current_price)
+            ? (currentValue > previous.current_price ? 'live-num-up' : currentValue < previous.current_price ? 'live-num-down' : '')
+            : '';
+        const pnlDeltaClass = previous
+            ? (pnlValue > previous.unrealized_pnl ? 'live-num-up' : pnlValue < previous.unrealized_pnl ? 'live-num-down' : '')
+            : '';
+        nextPositionValues.set(rowKey, {
+            current_price: Number.isFinite(currentValue) ? currentValue : NaN,
+            unrealized_pnl: pnlValue,
+        });
         return `
         <tr${childClass}>
             ${symbolCell}
@@ -1590,8 +1687,8 @@ function updatePositionsTable(positions) {
             <td class="col-pos-prio-6">${pos.avg_tp !== null ? formatPrice(pos.avg_tp, tpDecimals) : '-'}</td>
             <td class="col-pos-prio-6 ${pnlClass(tpMoney || 0)}">${tpMoney === null ? '-' : formatMoney(tpMoney)}</td>
             <td class="col-pos-prio-7">${ageText}</td>
-            <td class="col-pos-prio-7">${pos.current_price !== null ? formatPrice(pos.current_price, currentDecimals) : '-'}</td>
-            <td class="${pnlClass(pos.unrealized_pnl || 0)}">${formatMoney(pos.unrealized_pnl || 0)}</td>
+            <td class="col-pos-prio-7 ${currentClass}">${pos.current_price !== null ? formatPrice(pos.current_price, currentDecimals) : '-'}</td>
+            <td class="${pnlClass(pos.unrealized_pnl || 0)} ${pnlDeltaClass}">${formatMoney(pos.unrealized_pnl || 0)}</td>
             <td class="col-pos-prio-7">${accountInner}</td>
         </tr>
     `;
@@ -1650,6 +1747,8 @@ function updatePositionsTable(positions) {
             td.textContent = `\u25BC ${count}`;
         }
     });
+
+    state.livePositionValues = nextPositionValues;
 
     scheduleAutoFitOpenPositions();
 }
@@ -3251,23 +3350,33 @@ async function fetchLivePnl() {}
 function applyLivePnl(data) {
     if (state.inflight) return;
     const floatingEl = document.getElementById('floatingPnl');
+    const equityEl = document.getElementById('equity');
     const floatingMetaEl = document.getElementById('floatingPnlMeta');
     if (!floatingEl) return;
     const floatingPnl = toNum(data.floating_pnl, 0);
     const balance = toNum(state.lastData?.summary?.balance, 0);
+    const rawEquity = toNum(data.equity, NaN);
+    const liveEquity = Number.isFinite(rawEquity)
+        ? rawEquity
+        : toNum(state.lastData?.summary?.equity, balance + floatingPnl);
     const balanceBase = Math.max(Math.abs(balance), 1);
     const floatingPct = (floatingPnl / balanceBase) * 100;
 
     if (state.lastData && state.lastData.summary) {
         state.lastData.summary.floating_pnl = floatingPnl;
+        state.lastData.summary.equity = liveEquity;
         state.lastData.summary.open_positions = toNum(data.open_positions, state.lastData.summary.open_positions || 0);
         if (Array.isArray(data.positions)) {
             state.lastData.positions = data.positions;
         }
     }
 
-    floatingEl.textContent = formatMoney(floatingPnl);
+    animateNumericText(floatingEl, floatingPnl, formatMoney);
     applyPnlClass(floatingEl, floatingPnl);
+    if (equityEl) {
+        animateNumericText(equityEl, liveEquity, formatMoney);
+        applyPnlClass(equityEl, liveEquity - balance);
+    }
     if (floatingMetaEl) {
         floatingMetaEl.textContent = formatDeltaPct(floatingPct);
         floatingMetaEl.className = `label metric-card__meta ${pnlClass(floatingPnl)}`;
@@ -3299,6 +3408,11 @@ function startLivePnlPolling() {
         state.livePnlSource.close();
         state.livePnlSource = null;
     }
+    if (state.livePnlPumpTimer) {
+        clearInterval(state.livePnlPumpTimer);
+        state.livePnlPumpTimer = null;
+    }
+    state.livePnlBuffer = [];
     state.liveStreamHealthy = false;
     syncAdaptiveRefreshMode();
     const selectedAccount = document.getElementById('accountSelector')?.value || localStorage.getItem('selectedAccount') || '';
@@ -3311,7 +3425,15 @@ function startLivePnlPolling() {
     };
     es.onmessage = (event) => {
         try {
-            applyLivePnl(JSON.parse(event.data));
+            const payload = JSON.parse(event.data);
+            const now = Date.now();
+            state.livePnlBuffer.push({ ts: now, payload });
+            const cutoff = now - LIVE_STREAM_BUFFER_MS;
+            state.livePnlBuffer = state.livePnlBuffer.filter((item) => item.ts >= cutoff);
+            const maxBuffered = Math.max(1, Math.floor(LIVE_STREAM_BUFFER_MS / LIVE_STREAM_MIN_EMIT_MS));
+            if (state.livePnlBuffer.length > maxBuffered) {
+                state.livePnlBuffer = state.livePnlBuffer.slice(state.livePnlBuffer.length - maxBuffered);
+            }
         } catch (_) {}
     };
     es.onerror = () => {
@@ -3319,6 +3441,14 @@ function startLivePnlPolling() {
         syncAdaptiveRefreshMode();
     };
     state.livePnlSource = es;
+    state.livePnlPumpTimer = setInterval(() => {
+        if (!state.livePnlBuffer.length) {
+            return;
+        }
+        const latest = state.livePnlBuffer[state.livePnlBuffer.length - 1];
+        state.livePnlBuffer = [];
+        applyLivePnl(latest.payload);
+    }, LIVE_STREAM_MIN_EMIT_MS);
 }
 
 function startHistoryPolling() {

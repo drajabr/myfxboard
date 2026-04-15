@@ -938,10 +938,12 @@ body[data-layout='live'] .table-section--exposure {
 
 .charts-row--primary-split > .table-section--positions-main {
     grid-column: span 8;
+    min-height: clamp(288px, 33.6vw, 448px);
 }
 
 .charts-row--primary-split > .table-section--exposure {
     grid-column: span 4;
+    min-height: clamp(288px, 33.6vw, 448px);
 }
 
 .charts-row--calendar-split > .calendar-card:first-child {
@@ -1202,6 +1204,12 @@ body[data-layout='dense'] .data-table {
     flex-direction: column;
 }
 
+body:not([data-layout='live']) .table-section--positions-main,
+body:not([data-layout='live']) .table-section--exposure {
+    max-height: clamp(256px, 42vh, 544px);
+    overflow: auto;
+}
+
 .table-section--historic {
     min-height: calc(100vh - 9rem);
     display: flex;
@@ -1260,6 +1268,12 @@ body[data-layout='dense'] .data-table {
     text-align: left;
 }
 
+#positionsTable td:not(:first-child),
+#tradesTable td:not(:first-child),
+#exposureTable td:not(:first-child) {
+    text-align: center !important;
+}
+
 .data-table thead {
     background: var(--surface-alt);
 }
@@ -1316,6 +1330,44 @@ body[data-layout='dense'] .data-table {
 .pnl-neutral {
     color: var(--pnl-neutral);
     font-weight: 700;
+}
+
+@keyframes liveNumUpPulse {
+    0% {
+        transform: translateY(0);
+        filter: brightness(1);
+    }
+    35% {
+        transform: translateY(-1px);
+        filter: brightness(1.12);
+    }
+    100% {
+        transform: translateY(0);
+        filter: brightness(1);
+    }
+}
+
+@keyframes liveNumDownPulse {
+    0% {
+        transform: translateY(0);
+        filter: brightness(1);
+    }
+    35% {
+        transform: translateY(1px);
+        filter: brightness(1.08);
+    }
+    100% {
+        transform: translateY(0);
+        filter: brightness(1);
+    }
+}
+
+.live-num-up {
+    animation: liveNumUpPulse 220ms ease-out;
+}
+
+.live-num-down {
+    animation: liveNumDownPulse 220ms ease-out;
 }
 
 .account-tag {

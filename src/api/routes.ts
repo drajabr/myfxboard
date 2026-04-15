@@ -988,7 +988,12 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
     res.setHeader('X-Accel-Buffering', 'no'); // disable nginx proxy buffering
     res.flushHeaders();
 
-    let scheduledSend: NodeJS.Timeout | null = null;
+    const STREAM_MIN_EMIT_MS = 50;
+    const STREAM_BUFFER_MS = 1000;
+    const MAX_BUFFERED_EVENTS = Math.max(1, Math.floor(STREAM_BUFFER_MS / STREAM_MIN_EMIT_MS));
+
+    let sendPump: NodeJS.Timeout | null = null;
+    let pendingUpdateTs: number[] = [];
     let lastSentAt = 0;
 
     const send = () => {
@@ -1000,19 +1005,16 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
         positions,
       })}\n\n`);
       lastSentAt = Date.now();
-      scheduledSend = null;
     };
 
-    const scheduleSend = () => {
-      const elapsed = Date.now() - lastSentAt;
-      if (elapsed >= 100) {
-        send();
-        return;
+    const queueUpdate = () => {
+      const now = Date.now();
+      pendingUpdateTs.push(now);
+      const cutoff = now - STREAM_BUFFER_MS;
+      pendingUpdateTs = pendingUpdateTs.filter((ts) => ts >= cutoff);
+      if (pendingUpdateTs.length > MAX_BUFFERED_EVENTS) {
+        pendingUpdateTs = pendingUpdateTs.slice(pendingUpdateTs.length - MAX_BUFFERED_EVENTS);
       }
-      if (scheduledSend) {
-        return;
-      }
-      scheduledSend = setTimeout(send, 100 - elapsed);
     };
 
     // Send current snapshot immediately on connect
@@ -1020,11 +1022,24 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
 
     const onUpdate = (updatedAccountId: string) => {
       if (accountIdParam === 'all' || accountIds.includes(updatedAccountId)) {
-        scheduleSend();
+        queueUpdate();
       }
     };
 
     pnlEmitter.on('update', onUpdate);
+
+    sendPump = setInterval(() => {
+      if (!pendingUpdateTs.length) {
+        return;
+      }
+      const elapsed = Date.now() - lastSentAt;
+      if (elapsed < STREAM_MIN_EMIT_MS) {
+        return;
+      }
+      pendingUpdateTs = [];
+      send();
+    }, STREAM_MIN_EMIT_MS);
+    (sendPump as any).unref?.();
 
     // Heartbeat keeps the TCP connection alive through proxies (comment line, not a data event)
     const heartbeat = setInterval(() => {
@@ -1032,8 +1047,8 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
     }, 25000);
 
     req.on('close', () => {
-      if (scheduledSend) {
-        clearTimeout(scheduledSend);
+      if (sendPump) {
+        clearInterval(sendPump);
       }
       clearInterval(heartbeat);
       pnlEmitter.off('update', onUpdate);
