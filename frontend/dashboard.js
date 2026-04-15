@@ -9,15 +9,17 @@ const LAYOUT_KEY = 'layoutPreference';
 const UI_VERSION = 'v1.6';
 const DASHBOARD_REFRESH_MS = 30000;
 const ACCOUNTS_REFRESH_MS = 60000;
-const LAYOUT_MODES = ['compact', 'dense'];
+const LAYOUT_MODES = ['default', 'live', 'historic'];
 const MAX_PNL_CURVE_POINTS = 180;
 const LAYOUT_BUTTON_LABELS = {
-    compact: 'P',
-    dense: '\u229e',
+    default: 'D',
+    live: 'L',
+    historic: 'H',
 };
 const LAYOUT_NAME_LABELS = {
-    compact: 'Compact',
-    dense: 'Dense',
+    default: 'Default',
+    live: 'Live',
+    historic: 'Historic',
 };
 
 const ACCENT_PRESETS = [
@@ -407,7 +409,7 @@ function getPreferredFontSize() {
 
 function getPreferredLayout() {
     const saved = localStorage.getItem(LAYOUT_KEY);
-    return LAYOUT_MODES.includes(saved) ? saved : 'compact';
+    return LAYOUT_MODES.includes(saved) ? saved : 'default';
 }
 
 function getAccentPreset(key) {
@@ -742,9 +744,18 @@ function applyTheme(theme) {
     applyAccentTheme(getPreferredAccent());
 }
 
+function syncHeaderHeightVar() {
+    const header = document.querySelector('.header');
+    if (!header) {
+        return;
+    }
+    document.documentElement.style.setProperty('--header-height', `${Math.ceil(header.offsetHeight)}px`);
+}
+
 function applyLayout(layoutMode) {
-    const mode = LAYOUT_MODES.includes(layoutMode) ? layoutMode : 'compact';
+    const mode = LAYOUT_MODES.includes(layoutMode) ? layoutMode : 'default';
     document.body.setAttribute('data-layout', mode);
+    syncHeaderHeightVar();
     const layoutBtn = document.getElementById('layoutCycleBtn');
     const layoutModeLabel = document.getElementById('layoutModeLabel');
     if (layoutBtn) {
@@ -753,12 +764,12 @@ function applyLayout(layoutMode) {
         layoutBtn.setAttribute('aria-label', `Layout: ${LAYOUT_NAME_LABELS[mode] || mode}`);
     }
     if (layoutModeLabel) {
-        layoutModeLabel.textContent = LAYOUT_NAME_LABELS[mode] || 'Compact';
+        layoutModeLabel.textContent = LAYOUT_NAME_LABELS[mode] || 'Default';
     }
 }
 
 function setLayout(layoutMode) {
-    const mode = LAYOUT_MODES.includes(layoutMode) ? layoutMode : 'compact';
+    const mode = LAYOUT_MODES.includes(layoutMode) ? layoutMode : 'default';
     localStorage.setItem(LAYOUT_KEY, mode);
     applyLayout(mode);
     Object.values(charts).forEach((chart) => {
@@ -772,7 +783,7 @@ function setLayout(layoutMode) {
 }
 
 function cycleLayoutMode() {
-    const current = document.body.getAttribute('data-layout') || 'compact';
+    const current = document.body.getAttribute('data-layout') || 'default';
     const idx = LAYOUT_MODES.indexOf(current);
     const next = LAYOUT_MODES[(idx + 1) % LAYOUT_MODES.length];
     setLayout(next);
@@ -1079,6 +1090,7 @@ function setupEventListeners() {
     themeMedia.addEventListener('change', applyThemeFromSystemIfNeeded);
 
     window.addEventListener('resize', () => {
+        syncHeaderHeightVar();
         scheduleAutoFitOpenPositions();
         scheduleAutoFitHistoricTrades();
     });
@@ -1307,10 +1319,10 @@ function renderTradeMetrics(metrics, periods) {
         ['Expectancy', formatMoney(metrics.expectancy), toNum(metrics.expectancy), 'pnl'],
         ['Average RR', Number(toNum(metrics.avg_rr)).toFixed(2), 0, 'neutral'],
         ['Average Win', formatMoney(metrics.avg_win), metrics.avg_win, 'pnl'],
-        ['Average Loss', formatMoney(metrics.avg_loss), metrics.avg_loss, 'pnl'],
         ['Max Win', formatMoney(metrics.max_win), metrics.max_win, 'pnl'],
-        ['Max Drawdown', formatMoney(metrics.max_drawdown), -Math.abs(toNum(metrics.max_drawdown)), 'pnl'],
+        ['Average Loss', formatMoney(metrics.avg_loss), metrics.avg_loss, 'pnl'],
         ['Max Loss', formatMoney(metrics.max_loss), metrics.max_loss, 'pnl'],
+        ['Max Drawdown', formatMoney(metrics.max_drawdown), -Math.abs(toNum(metrics.max_drawdown)), 'pnl'],
         ['Avg Hold Time', durationLabel(metrics.avg_hold_seconds), 0, 'neutral'],
     ];
 
@@ -2544,8 +2556,8 @@ function updateCharts(data) {
     const dailyTitle = document.getElementById('dailyPnlChartTitle');
     if (dailyTitle) {
         dailyTitle.textContent = state.activeTradeFilter
-            ? `Daily PnL (${state.activeTradeFilter.label})`
-            : 'Daily PnL (All Time)';
+            ? `Historical PnL (${state.activeTradeFilter.label})`
+            : 'Historical PnL (All Time)';
     }
 
     if (!charts.dailyPnl) {
@@ -2608,8 +2620,8 @@ function updateCharts(data) {
     const dailyWrTitle = document.getElementById('dailyWrChartTitle');
     if (dailyWrTitle) {
         dailyWrTitle.textContent = state.activeTradeFilter
-            ? `Daily Win Rate (${state.activeTradeFilter.label})`
-            : 'Daily Win Rate (All Time)';
+            ? `Historical Win Rate (${state.activeTradeFilter.label})`
+            : 'Historical Win Rate (All Time)';
     }
 
     if (!charts.dailyWr) {

@@ -66,7 +66,7 @@
         </header>
 
         <main class="main-content">
-            <section class="table-section section-performance-windows">
+            <section class="table-section section-performance-windows layout-live-keep">
                 <h3>Performance Overview</h3>
                 <div class="summary-spotlight">
                     <div class="metric-card metric-card--spotlight">
@@ -88,7 +88,7 @@
                 <div class="metric-grid" id="periodStatsGrid"></div>
             </section>
 
-            <section class="charts-row charts-row--primary-split">
+            <section class="charts-row charts-row--primary-split layout-live-keep">
                 <div class="table-section table-section--positions-main">
                     <div class="trades-head">
                         <h3>Open Positions</h3>
@@ -139,7 +139,7 @@
                 </div>
             </section>
 
-            <section class="charts-row charts-row--calendar-split">
+            <section class="charts-row charts-row--calendar-split layout-historic-keep">
                 <div class="table-section calendar-card">
                     <div class="calendar-head calendar-head--inline">
                         <h3 class="calendar-head__title">Monthly Calendar</h3>
@@ -170,7 +170,7 @@
                 </div>
             </section>
 
-            <section class="charts-row charts-row--metrics-split">
+            <section class="charts-row charts-row--metrics-split layout-historic-keep">
                 <div class="table-section table-section--trade-metrics">
                     <h3>Trade Metrics</h3>
                     <div class="metric-grid" id="tradeMetricsGrid"></div>
@@ -181,7 +181,7 @@
                 </div>
             </section>
 
-            <section class="charts-row dense-hide">
+            <section class="charts-row dense-hide layout-historic-keep">
                 <div class="chart-container">
                     <h3 id="pnlHistogramTitle">PnL Distribution (Histogram)</h3>
                     <canvas id="pnlHistogramChart"></canvas>
@@ -270,51 +270,7 @@
                 </div>
             </section>
 
-            <section class="charts-row dense-hide">
-                <div class="chart-container">
-                    <h3 id="dailyPnlChartTitle">Daily PnL (All Time)</h3>
-                    <canvas id="dailyPnlChart"></canvas>
-                </div>
-                <div class="chart-container">
-                    <h3 id="dailyWrChartTitle">Daily Win Rate (All Time)</h3>
-                    <canvas id="dailyWrChart"></canvas>
-                </div>
-            </section>
-
-            <section class="charts-row dense-hide">
-                <div class="chart-container">
-                    <h3>PnL by Hour of Day</h3>
-                    <canvas id="pnlByHourOfDayChart"></canvas>
-                </div>
-                <div class="chart-container">
-                    <h3>Win Rate by Hour of Day</h3>
-                    <canvas id="wrByHourOfDayChart"></canvas>
-                </div>
-            </section>
-
-            <section class="charts-row dense-hide">
-                <div class="chart-container">
-                    <h3>PnL by Day of Week</h3>
-                    <canvas id="pnlByDayOfWeekChart"></canvas>
-                </div>
-                <div class="chart-container">
-                    <h3>Win Rate by Day of Week</h3>
-                    <canvas id="wrByDayOfWeekChart"></canvas>
-                </div>
-            </section>
-
-            <section class="charts-row dense-hide">
-                <div class="chart-container">
-                    <h3 id="durationWinRateTitle">PnL by Trade Duration</h3>
-                    <canvas id="durationWinRateChart"></canvas>
-                </div>
-                <div class="chart-container">
-                    <h3 id="durationWrChartTitle">Win Rate by Trade Duration</h3>
-                    <canvas id="durationWrChart"></canvas>
-                </div>
-            </section>
-
-            <section class="charts-row dense-hide">
+            <section class="charts-row dense-hide layout-historic-keep">
                 <div class="chart-container">
                     <h3>PnL by Symbol</h3>
                     <div id="symbolPnlPanel" class="distribution-progress"></div>
@@ -325,7 +281,51 @@
                 </div>
             </section>
 
-            <section class="table-section table-section--historic">
+            <section class="charts-row dense-hide layout-historic-keep">
+                <div class="chart-container">
+                    <h3 id="durationWinRateTitle">PnL by Trade Duration</h3>
+                    <canvas id="durationWinRateChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3 id="durationWrChartTitle">Win Rate by Trade Duration</h3>
+                    <canvas id="durationWrChart"></canvas>
+                </div>
+            </section>
+
+            <section class="charts-row dense-hide layout-historic-keep">
+                <div class="chart-container">
+                    <h3 id="dailyPnlChartTitle">Historical PnL (All Time)</h3>
+                    <canvas id="dailyPnlChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3 id="dailyWrChartTitle">Historical Win Rate (All Time)</h3>
+                    <canvas id="dailyWrChart"></canvas>
+                </div>
+            </section>
+
+            <section class="charts-row dense-hide layout-historic-keep">
+                <div class="chart-container">
+                    <h3>PnL by Day of Week</h3>
+                    <canvas id="pnlByDayOfWeekChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>Win Rate by Day of Week</h3>
+                    <canvas id="wrByDayOfWeekChart"></canvas>
+                </div>
+            </section>
+
+            <section class="charts-row dense-hide layout-historic-keep">
+                <div class="chart-container">
+                    <h3>PnL by Hour of Day</h3>
+                    <canvas id="pnlByHourOfDayChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>Win Rate by Hour of Day</h3>
+                    <canvas id="wrByHourOfDayChart"></canvas>
+                </div>
+            </section>
+
+            <section class="table-section table-section--historic layout-historic-keep">
                 <div class="trades-head">
                     <h3 id="tradesSectionTitle">Historic Trades</h3>
                     <div class="trades-controls">

@@ -160,16 +160,6 @@ body {
     font-family: var(--app-font);
     background: radial-gradient(circle at top right, rgba(var(--bg-tint-rgb), 0.12), transparent 40%), var(--bg);
     color: var(--text);
-    --layout-gap: 1rem;
-    --layout-block-pad: 1rem;
-    --layout-card-pad: 0.75rem;
-    --layout-row-min-h: 360px;
-    --layout-head-size: 0.95rem;
-    --layout-cell-pad: 0.65rem;
-    --chart-height: 340px;
-}
-
-body[data-layout='compact'] {
     --layout-gap: 0.72rem;
     --layout-block-pad: 0.76rem;
     --layout-card-pad: 0.58rem;
@@ -874,7 +864,9 @@ body[data-layout='dense'] #tradeMetricsGrid .metric-card {
     font-weight: 700;
 }
 
-body[data-layout='compact'] .metric-card .value {
+body[data-layout='default'] .metric-card .value,
+body[data-layout='live'] .metric-card .value,
+body[data-layout='historic'] .metric-card .value {
     font-size: 0.95rem;
 }
 
@@ -895,6 +887,53 @@ body[data-layout='dense'] .metric-card .value {
     display: flex;
     flex-direction: column;
     min-height: clamp(360px, 42vw, 560px);
+}
+
+body[data-layout='live'] .layout-historic-keep {
+    display: none !important;
+}
+
+body[data-layout='historic'] .layout-live-keep {
+    display: none !important;
+}
+
+body[data-layout='live'] {
+    overflow: hidden;
+}
+
+body[data-layout='live'] .app-container {
+    height: 100vh;
+    overflow: hidden;
+}
+
+body[data-layout='live'] .main-content {
+    height: calc(100vh - var(--header-height, 64px));
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: var(--layout-gap);
+}
+
+body[data-layout='live'] .section-performance-windows {
+    min-height: 0;
+    margin-bottom: 0;
+}
+
+body[data-layout='live'] .charts-row--primary-split {
+    min-height: 0;
+    margin-bottom: 0;
+}
+
+body[data-layout='live'] .charts-row--primary-split > * {
+    min-height: 0;
+    height: 100%;
+}
+
+body[data-layout='live'] .table-section--positions-main,
+body[data-layout='live'] .table-section--exposure {
+    min-height: 0;
+    height: 100%;
+    overflow: auto;
 }
 
 .charts-row--primary-split > .table-section--positions-main {
@@ -1211,8 +1250,14 @@ body[data-layout='dense'] .data-table {
 .data-table td {
     padding: var(--layout-cell-pad);
     border-bottom: 1px solid var(--border);
-    text-align: left;
+    text-align: center;
     white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.data-table th:first-child,
+.data-table td:first-child {
+    text-align: left;
 }
 
 .data-table thead {
@@ -1236,27 +1281,6 @@ body[data-layout='dense'] .data-table {
 
 .sort-btn:hover {
     color: var(--accent-strong);
-}
-
-#positionsTable td:nth-child(2),
-#tradesTable td:nth-child(2) {
-    text-align: center;
-}
-
-#positionsTable td:nth-child(3),
-#positionsTable td:nth-child(4),
-#positionsTable td:nth-child(5),
-#positionsTable td:nth-child(6),
-#positionsTable td:nth-child(7),
-#positionsTable td:nth-child(8),
-#positionsTable td:nth-child(10),
-#positionsTable td:nth-child(11),
-#tradesTable td:nth-child(3),
-#tradesTable td:nth-child(4),
-#tradesTable td:nth-child(8),
-#tradesTable td:nth-child(10) {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
 }
 
 .col-pos-prio-3,
@@ -1463,12 +1487,16 @@ body[data-layout='dense'] .data-table {
     font-size: 0.68rem;
 }
 
-body[data-layout='compact'] .calendar-cell {
+body[data-layout='default'] .calendar-cell,
+body[data-layout='live'] .calendar-cell,
+body[data-layout='historic'] .calendar-cell {
     min-height: 56px;
     font-size: 0.7rem;
 }
 
-body[data-layout='compact'] #monthCalendar {
+body[data-layout='default'] #monthCalendar,
+body[data-layout='live'] #monthCalendar,
+body[data-layout='historic'] #monthCalendar {
     height: 408px;
 }
 
@@ -1800,12 +1828,6 @@ body[data-layout='dense'] .pos-combine-child {
     opacity: 0.8;
 }
 
-@media (min-width: 761px) and (max-width: 1180px) {
-    #tradeMetricsGrid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-}
-
 @media (max-width: 540px) {
     .header {
         flex-wrap: wrap;
@@ -1840,8 +1862,13 @@ body[data-layout='dense'] .pos-combine-child {
         grid-column: 1 / -1;
     }
 
-    body[data-layout='dense'] .charts-row > * {
-        grid-column: span 6;
+    .charts-row--primary-split > .table-section--positions-main,
+    .charts-row--primary-split > .table-section--exposure,
+    .charts-row--calendar-split > .calendar-card:first-child,
+    .charts-row--calendar-split > .calendar-card:last-child,
+    .charts-row--metrics-split > .table-section--trade-metrics,
+    .charts-row--metrics-split > .chart-container {
+        grid-column: 1 / -1;
     }
 
     .summary-spotlight {
@@ -1867,11 +1894,7 @@ body[data-layout='dense'] .pos-combine-child {
     }
 
     #tradeMetricsGrid {
-        grid-template-columns: 1fr;
-    }
-
-    body[data-layout='dense'] .charts-row > * {
-        grid-column: 1 / -1;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .year-grid {
