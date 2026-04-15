@@ -4,7 +4,11 @@ import crypto from 'crypto';
 const DEFAULT_ALLOWED_TIMESTAMP_DRIFT_MS = 180000;
 
 const resolveAllowedTimestampDriftMs = (): number => {
-  const configured = Number(process.env.INGEST_ALLOWED_TIMESTAMP_DRIFT_MS);
+  const raw = process.env.INGEST_ALLOWED_TIMESTAMP_DRIFT_MS;
+  if (raw === undefined || raw === '') {
+    return DEFAULT_ALLOWED_TIMESTAMP_DRIFT_MS;
+  }
+  const configured = Number(raw);
   if (Number.isFinite(configured) && configured >= 0) {
     return configured;
   }
