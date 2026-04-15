@@ -173,6 +173,7 @@ const chartSignatures = {};
 
 const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
 let deferredInstallPrompt = null;
+const numericTweenRaf = new WeakMap();
 const numericFlashTimer = new WeakMap();
 
 function formatMoney(value) {
@@ -214,6 +215,10 @@ function toNum(value, fallback = 0) {
     return Number.isFinite(n) ? n : fallback;
 }
 
+function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+}
+
 function animateNumericText(el, nextValue, formatter, durationMs = 220) {
     if (!el) {
         return;
@@ -222,6 +227,11 @@ function animateNumericText(el, nextValue, formatter, durationMs = 220) {
     const toValue = toNum(nextValue, 0);
     const fromValue = toNum(el.dataset.animValue, toValue);
     const diff = toValue - fromValue;
+
+    const prevRaf = numericTweenRaf.get(el);
+    if (prevRaf) {
+        cancelAnimationFrame(prevRaf);
+    }
 
     const prevTimer = numericFlashTimer.get(el);
     if (prevTimer) {
@@ -237,8 +247,33 @@ function animateNumericText(el, nextValue, formatter, durationMs = 220) {
         numericFlashTimer.set(el, timer);
     }
 
-    el.textContent = formatter(toValue);
-    el.dataset.animValue = String(toValue);
+    if (Math.abs(diff) < 0.0000001) {
+        el.textContent = formatter(toValue);
+        el.dataset.animValue = String(toValue);
+        return;
+    }
+
+    const startedAt = performance.now();
+    const tick = (now) => {
+        const elapsed = now - startedAt;
+        const t = Math.max(0, Math.min(1, elapsed / durationMs));
+        const eased = easeOutCubic(t);
+        const currentValue = fromValue + (diff * eased);
+        el.textContent = formatter(currentValue);
+
+        if (t < 1) {
+            const raf = requestAnimationFrame(tick);
+            numericTweenRaf.set(el, raf);
+            return;
+        }
+
+        el.textContent = formatter(toValue);
+        el.dataset.animValue = String(toValue);
+        numericTweenRaf.delete(el);
+    };
+
+    const raf = requestAnimationFrame(tick);
+    numericTweenRaf.set(el, raf);
 }
 
 function estimatePositionTargetPnl(position, targetPrice) {

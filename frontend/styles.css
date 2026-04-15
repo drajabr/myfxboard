@@ -731,6 +731,7 @@ body[data-layout='dense'] .summary-spotlight .metric-card {
 .metric-card--spotlight .value {
     font-size: 1.45rem;
     font-weight: 800;
+    font-variant-numeric: tabular-nums;
 }
 
 .metric-card__meta {
@@ -862,6 +863,7 @@ body[data-layout='dense'] #tradeMetricsGrid .metric-card {
 .metric-card .value {
     font-size: 1rem;
     font-weight: 700;
+    font-variant-numeric: tabular-nums;
 }
 
 body[data-layout='default'] .metric-card .value,
@@ -1363,6 +1365,15 @@ body:not([data-layout='live']) .table-section--exposure {
 
 .live-num-down {
     animation: liveNumDownPulse 220ms ease-out;
+}
+
+.live-num-up,
+.live-num-down {
+    font-variant-numeric: tabular-nums;
+}
+
+.data-table {
+    font-variant-numeric: tabular-nums;
 }
 
 .account-tag {
