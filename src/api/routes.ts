@@ -444,6 +444,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const allFilteredTrades: any[] = [];
     let equity = 0;
     let balance = 0;
+    let marginUsed = 0;
     const tradeCurveEvents: Array<{ ts: number; pnl: number }> = [];
 
     const filteredDailyMap = new Map<string, number>();
@@ -711,6 +712,17 @@ router.get('/analytics', async (req: Request, res: Response) => {
     }
 
     const floatingPnl = positions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
+
+    // Overlay live account data (equity, balance, margin) from position cache if available
+    const liveSnap = getAggregated(accountIds);
+    if (liveSnap.equity !== undefined && liveSnap.equity > 0) {
+      equity = liveSnap.equity;
+    }
+    if (liveSnap.balance !== undefined && liveSnap.balance > 0) {
+      balance = liveSnap.balance;
+    }
+    marginUsed = liveSnap.marginUsed ?? 0;
+
     const recentTrades = recentTradesPool
       .slice()
       .sort((a, b) => (b.exit_time_ms || b.entry_time_ms) - (a.exit_time_ms || a.entry_time_ms))
@@ -908,6 +920,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
         equity,
         balance,
         floating_pnl: floatingPnl,
+        margin_used: marginUsed,
       },
       periods,
       trade_metrics: { ...tradeMetrics, max_drawdown: maxDrawdown },
@@ -989,7 +1002,7 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
     res.setHeader('X-Accel-Buffering', 'no'); // disable nginx proxy buffering
     res.flushHeaders();
 
-    const STREAM_MIN_EMIT_MS = 100;
+    const STREAM_MIN_EMIT_MS = 200;
     const STREAM_BUFFER_MS = 1000;
     const MAX_BUFFERED_EVENTS = Math.max(1, Math.floor(STREAM_BUFFER_MS / STREAM_MIN_EMIT_MS));
 

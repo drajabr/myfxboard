@@ -1335,43 +1335,6 @@ body:not([data-layout='live']) .table-section--exposure {
     font-weight: 700;
 }
 
-@keyframes liveNumUpPulse {
-    0% {
-        color: inherit;
-    }
-    35% {
-        color: var(--pnl-positive);
-    }
-    100% {
-        color: inherit;
-    }
-}
-
-@keyframes liveNumDownPulse {
-    0% {
-        color: inherit;
-    }
-    35% {
-        color: var(--pnl-negative);
-    }
-    100% {
-        color: inherit;
-    }
-}
-
-.live-num-up {
-    animation: liveNumUpPulse 220ms ease-out;
-}
-
-.live-num-down {
-    animation: liveNumDownPulse 220ms ease-out;
-}
-
-.live-num-up,
-.live-num-down {
-    font-variant-numeric: tabular-nums;
-}
-
 .data-table {
     font-variant-numeric: tabular-nums;
 }

@@ -12,7 +12,7 @@ const COMBINE_EXPOSURE_KEY = 'combineExposurePreference';
 const UI_VERSION = 'v1.6';
 const DASHBOARD_REFRESH_MS = 30000;
 const ACCOUNTS_REFRESH_MS = 60000;
-const LIVE_STREAM_MIN_EMIT_MS = 100;
+const LIVE_STREAM_MIN_EMIT_MS = 200;
 const LIVE_STREAM_BUFFER_MS = 1000;
 const LAYOUT_MODES = ['default', 'live', 'historic'];
 const MAX_PNL_CURVE_POINTS = 180;
@@ -174,7 +174,7 @@ const chartSignatures = {};
 const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
 let deferredInstallPrompt = null;
 const numericTweenRaf = new WeakMap();
-const numericFlashTimer = new WeakMap();
+
 
 function formatMoney(value) {
     return `$ ${Number(value || 0).toFixed(2)}`;
@@ -219,7 +219,7 @@ function easeOutCubic(t) {
     return 1 - Math.pow(1 - t, 3);
 }
 
-function animateNumericText(el, nextValue, formatter, durationMs = 220) {
+function animateNumericText(el, nextValue, formatter, durationMs = 200) {
     if (!el) {
         return;
     }
@@ -231,20 +231,6 @@ function animateNumericText(el, nextValue, formatter, durationMs = 220) {
     const prevRaf = numericTweenRaf.get(el);
     if (prevRaf) {
         cancelAnimationFrame(prevRaf);
-    }
-
-    const prevTimer = numericFlashTimer.get(el);
-    if (prevTimer) {
-        clearTimeout(prevTimer);
-    }
-
-    el.classList.remove('live-num-up', 'live-num-down');
-    if (diff !== 0) {
-        el.classList.add(diff > 0 ? 'live-num-up' : 'live-num-down');
-        const timer = setTimeout(() => {
-            el.classList.remove('live-num-up', 'live-num-down');
-        }, durationMs + 40);
-        numericFlashTimer.set(el, timer);
     }
 
     if (Math.abs(diff) < 0.0000001) {
@@ -2043,7 +2029,7 @@ function updateExposureTable(positions) {
     const source = Array.isArray(positions) ? positions : [];
 
     if (source.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No exposure</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No exposure</td></tr>';
         return;
     }
 
@@ -2093,6 +2079,7 @@ function updateExposureTable(positions) {
                 for (const [acct, data] of acctMap) {
                     rows.push({
                         isSymbol: false,
+                        _parentSymbol: sym,
                         symbol: '',
                         size: data.size,
                         margin: data.margin,
@@ -2107,22 +2094,8 @@ function updateExposureTable(positions) {
     }
 
     // Sort symbol groups
-    rows.sort((a, b) => {
-        if (a.isSymbol && b.isSymbol) {
-            if (state.exposureSort.key === 'symbol') {
-                const cmp = a.symbol.localeCompare(b.symbol);
-                return state.exposureSort.direction === 'asc' ? cmp : -cmp;
-            }
-            const diff = a.size - b.size;
-            return state.exposureSort.direction === 'asc' ? diff : -diff;
-        }
-        return 0;
-    });
-
-    // Re-sort: keep children after their parent symbol
-    const sorted = [];
-    const symbolOrder = rows.filter((r) => r.isSymbol);
-    symbolOrder.sort((a, b) => {
+    const symbolRows = rows.filter((r) => r.isSymbol);
+    symbolRows.sort((a, b) => {
         if (state.exposureSort.key === 'symbol') {
             const cmp = a.symbol.localeCompare(b.symbol);
             return state.exposureSort.direction === 'asc' ? cmp : -cmp;
@@ -2130,18 +2103,20 @@ function updateExposureTable(positions) {
         const diff = a.size - b.size;
         return state.exposureSort.direction === 'asc' ? diff : -diff;
     });
-    for (const sym of symbolOrder) {
-        sorted.push(sym);
-        rows.filter((r) => !r.isSymbol && rows.indexOf(r) > rows.indexOf(sym) &&
-            (rows.findIndex((s, i) => i > rows.indexOf(sym) && s.isSymbol) === -1 ||
-             rows.indexOf(r) < rows.findIndex((s, i) => i > rows.indexOf(sym) && s.isSymbol)))
-            .forEach((r) => sorted.push(r));
+
+    // Rebuild rows keeping children after their parent
+    const final = [];
+    for (const sym of symbolRows) {
+        final.push(sym);
+        const childRows = rows.filter((r) => !r.isSymbol && r._parentSymbol === sym.symbol);
+        final.push(...childRows);
     }
 
-    tbody.innerHTML = rows.map((row) => `
+    tbody.innerHTML = (final.length > 0 ? final : rows).map((row) => `
         <tr class="${row.isSymbol ? 'exposure-symbol-row' : 'exposure-child-row'}">
             <td>${row.isSymbol ? row.symbol : ''}</td>
             <td>${toNum(row.size).toFixed(2)}</td>
+            <td>${row.margin > 0 ? formatMoney(row.margin) : '-'}</td>
             <td>${formatPct(row.pct)}</td>
             <td><span class="account-tag">${row.account || '-'}</span></td>
         </tr>
