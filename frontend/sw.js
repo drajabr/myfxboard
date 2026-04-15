@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'myfxboard-v4';
+const CACHE_VERSION = 'myfxboard-v5';
 const APP_SHELL = [
   '/',
   '/index.html',

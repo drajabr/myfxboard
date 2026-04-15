@@ -656,7 +656,7 @@ export const tradeQueries = {
   ): Promise<Array<{ day: number; pnl: number; trades: number; wins: number }>> {
     const result = await query(
       `SELECT
-          EXTRACT(DAY FROM TO_TIMESTAMP(exit_time_ms / 1000.0))::int AS day,
+          FLOOR((exit_time_ms - $2) / 86400000.0)::int + 1 AS day,
           COALESCE(SUM(profit), 0)::float8 AS pnl,
           COUNT(*)::int AS trades,
           COUNT(*) FILTER (WHERE profit > 0)::int AS wins

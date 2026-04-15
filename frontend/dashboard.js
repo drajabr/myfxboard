@@ -6,7 +6,7 @@ const FONT_KEY = 'fontPreference';
 const FONT_SIZE_KEY = 'fontSizePreference';
 const QUICK_CONTROLS_COLLAPSED_KEY = 'quickControlsCollapsed';
 const LAYOUT_KEY = 'layoutPreference';
-const UI_VERSION = 'v1.5';
+const UI_VERSION = 'v1.6';
 const DASHBOARD_REFRESH_MS = 30000;
 const ACCOUNTS_REFRESH_MS = 60000;
 const LAYOUT_MODES = ['normal', 'compact', 'wide', 'dense'];
@@ -224,17 +224,15 @@ function estimatePositionTargetPnl(position, targetPrice) {
         return null;
     }
 
-    // Broker-accurate path: use tick geometry if provided by MT5 connector.
-    // This avoids contract-size assumptions that can be off by 10x/100x on some brokers.
-    if (Number.isFinite(tickSize) && tickSize > 0 && Number.isFinite(tickValue) && tickValue > 0 && size > 0) {
-        const ticks = ((target - entryPrice) * direction) / tickSize;
-        return ticks * tickValue * size;
-    }
-
     const liveMove = (currentPrice - entryPrice) * direction;
     if (Number.isFinite(currentPrice) && Number.isFinite(unrealizedPnl) && Math.abs(liveMove) > 1e-12) {
         const pnlPerPriceUnit = unrealizedPnl / liveMove;
         return (target - entryPrice) * direction * pnlPerPriceUnit;
+    }
+
+    if (Number.isFinite(tickSize) && tickSize > 0 && Number.isFinite(tickValue) && tickValue > 0 && size > 0) {
+        const ticks = ((target - entryPrice) * direction) / tickSize;
+        return ticks * tickValue * size;
     }
 
     return (target - entryPrice) * direction * size;
@@ -357,6 +355,20 @@ function durationLabel(seconds) {
         return `${h}h ${m}m`;
     }
     return `${m}m`;
+}
+
+function formatTradeResultShort(result) {
+    const normalized = String(result || '').toLowerCase();
+    if (normalized === 'win') {
+        return 'W';
+    }
+    if (normalized === 'loss') {
+        return 'L';
+    }
+    if (normalized === 'breakeven') {
+        return 'BE';
+    }
+    return '-';
 }
 
 function formatDurationTick(seconds) {
@@ -1093,9 +1105,9 @@ function setupEventListeners() {
             if (!ticking) {
                 window.requestAnimationFrame(() => {
                     const y = window.scrollY;
-                    if (y > lastScrollY && y > 80) {
+                    if (y > lastScrollY && y > 4) {
                         header.classList.add('header--hidden');
-                    } else if (y < lastScrollY - 4) {
+                    } else if (y < lastScrollY - 2 || y <= 0) {
                         header.classList.remove('header--hidden');
                     }
                     lastScrollY = y;
@@ -1559,27 +1571,28 @@ function updatePositionsTable(positions) {
         const slMoney = pos.sl_amount ?? estimatePositionTargetPnl(pos, pos.avg_sl);
         const tpMoney = pos.tp_amount ?? estimatePositionTargetPnl(pos, pos.avg_tp);
         const childClass = isChild ? ` class="pos-combine-child" data-group-symbol="${normalizeSymbol(pos.symbol)}"` : '';
+        const accountCell = `<td><span class="account-tag">${pos.account_id || (pos._accountCount ? `${pos._accountCount} accts` : '-')}</span></td>`;
         const symbolCell = pos._combined
             ? `<td class="pos-combine-toggle" data-group-symbol="${normalizeSymbol(pos.symbol)}" title="Click to expand">\u25B6 ${pos.symbol} (${pos._children.length})</td>`
-            : `<td>${isChild ? (pos.account_id || '-') : pos.symbol}</td>`;
+            : `<td>${isChild ? '<span class="cell-muted">-</span>' : pos.symbol}</td>`;
         const entryDecimals = pos._entryDecimals || inferPriceDecimals([pos], 'entry_price');
         const currentDecimals = pos._currentDecimals || inferPriceDecimals([pos], 'current_price');
         const slDecimals = pos._slDecimals || inferPriceDecimals([pos], 'avg_sl');
         const tpDecimals = pos._tpDecimals || inferPriceDecimals([pos], 'avg_tp');
         return `
         <tr${childClass}>
+            ${accountCell}
             ${symbolCell}
             <td><span class="dir-badge ${side === 'BUY' ? 'dir-buy' : side === 'SELL' ? 'dir-sell' : ''}">${side}</span></td>
-            <td class="${pnlClass(pos.unrealized_pnl || 0)}">${formatMoney(pos.unrealized_pnl || 0)}</td>
-            <td class="col-pos-prio-2">${ageText}</td>
-            <td class="col-pos-prio-3">${formatPrice(pos.entry_price, entryDecimals)}</td>
-            <td class="col-pos-prio-4">${pos.current_price !== null ? formatPrice(pos.current_price, currentDecimals) : '-'}</td>
-            <td class="col-pos-prio-5">${formatSize(pos.size)}</td>
+            <td class="col-pos-prio-3">${formatSize(pos.size)}</td>
+            <td class="col-pos-prio-4">${formatPrice(pos.entry_price, entryDecimals)}</td>
             <td class="col-pos-prio-5">${pos.avg_sl !== null ? formatPrice(pos.avg_sl, slDecimals) : '-'}</td>
-            <td class="col-pos-prio-5">${pos.avg_tp !== null ? formatPrice(pos.avg_tp, tpDecimals) : '-'}</td>
-            <td class="col-pos-prio-6 ${pnlClass(slMoney || 0)}">${slMoney === null ? '-' : formatMoney(slMoney)}</td>
+            <td class="col-pos-prio-5 ${pnlClass(slMoney || 0)}">${slMoney === null ? '-' : formatMoney(slMoney)}</td>
+            <td class="col-pos-prio-6">${pos.avg_tp !== null ? formatPrice(pos.avg_tp, tpDecimals) : '-'}</td>
             <td class="col-pos-prio-6 ${pnlClass(tpMoney || 0)}">${tpMoney === null ? '-' : formatMoney(tpMoney)}</td>
-            <td class="col-pos-prio-7"><span class="account-tag">${pos.account_id || (pos._accountCount ? `${pos._accountCount} accts` : '-')}</span></td>
+            <td class="col-pos-prio-7">${ageText}</td>
+            <td class="col-pos-prio-7">${pos.current_price !== null ? formatPrice(pos.current_price, currentDecimals) : '-'}</td>
+            <td class="${pnlClass(pos.unrealized_pnl || 0)}">${formatMoney(pos.unrealized_pnl || 0)}</td>
         </tr>
     `;
     };
@@ -1806,25 +1819,27 @@ function updateTradesTable(trades) {
         const closeTime = formatDateTimeMs(trade.exit_time_ms);
         const accountLabel = trade.account_id ? String(trade.account_id) : '-';
         const duration = durationLabel(trade.duration_sec);
+        const resultShort = formatTradeResultShort(trade.result);
         const childClass = isChild ? ` class="combine-child" data-group-symbol="${normalizeSymbol(trade.symbol)}"` : '';
+        const accountCell = `<td><span class="account-tag">${accountLabel}</span></td>`;
         const symbolCell = trade._combined
             ? `<td class="combine-toggle" data-group-symbol="${normalizeSymbol(trade.symbol)}" title="Click to expand">▶ ${trade.symbol} (${trade._children.length})</td>`
-            : `<td>${isChild ? accountLabel : trade.symbol}</td>`;
+            : `<td>${isChild ? '<span class="cell-muted">-</span>' : trade.symbol}</td>`;
         const entryDecimals = trade._entryDecimals || inferPriceDecimals([trade], 'entry_price');
         const exitDecimals = trade._exitDecimals || inferPriceDecimals([trade], 'exit_price');
         return `
         <tr${childClass}>
+            ${accountCell}
             ${symbolCell}
             <td>${dirBadge(trade.direction || deriveDirection(trade))}</td>
+            <td class="col-trades-prio-3">${Number(trade.size || 0).toFixed(2)}</td>
+            <td class="col-trades-prio-4">${formatPrice(trade.entry_price, entryDecimals)}</td>
+            <td class="col-trades-prio-5">${openTime}</td>
+            <td class="col-trades-prio-5">${closeTime}</td>
+            <td class="col-trades-prio-6">${duration}</td>
+            <td class="col-trades-prio-7">${trade.exit_price !== null ? formatPrice(trade.exit_price, exitDecimals) : '-'}</td>
+            <td class="col-trades-prio-7">${resultShort}</td>
             <td class="${pnlClass(trade.profit || 0)}">${formatMoney(trade.profit || 0)}</td>
-            <td class="col-trades-prio-7"><span class="account-tag">${accountLabel}</span></td>
-            <td class="col-trades-prio-3">${formatPrice(trade.entry_price, entryDecimals)}</td>
-            <td class="col-trades-prio-4">${trade.exit_price !== null ? formatPrice(trade.exit_price, exitDecimals) : '-'}</td>
-            <td class="col-trades-prio-5">${Number(trade.size || 0).toFixed(2)}</td>
-            <td class="col-trades-prio-6">${trade.result || '-'}</td>
-            <td class="col-trades-prio-2">${openTime}</td>
-            <td class="col-trades-prio-2">${closeTime}</td>
-            <td class="col-trades-prio-7">${duration}</td>
         </tr>
     `;
     };
@@ -2784,79 +2799,60 @@ function updateCharts(data) {
         }
     }
 
-    const scatterTrades = Array.isArray(data.trade_duration_scatter) ? data.trade_duration_scatter : [];
+    const durationRows = Array.isArray(data.win_rate_by_trade_duration) ? data.win_rate_by_trade_duration : [];
     const durationTitle = document.getElementById('durationWinRateTitle');
     if (durationTitle) {
         durationTitle.textContent = state.activeTradeFilter
             ? `PnL by Trade Duration (${state.activeTradeFilter.label})`
             : 'PnL by Trade Duration (All Trades)';
     }
-
-    const scatterPoints = scatterTrades.map((t) => ({ x: toNum(t.duration_sec), y: toNum(t.profit) }));
-
-    const durationChartData = {
-        datasets: [
-            {
-                label: 'Trade PnL',
-                data: scatterPoints,
-                backgroundColor: scatterPoints.map((p) => p.y >= 0 ? positive : negative),
-                pointRadius: 4,
-                pointHoverRadius: 6,
-            },
-        ],
+    const durationPnlLabels = durationRows.map((row) => row.label || 'N/A');
+    const durationPnlValues = durationRows.map((row) => toNum(row.avg_pnl));
+    const durationPnlTrades = durationRows.map((row) => toNum(row.trades));
+    const durationPnlChartData = {
+        labels: durationPnlLabels,
+        datasets: [buildBarDataset('Avg PnL', durationPnlValues, positive, negative, neutral)],
     };
-
-    const durationOptions = {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'nearest', intersect: false },
-        layout: {
-            padding: { left: 10, right: 18, top: 8, bottom: 18 },
-        },
+    const durationPnlBaseOptions = buildBarChartOptions(text, durationPnlLabels.length);
+    const durationPnlOptions = {
+        ...durationPnlBaseOptions,
         plugins: {
-            legend: { display: false },
+            ...durationPnlBaseOptions.plugins,
             tooltip: {
                 callbacks: {
-                    label: (ctx) => {
-                        const p = ctx.raw;
-                        return `Duration: ${formatDurationTooltip(p.x)}  PnL: $${toNum(p.y).toFixed(2)}`;
-                    },
+                    label: (ctx) => `Avg PnL: $${toNum(ctx.parsed.y).toFixed(2)} · Trades: ${durationPnlTrades[ctx.dataIndex] ?? 0}`,
                 },
             },
         },
         scales: {
-            x: {
-                type: 'linear',
-                title: { display: false },
-                ticks: { color: text, font: chartFont, callback: (v) => formatDurationTick(v) },
-                grid: { display: false },
-            },
+            ...durationPnlBaseOptions.scales,
             y: {
-                title: { display: false },
+                ...durationPnlBaseOptions.scales.y,
                 ticks: {
                     color: text,
                     font: chartFont,
                     callback: (v) => `$${v}`,
                 },
-                grid: {
-                    color: 'rgba(125, 138, 159, 0.2)',
-                    drawBorder: false,
-                },
             },
         },
     };
 
+    if (charts.durationWinRate && charts.durationWinRate.config.type !== 'bar') {
+        charts.durationWinRate.destroy();
+        charts.durationWinRate = null;
+    }
     if (!charts.durationWinRate) {
         charts.durationWinRate = new Chart(document.getElementById('durationWinRateChart'), {
-            type: 'scatter',
-            data: durationChartData,
-            options: durationOptions,
+            type: 'bar',
+            data: durationPnlChartData,
+            options: durationPnlOptions,
         });
     } else {
-        const durationPnlSig = toChartSignature([scatterPoints, styleSignature, state.activeTradeFilter?.label || 'all']);
+        const durationPnlSig = toChartSignature([durationPnlLabels, durationPnlValues, durationPnlTrades, styleSignature, state.activeTradeFilter?.label || 'all']);
         if (shouldUpdateChart('durationWinRate', durationPnlSig)) {
-            charts.durationWinRate.data.datasets[0].data = scatterPoints;
-            charts.durationWinRate.data.datasets[0].backgroundColor = scatterPoints.map((p) => p.y >= 0 ? positive : negative);
+            charts.durationWinRate.data.labels = durationPnlLabels;
+            charts.durationWinRate.data.datasets[0].data = durationPnlValues;
+            charts.durationWinRate.data.datasets[0].backgroundColor = durationPnlValues.map((v) => (v > 0 ? positive : v < 0 ? negative : neutral));
             charts.durationWinRate.options.scales.x.ticks.color = text;
             charts.durationWinRate.options.scales.x.ticks.font = chartFont;
             charts.durationWinRate.options.scales.y.ticks.color = text;
@@ -2865,7 +2861,7 @@ function updateCharts(data) {
         }
     }
 
-    const durationWrRows = Array.isArray(data.win_rate_by_trade_duration) ? data.win_rate_by_trade_duration : [];
+    const durationWrRows = durationRows;
     const durationWrLabels = durationWrRows.map((row) => row.label || 'N/A');
     const durationWrValues = durationWrRows.map((row) => toNum(row.win_rate_pct));
     const durationWrTitle = document.getElementById('durationWrChartTitle');

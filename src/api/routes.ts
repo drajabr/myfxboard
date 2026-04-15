@@ -506,7 +506,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
       short_neutral: 0,
     };
 
-    const monthBase = new Date();
+    const monthBase = new Date(nowMs);
     monthBase.setMonth(monthBase.getMonth() + monthShift);
     const monthYear = monthBase.getFullYear();
     const monthIdx = monthBase.getMonth();
@@ -514,7 +514,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const monthEnd = new Date(monthYear, monthIdx + 1, 0, 23, 59, 59, 999).getTime();
     const daysInMonth = new Date(monthYear, monthIdx + 1, 0).getDate();
 
-    const yearBase = new Date();
+    const yearBase = new Date(nowMs);
     yearBase.setFullYear(yearBase.getFullYear() + yearShift);
     const targetYear = yearBase.getFullYear();
 
@@ -560,7 +560,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
         tradeQueries.summarizeMonthCalendar(accountId, monthStart, monthEnd),
         tradeQueries.summarizeYearCalendar(accountId, targetYear),
         tradeQueries.summarizeMetrics(accountId, breakevenTolerance),
-        tradeQueries.summarizeAllPeriodStats(accountId, todayStartMs, last7dStartMs, last30dStartMs, ytdStartMs, nowMs, breakevenTolerance),
+        tradeQueries.summarizeAllPeriodStats(accountId, todayStartMs, last7dStartMs, last30dStartMs, ytdStartMs, filterEndMs, breakevenTolerance),
       ]);
 
       const { today: todayStats, last7d: last7dStats, last30d: last30dStats, ytd: ytdStats, all_time: allTimeStats } = allPeriodStats;

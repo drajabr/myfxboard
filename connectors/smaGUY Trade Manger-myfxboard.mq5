@@ -4022,9 +4022,11 @@ void UpdateLines() {
       double entry = PositionGetDouble(POSITION_PRICE_OPEN);
       double vol = PositionGetDouble(POSITION_VOLUME);
       if(tp > 0 && vol > 0) {
-         double profit = (GetPriceDiff(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY, tp, entry) / sym.point) * pvl * vol;
+         bool is_buy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+         double profit = CalculateProjectedPnL(is_buy, vol, entry, tp);
+         if(profit < 0) profit = 0;
          string label = "Entry#" + IntegerToString(manual_tp_label_idx + 1) + " TP@" + DoubleToString(tp, sym.displayDecimals) + " " + currencySymbol + DoubleToString(profit, 2);
-         DrawSingleLineLabel("TM_Line_ManualTP" + IntegerToString(manual_tp_label_idx), tp, clrDodgerBlue, label, reference_width, PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+         DrawSingleLineLabel("TM_Line_ManualTP" + IntegerToString(manual_tp_label_idx), tp, clrDodgerBlue, label, reference_width, is_buy);
          manual_tp_label_idx++;
       }
    }
