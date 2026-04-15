@@ -26,6 +26,7 @@ vi.mock('../db/queries.js', () => ({
     summarizeMonthCalendar: vi.fn(),
     summarizeYearCalendar: vi.fn(),
     summarizeMetrics: vi.fn(),
+    summarizeAllPeriodStats: vi.fn(),
     summarizeByExitRange: vi.fn(),
     getBreakevenTolerance: vi.fn(),
   },
@@ -167,6 +168,13 @@ describe('GET /api/account/analytics', () => {
     vi.mocked(tradeQueries.summarizeMonthCalendar).mockResolvedValue([]);
     vi.mocked(tradeQueries.summarizeYearCalendar).mockResolvedValue([]);
     vi.mocked(tradeQueries.summarizeMetrics).mockResolvedValue(zeroMetrics);
+    vi.mocked(tradeQueries.summarizeAllPeriodStats).mockResolvedValue({
+      today: { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0 },
+      last7d: { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0 },
+      last30d: { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0 },
+      ytd: { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0 },
+      all_time: { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0 },
+    });
   });
 
   it('returns analytics for all accounts', async () => {

@@ -6,6 +6,7 @@ import request from 'supertest';
 // Mock DB modules before importing the router
 vi.mock('../db/queries.js', () => ({
   accountQueries: {
+    findById: vi.fn(),
     ensureByAccountNumber: vi.fn(),
     updateWatermarks: vi.fn(),
     updateIngestionState: vi.fn(),
@@ -18,12 +19,11 @@ vi.mock('../db/queries.js', () => ({
   },
   tradeQueries: {
     insertTrade: vi.fn(),
+    insertTradeBatch: vi.fn(),
     getBreakevenTolerance: vi.fn().mockResolvedValue(1.0),
     summarizeByExitRange: vi.fn().mockResolvedValue({ trades_count: 0, wins: 0, losses: 0 }),
   },
-  snapshotQueries: {
-    insertSnapshot: vi.fn(),
-  },
+  invalidateBreakevenCache: vi.fn(),
 }));
 
 vi.mock('../db/connection.js', () => ({
@@ -109,7 +109,7 @@ describe('POST /api/ingestion', () => {
     expect(res.body.account_id).toBe('662240');
   });
 
-  it('calls deleteByAccount and upsertPosition for positions', async () => {
+  it('accepts positions and returns success', async () => {
     const app = makeSignedApp();
     const ts = Date.now();
     const { sig } = signRequest('662240', ts);
@@ -126,13 +126,14 @@ describe('POST /api/ingestion', () => {
         pnl: 50,
       }],
     };
-    await request(app)
+    const res = await request(app)
       .post('/api/ingestion')
       .set('Authorization', `HMAC-SHA256 ${sig}`)
       .set('X-Signature-Timestamp', String(ts))
       .send(payload);
-    expect(positionQueries.deleteByAccount).toHaveBeenCalledWith('662240', expect.anything());
-    expect(positionQueries.upsertPosition).toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(positionQueries.deleteByAccount).not.toHaveBeenCalled();
+    expect(positionQueries.upsertPosition).not.toHaveBeenCalled();
   });
 
   it('inserts closed trades when include_history is not false', async () => {
@@ -207,7 +208,7 @@ describe('POST /api/ingestion', () => {
 describe('POST /api/ingestion/health', () => {
   beforeEach(() => {
     vi.stubEnv('CONNECTOR_SHARED_SECRET', SECRET);
-    vi.mocked(accountQueries.ensureByAccountNumber).mockResolvedValue({
+    vi.mocked(accountQueries.findById).mockResolvedValue({
       account_id: '662240',
       last_history_hash: 'server-hash',
     } as any);
@@ -247,7 +248,7 @@ describe('POST /api/ingestion/backfill', () => {
       account_id: '662240',
     } as any);
     vi.mocked(tradeQueries.getBreakevenTolerance).mockResolvedValue(1.0);
-    vi.mocked(tradeQueries.insertTrade).mockResolvedValue(null);
+    vi.mocked(tradeQueries.insertTradeBatch).mockResolvedValue(undefined);
   });
 
   it('inserts backfill trades and returns ok', async () => {
@@ -275,6 +276,6 @@ describe('POST /api/ingestion/backfill', () => {
       .send(payload);
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ok');
-    expect(tradeQueries.insertTrade).toHaveBeenCalled();
+    expect(tradeQueries.insertTradeBatch).toHaveBeenCalled();
   });
 });

@@ -147,6 +147,7 @@ describe('validateIngestionAuth', () => {
   });
 
   it('passes valid HMAC request and sets accountId and timestamp', async () => {
+    vi.stubEnv('INGEST_ALLOWED_TIMESTAMP_DRIFT_MS', '5000');
     const ts = Date.now();
     const sig = makeSignature('662240', ts);
     const req = createMockReq({
@@ -162,6 +163,7 @@ describe('validateIngestionAuth', () => {
   });
 
   it('trims whitespace from account_number', async () => {
+    vi.stubEnv('INGEST_ALLOWED_TIMESTAMP_DRIFT_MS', '5000');
     const ts = Date.now();
     const sig = makeSignature('662240', ts);
     const req = createMockReq({
