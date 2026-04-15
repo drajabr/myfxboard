@@ -141,12 +141,17 @@ string DC_BuildPositionsJson() {
       string symbol = PositionGetString(POSITION_SYMBOL);
       double tick_size = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
       double tick_value = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
+      double volume = PositionGetDouble(POSITION_VOLUME);
+      double open_price = PositionGetDouble(POSITION_PRICE_OPEN);
+      double pos_margin = 0;
+      OrderCalcMargin(dir == POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
+                       symbol, volume, open_price, pos_margin);
       j += StringFormat(
-         "{\"symbol\":\"%s\",\"volume\":%.2f,\"direction\":\"%s\",\"open_price\":%.5f,\"current_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"tick_size\":%.10f,\"tick_value\":%.10f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
-         symbol, PositionGetDouble(POSITION_VOLUME),
+         "{\"symbol\":\"%s\",\"volume\":%.2f,\"direction\":\"%s\",\"open_price\":%.5f,\"current_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"tick_size\":%.10f,\"tick_value\":%.10f,\"margin\":%.2f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
+         symbol, volume,
          dir == POSITION_TYPE_BUY ? "BUY" : "SELL",
-         PositionGetDouble(POSITION_PRICE_OPEN), PositionGetDouble(POSITION_PRICE_CURRENT), PositionGetDouble(POSITION_SL),
-         PositionGetDouble(POSITION_TP), tick_size, tick_value, (long)PositionGetInteger(POSITION_TIME_MSC),
+         open_price, PositionGetDouble(POSITION_PRICE_CURRENT), PositionGetDouble(POSITION_SL),
+         PositionGetDouble(POSITION_TP), tick_size, tick_value, pos_margin, (long)PositionGetInteger(POSITION_TIME_MSC),
          PositionGetDouble(POSITION_PROFIT));
    }
    return j + "]";

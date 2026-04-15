@@ -114,6 +114,7 @@ const normalizePosition = (p: any) => ({
   avg_tp: p.avg_tp === null ? null : toNum(p.avg_tp),
   tick_size: p.tick_size === null || p.tick_size === undefined ? null : toNum(p.tick_size),
   tick_value: p.tick_value === null || p.tick_value === undefined ? null : toNum(p.tick_value),
+  margin: p.margin === null || p.margin === undefined ? null : toNum(p.margin),
   unrealized_pnl: toNum(p.unrealized_pnl),
   open_time_ms: toNum(p.open_time_ms),
   updated_at_ms: toNum(p.updated_at_ms),
@@ -988,7 +989,7 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
     res.setHeader('X-Accel-Buffering', 'no'); // disable nginx proxy buffering
     res.flushHeaders();
 
-    const STREAM_MIN_EMIT_MS = 50;
+    const STREAM_MIN_EMIT_MS = 100;
     const STREAM_BUFFER_MS = 1000;
     const MAX_BUFFERED_EVENTS = Math.max(1, Math.floor(STREAM_BUFFER_MS / STREAM_MIN_EMIT_MS));
 
@@ -1001,6 +1002,9 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
       const positions = getAggregatedPositions(accountIds).map(normalizePosition);
       res.write(`data: ${JSON.stringify({
         floating_pnl: snap.floatingPnl,
+        equity: snap.equity ?? null,
+        balance: snap.balance ?? null,
+        margin_used: snap.marginUsed ?? null,
         open_positions: snap.openPositions,
         positions,
       })}\n\n`);

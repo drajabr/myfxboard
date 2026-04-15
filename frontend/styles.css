@@ -1211,7 +1211,7 @@ body:not([data-layout='live']) .table-section--exposure {
 }
 
 .table-section--historic {
-    min-height: calc(100vh - 9rem);
+    height: calc(100vh - 9rem);
     display: flex;
     flex-direction: column;
 }
@@ -1220,6 +1220,7 @@ body:not([data-layout='live']) .table-section--exposure {
     flex: 1 1 auto;
     min-height: 0;
     max-height: none;
+    overflow-y: auto;
 }
 
 .table-section--trade-metrics {
@@ -1334,31 +1335,25 @@ body:not([data-layout='live']) .table-section--exposure {
 
 @keyframes liveNumUpPulse {
     0% {
-        transform: translateY(0);
-        filter: brightness(1);
+        color: inherit;
     }
     35% {
-        transform: translateY(-1px);
-        filter: brightness(1.12);
+        color: var(--pnl-positive);
     }
     100% {
-        transform: translateY(0);
-        filter: brightness(1);
+        color: inherit;
     }
 }
 
 @keyframes liveNumDownPulse {
     0% {
-        transform: translateY(0);
-        filter: brightness(1);
+        color: inherit;
     }
     35% {
-        transform: translateY(1px);
-        filter: brightness(1.08);
+        color: var(--pnl-negative);
     }
     100% {
-        transform: translateY(0);
-        filter: brightness(1);
+        color: inherit;
     }
 }
 

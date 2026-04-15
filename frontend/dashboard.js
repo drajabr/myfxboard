@@ -12,7 +12,7 @@ const COMBINE_EXPOSURE_KEY = 'combineExposurePreference';
 const UI_VERSION = 'v1.6';
 const DASHBOARD_REFRESH_MS = 30000;
 const ACCOUNTS_REFRESH_MS = 60000;
-const LIVE_STREAM_MIN_EMIT_MS = 50;
+const LIVE_STREAM_MIN_EMIT_MS = 100;
 const LIVE_STREAM_BUFFER_MS = 1000;
 const LAYOUT_MODES = ['default', 'live', 'historic'];
 const MAX_PNL_CURVE_POINTS = 180;
@@ -278,7 +278,7 @@ function animateNumericText(el, nextValue, formatter, durationMs = 220) {
 }
 
 function estimatePositionTargetPnl(position, targetPrice) {
-    if (targetPrice === null || targetPrice === undefined) {
+    if (targetPrice === null || targetPrice === undefined || targetPrice === 0) {
         return null;
     }
     const entryPrice = toNum(position?.entry_price, NaN);
@@ -297,7 +297,10 @@ function estimatePositionTargetPnl(position, targetPrice) {
         return ticks * tickValue * size;
     }
 
-    return (target - entryPrice) * direction * size;
+    // Without symbol specifications (tick_size / tick_value) we cannot
+    // reliably estimate the monetary SL/TP value — return null so the
+    // UI shows '-' instead of a misleading number.
+    return null;
 }
 
 function formatDateTimeMs(value) {
@@ -2053,12 +2056,15 @@ function updateExposureTable(positions) {
         symbolGroups.get(sym).push(p);
     });
 
+    // Use account-level margin_used from live data for total margin
+    const totalMarginUsed = toNum(state.lastData?.summary?.margin_used, 0);
     const totalSize = source.reduce((s, p) => s + Math.abs(toNum(p.size)), 0);
     const safeTotal = Math.max(totalSize, 1e-9);
     let rows = [];
 
     for (const [sym, posArr] of symbolGroups) {
         const symSize = posArr.reduce((s, p) => s + Math.abs(toNum(p.size)), 0);
+        const symMargin = posArr.reduce((s, p) => s + toNum(p.margin, 0), 0);
         const accounts = [...new Set(posArr.map((p) => String(p.account_id || '-')))];
 
         // Symbol total row always present
@@ -2066,7 +2072,10 @@ function updateExposureTable(positions) {
             isSymbol: true,
             symbol: sym,
             size: symSize,
-            pct: (symSize / safeTotal) * 100,
+            margin: symMargin,
+            pct: totalMarginUsed > 0 && symMargin > 0
+                ? (symMargin / totalMarginUsed) * 100
+                : (symSize / safeTotal) * 100,
             account: accounts.length === 1 ? accounts[0] : `${accounts.length} accts`,
             hasChildren: !state.combineExposure && accounts.length > 1,
         });
@@ -2076,15 +2085,21 @@ function updateExposureTable(positions) {
             const acctMap = new Map();
             posArr.forEach((p) => {
                 const acct = String(p.account_id || '-');
-                acctMap.set(acct, (acctMap.get(acct) || 0) + Math.abs(toNum(p.size)));
+                if (!acctMap.has(acct)) acctMap.set(acct, { size: 0, margin: 0 });
+                const entry = acctMap.get(acct);
+                entry.size += Math.abs(toNum(p.size));
+                entry.margin += toNum(p.margin, 0);
             });
             if (acctMap.size > 1) {
-                for (const [acct, sz] of acctMap) {
+                for (const [acct, data] of acctMap) {
                     rows.push({
                         isSymbol: false,
                         symbol: '',
-                        size: sz,
-                        pct: (sz / safeTotal) * 100,
+                        size: data.size,
+                        margin: data.margin,
+                        pct: totalMarginUsed > 0 && data.margin > 0
+                            ? (data.margin / totalMarginUsed) * 100
+                            : (data.size / safeTotal) * 100,
                         account: acct,
                     });
                 }
@@ -3405,17 +3420,20 @@ function applyLivePnl(data) {
     const floatingMetaEl = document.getElementById('floatingPnlMeta');
     if (!floatingEl) return;
     const floatingPnl = toNum(data.floating_pnl, 0);
-    const balance = toNum(state.lastData?.summary?.balance, 0);
+    const balance = toNum(data.balance, toNum(state.lastData?.summary?.balance, 0));
     const rawEquity = toNum(data.equity, NaN);
     const liveEquity = Number.isFinite(rawEquity)
         ? rawEquity
         : toNum(state.lastData?.summary?.equity, balance + floatingPnl);
+    const marginUsed = toNum(data.margin_used, toNum(state.lastData?.summary?.margin_used, 0));
     const balanceBase = Math.max(Math.abs(balance), 1);
     const floatingPct = (floatingPnl / balanceBase) * 100;
 
     if (state.lastData && state.lastData.summary) {
         state.lastData.summary.floating_pnl = floatingPnl;
         state.lastData.summary.equity = liveEquity;
+        state.lastData.summary.balance = balance;
+        state.lastData.summary.margin_used = marginUsed;
         state.lastData.summary.open_positions = toNum(data.open_positions, state.lastData.summary.open_positions || 0);
         if (Array.isArray(data.positions)) {
             state.lastData.positions = data.positions;

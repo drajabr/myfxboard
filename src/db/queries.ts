@@ -154,13 +154,13 @@ export const positionQueries = {
     const q = getQueryFn(client);
     const now = Date.now();
     const result = await q(
-      `INSERT INTO positions (account_id, symbol, size, direction, entry_price, current_price, avg_sl, avg_tp, unrealized_pnl, open_time_ms, updated_at_ms)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `INSERT INTO positions (account_id, symbol, size, direction, entry_price, current_price, avg_sl, avg_tp, tick_size, tick_value, margin, unrealized_pnl, open_time_ms, updated_at_ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        ON CONFLICT (account_id, symbol, direction, entry_price, open_time_ms) DO UPDATE SET
-         current_price = $6, avg_sl = $7, avg_tp = $8, unrealized_pnl = $9, updated_at_ms = $11
+         current_price = $6, avg_sl = $7, avg_tp = $8, tick_size = $9, tick_value = $10, margin = $11, unrealized_pnl = $12, updated_at_ms = $14
        RETURNING *`,
       [position.account_id, position.symbol, position.size, position.direction, position.entry_price,
-       position.current_price, position.avg_sl, position.avg_tp, position.unrealized_pnl, position.open_time_ms, now]
+       position.current_price, position.avg_sl, position.avg_tp, position.tick_size, position.tick_value, position.margin, position.unrealized_pnl, position.open_time_ms, now]
     );
     return result.rows[0];
   },

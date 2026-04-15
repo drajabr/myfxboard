@@ -19,8 +19,17 @@ export interface PnlSnapshot {
   openPositions: number;
 }
 
+export interface AccountSnapshot {
+  equity: number;
+  balance: number;
+  marginUsed: number;
+}
+
 // Account-id → latest PnL summary (for SSE / live-pnl)
 const cache = new Map<string, PnlSnapshot>();
+
+// Account-id → latest account data (equity, balance, margin)
+const accountDataCache = new Map<string, AccountSnapshot>();
 
 // Account-id → full position objects (for analytics endpoint)
 const positionsByAccount = new Map<string, any[]>();
@@ -42,6 +51,13 @@ export function updateAccountCache(accountId: string, positions: any[]): void {
   cache.set(accountId, { floatingPnl, openPositions: positions.length });
   positionsByAccount.set(accountId, positions);
   pnlEmitter.emit('update', accountId);
+}
+
+/**
+ * Stores account-level data (equity, balance, margin) on each sync.
+ */
+export function updateAccountData(accountId: string, data: AccountSnapshot): void {
+  accountDataCache.set(accountId, data);
 }
 
 /**
@@ -83,15 +99,30 @@ export function seedAccountPositions(accountId: string, positions: any[]): void 
 /**
  * Aggregates PnL snapshots for the given account IDs (used by SSE endpoint).
  */
-export function getAggregated(accountIds: string[]): PnlSnapshot {
+export function getAggregated(accountIds: string[]): PnlSnapshot & Partial<AccountSnapshot> {
   let floatingPnl = 0;
   let openPositions = 0;
+  let equity = 0;
+  let balance = 0;
+  let marginUsed = 0;
+  let hasAccountData = false;
   for (const id of accountIds) {
     const s = cache.get(id);
     if (s) {
       floatingPnl += s.floatingPnl;
       openPositions += s.openPositions;
     }
+    const ad = accountDataCache.get(id);
+    if (ad) {
+      hasAccountData = true;
+      equity += ad.equity;
+      balance += ad.balance;
+      marginUsed += ad.marginUsed;
+    }
   }
-  return { floatingPnl, openPositions };
+  return {
+    floatingPnl,
+    openPositions,
+    ...(hasAccountData ? { equity, balance, marginUsed } : {}),
+  };
 }

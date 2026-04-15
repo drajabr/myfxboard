@@ -4,7 +4,7 @@ import { validateIngestionAuth } from '../middleware/auth.js';
 import { accountQueries, tradeQueries, invalidateBreakevenCache } from '../db/queries.js';
 import { transaction } from '../db/connection.js';
 import { Trade } from '../types/index.js';
-import { updateAccountCache } from '../services/positionCache.js';
+import { updateAccountCache, updateAccountData } from '../services/positionCache.js';
 import { bufferSnapshot } from '../services/writeBuffer.js';
 import { emitHistoryUpdate } from '../services/historyEvents.js';
 
@@ -157,16 +157,25 @@ router.post(
           avg_tp: p.avg_tp ?? null,
           tick_size: p.tick_size ?? null,
           tick_value: p.tick_value ?? null,
+          margin: p.margin ?? null,
           unrealized_pnl: p.pnl,
           open_time_ms: p.open_time_ms,
         }))
       );
 
+      // Store account-level data (equity, balance, margin) for live SSE
+      const safeEquity = asFiniteNumber(accountData?.equity, 0);
+      const safeBalance = asFiniteNumber(accountData?.balance, 0);
+      const safeMarginUsed = asFiniteNumber(accountData?.margin_used, 0);
+      updateAccountData(accountId, {
+        equity: safeEquity,
+        balance: safeBalance,
+        marginUsed: safeMarginUsed,
+      });
+
       // Snapshot (daily equity/balance record) — idempotent day-keyed upsert, buffered at 5s.
       // The trade count query is fire-and-forget: the buffer flushes 5s later so the query
       // always completes well before the flush, and we don't need to block the response for it.
-      const safeEquity = asFiniteNumber(accountData?.equity, 0);
-      const safeBalance = asFiniteNumber(accountData?.balance, 0);
       const snapshotDate = new Date().toISOString().split('T')[0];
       tradeQueries.summarizeByExitRange(accountId, dayStartMs, dayEndMs, breakevenTolerance)
         .then((daySummary) => {

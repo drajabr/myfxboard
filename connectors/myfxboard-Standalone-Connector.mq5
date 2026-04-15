@@ -229,10 +229,13 @@ private:
          double pnl         = PositionGetDouble(POSITION_PROFIT);
          ENUM_POSITION_TYPE dir = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
          string direction = (dir == POSITION_TYPE_BUY) ? "BUY" : "SELL";
+         double pos_margin = 0;
+         OrderCalcMargin(dir == POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
+                          symbol, volume, open_price, pos_margin);
 
          positions_json += StringFormat(
-            "{\"symbol\":\"%s\",\"volume\":%.2f,\"direction\":\"%s\",\"open_price\":%.5f,\"current_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"tick_size\":%.10f,\"tick_value\":%.10f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
-            symbol, volume, direction, open_price, current_price, sl, tp, tick_size, tick_value, open_time_ms, pnl
+            "{\"symbol\":\"%s\",\"volume\":%.2f,\"direction\":\"%s\",\"open_price\":%.5f,\"current_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"tick_size\":%.10f,\"tick_value\":%.10f,\"margin\":%.2f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
+            symbol, volume, direction, open_price, current_price, sl, tp, tick_size, tick_value, pos_margin, open_time_ms, pnl
          );
       }
       positions_json += "]";

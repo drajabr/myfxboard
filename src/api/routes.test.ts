@@ -108,6 +108,7 @@ describe('GET /api/account/:accountId/positions', () => {
     vi.mocked(positionQueries.findByAccount).mockResolvedValue([{
       id: 1, account_id: '123', symbol: 'EURUSD', size: 0.1, direction: 'BUY',
       entry_price: 1.1, current_price: 1.11, avg_sl: null, avg_tp: null,
+      tick_size: null, tick_value: null, margin: null,
       unrealized_pnl: 100, open_time_ms: 1000000, updated_at_ms: 2000000,
     }]);
     const app = makeApp();

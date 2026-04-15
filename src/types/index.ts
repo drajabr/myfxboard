@@ -23,6 +23,9 @@ export interface Position {
   current_price: number | null;
   avg_sl: number | null;
   avg_tp: number | null;
+  tick_size: number | null;
+  tick_value: number | null;
+  margin: number | null;
   unrealized_pnl: number | null;
   open_time_ms: number;
   updated_at_ms: number;
@@ -93,6 +96,7 @@ export interface IngestPayload {
     avg_tp: number | null;
     tick_size?: number;
     tick_value?: number;
+    margin?: number;
     open_time_ms: number;
     pnl: number;
   }>;
