@@ -12,7 +12,7 @@ const COMBINE_EXPOSURE_KEY = 'combineExposurePreference';
 const UI_VERSION = 'v1.6';
 const DASHBOARD_REFRESH_MS = 30000;
 const ACCOUNTS_REFRESH_MS = 60000;
-const LIVE_STREAM_MIN_EMIT_MS = 200;
+const LIVE_STREAM_MIN_EMIT_MS = 333;
 const LIVE_STREAM_BUFFER_MS = 1000;
 const LAYOUT_MODES = ['default', 'live', 'historic'];
 const MAX_PNL_CURVE_POINTS = 180;
@@ -219,7 +219,7 @@ function easeOutCubic(t) {
     return 1 - Math.pow(1 - t, 3);
 }
 
-function animateNumericText(el, nextValue, formatter, durationMs = 200) {
+function animateNumericText(el, nextValue, formatter, durationMs = 333) {
     if (!el) {
         return;
     }

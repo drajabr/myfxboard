@@ -1002,7 +1002,7 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
     res.setHeader('X-Accel-Buffering', 'no'); // disable nginx proxy buffering
     res.flushHeaders();
 
-    const STREAM_MIN_EMIT_MS = 200;
+    const STREAM_MIN_EMIT_MS = 333;
     const STREAM_BUFFER_MS = 1000;
     const MAX_BUFFERED_EVENTS = Math.max(1, Math.floor(STREAM_BUFFER_MS / STREAM_MIN_EMIT_MS));
 
