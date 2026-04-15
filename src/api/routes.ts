@@ -98,7 +98,7 @@ function normalizeSymbol(sym: string): string {
   s = s.replace(SYMBOL_PREFIX_RE, '');
   s = s.replace(SYMBOL_SUFFIX_RE, '');
   s = s.replace(SYMBOL_SUFFIX_RE, '');
-  s = s.replace(/[\/._\-\s]/g, '').toUpperCase();
+  s = s.replace(/[/._\-\s]/g, '').toUpperCase();
   return SYMBOL_ALIASES[s] || s;
 }
 
@@ -699,7 +699,6 @@ router.get('/analytics', async (req: Request, res: Response) => {
         }
         hourOfDayWinRateMap.set(hourKey, hodWr);
 
-        const dt = new Date(ts);
         tradeCurveEvents.push({
           ts,
           pnl: profit,

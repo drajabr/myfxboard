@@ -1,5 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import express from 'express';
+import { describe, it, expect, vi } from 'vitest';
 import request from 'supertest';
 
 // Mock DB so app can import without real DB

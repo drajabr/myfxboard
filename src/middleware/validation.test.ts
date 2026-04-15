@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { z } from 'zod';
 import { validateRequestBody, validateQueryParams, ingestPayloadSchema, ingestHealthPayloadSchema } from './validation.js';
 
 const createMockReq = (body: any = {}, query: any = {}) => ({
@@ -144,7 +145,7 @@ describe('ingestPayloadSchema', () => {
   });
 
   it('rejects missing sync_id', () => {
-    const { sync_id, ...rest } = validPayload;
+    const { sync_id: _sync_id, ...rest } = validPayload;
     const result = ingestPayloadSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });
@@ -152,7 +153,6 @@ describe('ingestPayloadSchema', () => {
 
 describe('validateQueryParams', () => {
   it('passes valid query params', () => {
-    const { z } = require('zod');
     const schema = z.object({ page: z.string().optional() });
     const middleware = validateQueryParams(schema);
     const req = createMockReq({}, { page: '1' });
@@ -163,7 +163,6 @@ describe('validateQueryParams', () => {
   });
 
   it('rejects invalid query params', () => {
-    const { z } = require('zod');
     const schema = z.object({ page: z.string().min(1) });
     const middleware = validateQueryParams(schema);
     const req = createMockReq({}, { page: '' });

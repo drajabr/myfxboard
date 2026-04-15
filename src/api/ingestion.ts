@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { validateRequestBody, ingestPayloadSchema, ingestHealthPayloadSchema } from '../middleware/validation.js';
 import { validateIngestionAuth } from '../middleware/auth.js';
-import { accountQueries, positionQueries, tradeQueries, snapshotQueries, invalidateBreakevenCache } from '../db/queries.js';
+import { accountQueries, tradeQueries, invalidateBreakevenCache } from '../db/queries.js';
 import { transaction } from '../db/connection.js';
 import { Trade } from '../types/index.js';
 import { updateAccountCache } from '../services/positionCache.js';

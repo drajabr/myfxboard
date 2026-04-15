@@ -35,7 +35,7 @@ vi.mock('../db/connection.js', () => ({
 }));
 
 import ingestionRoutes from '../api/ingestion.js';
-import { accountQueries, positionQueries, tradeQueries, snapshotQueries } from '../db/queries.js';
+import { accountQueries, positionQueries, tradeQueries } from '../db/queries.js';
 
 const SECRET = 'test-secret';
 
