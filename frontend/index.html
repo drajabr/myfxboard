@@ -99,10 +99,9 @@
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th><button class="sort-btn" type="button" data-positions-sort="account_id">Account</button></th>
                                 <th><button class="sort-btn" type="button" data-positions-sort="symbol">Symbol</button></th>
                                 <th><button class="sort-btn" type="button" data-positions-sort="direction">Trade</button></th>
-                                <th class="col-pos-prio-3"><button class="sort-btn" type="button" data-positions-sort="size">Size</button></th>
+                                <th><button class="sort-btn" type="button" data-positions-sort="size">Size</button></th>
                                 <th class="col-pos-prio-4"><button class="sort-btn" type="button" data-positions-sort="entry_price">Entry</button></th>
                                 <th class="col-pos-prio-5"><button class="sort-btn" type="button" data-positions-sort="avg_sl">SL</button></th>
                                 <th class="col-pos-prio-5"><button class="sort-btn" type="button" data-positions-sort="sl_amount">SL $</button></th>
@@ -111,6 +110,7 @@
                                 <th class="col-pos-prio-7"><button class="sort-btn" type="button" data-positions-sort="open_time_ms">Age</button></th>
                                 <th class="col-pos-prio-7"><button class="sort-btn" type="button" data-positions-sort="current_price">Current</button></th>
                                 <th><button class="sort-btn" type="button" data-positions-sort="unrealized_pnl">PnL</button></th>
+                                <th class="col-pos-prio-7"><button class="sort-btn" type="button" data-positions-sort="account_id">Account</button></th>
                             </tr>
                         </thead>
                         <tbody id="positionsTable">
@@ -139,7 +139,7 @@
                 </div>
             </section>
 
-            <section class="charts-row">
+            <section class="charts-row charts-row--calendar-split">
                 <div class="table-section calendar-card">
                     <div class="calendar-head calendar-head--inline">
                         <h3 class="calendar-head__title">Monthly Calendar</h3>
@@ -170,8 +170,8 @@
                 </div>
             </section>
 
-            <section class="charts-row">
-                <div class="table-section">
+            <section class="charts-row charts-row--metrics-split">
+                <div class="table-section table-section--trade-metrics">
                     <h3>Trade Metrics</h3>
                     <div class="metric-grid" id="tradeMetricsGrid"></div>
                 </div>
@@ -337,10 +337,9 @@
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th><button class="sort-btn" type="button" data-trades-sort="account_id">Account</button></th>
                                 <th><button class="sort-btn" type="button" data-trades-sort="symbol">Symbol</button></th>
                                 <th><button class="sort-btn" type="button" data-trades-sort="direction">Side</button></th>
-                                <th class="col-trades-prio-3"><button class="sort-btn" type="button" data-trades-sort="size">Size</button></th>
+                                <th><button class="sort-btn" type="button" data-trades-sort="size">Size</button></th>
                                 <th class="col-trades-prio-4"><button class="sort-btn" type="button" data-trades-sort="entry_price">Entry</button></th>
                                 <th class="col-trades-prio-5"><button class="sort-btn" type="button" data-trades-sort="entry_time_ms">Open</button></th>
                                 <th class="col-trades-prio-5"><button class="sort-btn" type="button" data-trades-sort="exit_time_ms">Close</button></th>
@@ -348,10 +347,11 @@
                                 <th class="col-trades-prio-7"><button class="sort-btn" type="button" data-trades-sort="exit_price">Exit</button></th>
                                 <th class="col-trades-prio-7"><button class="sort-btn" type="button" data-trades-sort="result">Result</button></th>
                                 <th><button class="sort-btn" type="button" data-trades-sort="profit">PnL</button></th>
+                                <th class="col-trades-prio-7"><button class="sort-btn" type="button" data-trades-sort="account_id">Account</button></th>
                             </tr>
                         </thead>
                         <tbody id="tradesTable">
-                            <tr><td colspan="11" style="text-align:center;">No trades</td></tr>
+                            <tr><td colspan="12" style="text-align:center;">No trades</td></tr>
                         </tbody>
                     </table>
                 </div>

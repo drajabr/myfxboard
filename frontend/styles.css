@@ -166,7 +166,7 @@ body {
     --layout-row-min-h: 360px;
     --layout-head-size: 0.95rem;
     --layout-cell-pad: 0.65rem;
-    --chart-height: 360px;
+    --chart-height: 340px;
 }
 
 body[data-layout='compact'] {
@@ -176,7 +176,7 @@ body[data-layout='compact'] {
     --layout-row-min-h: 320px;
     --layout-head-size: 0.87rem;
     --layout-cell-pad: 0.48rem;
-    --chart-height: 320px;
+    --chart-height: 300px;
 }
 
 body[data-layout='dense'] {
@@ -186,23 +186,7 @@ body[data-layout='dense'] {
     --layout-row-min-h: 280px;
     --layout-head-size: 0.82rem;
     --layout-cell-pad: 0.38rem;
-    --chart-height: 250px;
-}
-
-body[data-layout='wide'] {
-    --layout-gap: 0.85rem;
-    --layout-block-pad: 0.88rem;
-    --layout-card-pad: 0.64rem;
-    --layout-row-min-h: 340px;
-    --layout-head-size: 0.9rem;
-    --layout-cell-pad: 0.52rem;
-    --chart-height: 340px;
-}
-
-@media (min-width: 1440px) {
-    body[data-layout='wide'] .charts-row > * {
-        grid-column: span 4;
-    }
+    --chart-height: 240px;
 }
 
 .app-container {
@@ -819,17 +803,15 @@ body[data-layout='dense'] .summary-spotlight .metric-card {
 }
 
 #tradeMetricsGrid .metric-card {
-    flex: 1 1 calc(25% - var(--layout-gap));
-    min-width: 110px;
+    min-width: 0;
 }
 
 #tradeMetricsGrid .metric-card.metric-card--lead {
-    flex: 1 1 calc(50% - var(--layout-gap));
+    min-width: 0;
 }
 
 body[data-layout='dense'] #tradeMetricsGrid .metric-card {
-    flex: 1 1 calc(33.333% - var(--layout-gap));
-    min-width: 90px;
+    min-width: 0;
 }
 
 .metric-grid--dense-table {
@@ -851,8 +833,8 @@ body[data-layout='dense'] #tradeMetricsGrid .metric-card {
     font-size: 0.9em;
 }
 
-.pos-combine-child td:nth-child(2),
-.combine-child td:nth-child(2) {
+.pos-combine-child td:first-child,
+.combine-child td:first-child {
     padding-left: 1rem;
     color: var(--text-muted);
 }
@@ -923,6 +905,22 @@ body[data-layout='dense'] .metric-card .value {
     grid-column: span 4;
 }
 
+.charts-row--calendar-split > .calendar-card:first-child {
+    grid-column: span 8;
+}
+
+.charts-row--calendar-split > .calendar-card:last-child {
+    grid-column: span 4;
+}
+
+.charts-row--metrics-split > .table-section--trade-metrics {
+    grid-column: span 4;
+}
+
+.charts-row--metrics-split > .chart-container {
+    grid-column: span 8;
+}
+
 .charts-row > * > .metric-grid {
     flex: 1 1 0;
     align-content: start;
@@ -930,6 +928,24 @@ body[data-layout='dense'] .metric-card .value {
 
 body[data-layout='dense'] .charts-row > * {
     grid-column: span 4;
+}
+
+body[data-layout='dense'] .charts-row--primary-split > .table-section--positions-main,
+body[data-layout='dense'] .charts-row--calendar-split > .calendar-card:first-child {
+    grid-column: span 8;
+}
+
+body[data-layout='dense'] .charts-row--primary-split > .table-section--exposure,
+body[data-layout='dense'] .charts-row--calendar-split > .calendar-card:last-child {
+    grid-column: span 4;
+}
+
+body[data-layout='dense'] .charts-row--metrics-split > .table-section--trade-metrics {
+    grid-column: span 4;
+}
+
+body[data-layout='dense'] .charts-row--metrics-split > .chart-container {
+    grid-column: span 8;
 }
 
 .chart-container {
@@ -1148,7 +1164,29 @@ body[data-layout='dense'] .data-table {
 }
 
 .table-section--historic {
-    min-height: 100vh;
+    min-height: calc(100vh - 9rem);
+    display: flex;
+    flex-direction: column;
+}
+
+.table-section--historic .table-scroll--trades {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+}
+
+.table-section--trade-metrics {
+    display: flex;
+    flex-direction: column;
+}
+
+#tradeMetricsGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: 1fr;
+    gap: var(--layout-gap);
+    flex: 1 1 auto;
+    align-content: stretch;
 }
 
 .table-section--with-table-head .data-table {
@@ -1200,28 +1238,23 @@ body[data-layout='dense'] .data-table {
     color: var(--accent-strong);
 }
 
-#positionsTable td:nth-child(3),
-#tradesTable td:nth-child(3) {
+#positionsTable td:nth-child(2),
+#tradesTable td:nth-child(2) {
     text-align: center;
 }
 
+#positionsTable td:nth-child(3),
 #positionsTable td:nth-child(4),
 #positionsTable td:nth-child(5),
 #positionsTable td:nth-child(6),
 #positionsTable td:nth-child(7),
 #positionsTable td:nth-child(8),
-#positionsTable td:nth-child(9),
 #positionsTable td:nth-child(10),
 #positionsTable td:nth-child(11),
-#positionsTable td:nth-child(12),
+#tradesTable td:nth-child(3),
 #tradesTable td:nth-child(4),
-#tradesTable td:nth-child(5),
-#tradesTable td:nth-child(6),
-#tradesTable td:nth-child(7),
 #tradesTable td:nth-child(8),
-#tradesTable td:nth-child(9),
-#tradesTable td:nth-child(10),
-#tradesTable td:nth-child(11) {
+#tradesTable td:nth-child(10) {
     text-align: right;
     font-variant-numeric: tabular-nums;
 }
@@ -1624,7 +1657,7 @@ body[data-layout='dense'] .pos-combine-child {
     opacity: 0.88;
 }
 
-.combine-child td:nth-child(2) {
+.combine-child td:first-child {
     padding-left: 1.2rem;
 }
 
@@ -1643,8 +1676,8 @@ body[data-layout='dense'] .pos-combine-child {
 }
 
 .table-scroll--trades {
-    max-height: calc(100vh - 12rem);
-    min-height: calc(100vh - 18rem);
+    max-height: calc(100vh - 15rem);
+    min-height: 320px;
     overflow: auto;
     border-radius: 10px;
     border: 1px solid var(--border);
@@ -1768,8 +1801,8 @@ body[data-layout='dense'] .pos-combine-child {
 }
 
 @media (min-width: 761px) and (max-width: 1180px) {
-    #tradeMetricsGrid .metric-card {
-        flex: 1 1 calc(33.333% - var(--layout-gap));
+    #tradeMetricsGrid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 }
 
@@ -1819,9 +1852,8 @@ body[data-layout='dense'] .pos-combine-child {
         grid-column: auto;
     }
 
-    #tradeMetricsGrid .metric-card {
-        flex: 1 1 calc(50% - var(--layout-gap));
-        min-width: 100px;
+    #tradeMetricsGrid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .year-grid {
@@ -1834,8 +1866,8 @@ body[data-layout='dense'] .pos-combine-child {
         grid-template-columns: 1fr;
     }
 
-    #tradeMetricsGrid .metric-card {
-        flex: 1 1 100%;
+    #tradeMetricsGrid {
+        grid-template-columns: 1fr;
     }
 
     body[data-layout='dense'] .charts-row > * {

@@ -9,18 +9,14 @@ const LAYOUT_KEY = 'layoutPreference';
 const UI_VERSION = 'v1.6';
 const DASHBOARD_REFRESH_MS = 30000;
 const ACCOUNTS_REFRESH_MS = 60000;
-const LAYOUT_MODES = ['normal', 'compact', 'wide', 'dense'];
+const LAYOUT_MODES = ['compact', 'dense'];
 const MAX_PNL_CURVE_POINTS = 180;
 const LAYOUT_BUTTON_LABELS = {
-    normal: '\u25a1',
     compact: 'P',
-    wide: '\u229f',
     dense: '\u229e',
 };
 const LAYOUT_NAME_LABELS = {
-    normal: 'Spacious',
     compact: 'Compact',
-    wide: 'Wide',
     dense: 'Dense',
 };
 
@@ -212,8 +208,6 @@ function estimatePositionTargetPnl(position, targetPrice) {
         return null;
     }
     const entryPrice = toNum(position?.entry_price, NaN);
-    const currentPrice = toNum(position?.current_price, NaN);
-    const unrealizedPnl = toNum(position?.unrealized_pnl, NaN);
     const target = toNum(targetPrice, NaN);
     const direction = String(position?.direction || '').toUpperCase() === 'SELL' ? -1 : 1;
     const tickSize = toNum(position?.tick_size, NaN);
@@ -222,12 +216,6 @@ function estimatePositionTargetPnl(position, targetPrice) {
 
     if (!Number.isFinite(entryPrice) || !Number.isFinite(target)) {
         return null;
-    }
-
-    const liveMove = (currentPrice - entryPrice) * direction;
-    if (Number.isFinite(currentPrice) && Number.isFinite(unrealizedPnl) && Math.abs(liveMove) > 1e-12) {
-        const pnlPerPriceUnit = unrealizedPnl / liveMove;
-        return (target - entryPrice) * direction * pnlPerPriceUnit;
     }
 
     if (Number.isFinite(tickSize) && tickSize > 0 && Number.isFinite(tickValue) && tickValue > 0 && size > 0) {
@@ -1314,24 +1302,24 @@ function renderTradeMetrics(metrics, periods) {
     }
 
     const cards = [
-        ['Win Rate', formatPct(metrics.win_rate_pct), metrics.win_rate_pct],
-        ['Profit Factor', Number(toNum(metrics.profit_factor)).toFixed(2), 0],
-        ['Expectancy', formatMoney(metrics.expectancy), toNum(metrics.expectancy)],
-        ['Average RR', Number(toNum(metrics.avg_rr)).toFixed(2), 0],
-        ['Average Win', formatMoney(metrics.avg_win), metrics.avg_win],
-        ['Average Loss', formatMoney(metrics.avg_loss), metrics.avg_loss],
-        ['Max Win', formatMoney(metrics.max_win), metrics.max_win],
-        ['Max Loss', formatMoney(metrics.max_loss), metrics.max_loss],
-        ['Max Drawdown', formatMoney(metrics.max_drawdown), toNum(metrics.max_drawdown)],
-        ['Avg Hold Time', durationLabel(metrics.avg_hold_seconds), 0],
+        ['Win Rate', formatPct(metrics.win_rate_pct), 0, 'neutral'],
+        ['Profit Factor', Number(toNum(metrics.profit_factor)).toFixed(2), 0, 'neutral'],
+        ['Expectancy', formatMoney(metrics.expectancy), toNum(metrics.expectancy), 'pnl'],
+        ['Average RR', Number(toNum(metrics.avg_rr)).toFixed(2), 0, 'neutral'],
+        ['Average Win', formatMoney(metrics.avg_win), metrics.avg_win, 'pnl'],
+        ['Average Loss', formatMoney(metrics.avg_loss), metrics.avg_loss, 'pnl'],
+        ['Max Win', formatMoney(metrics.max_win), metrics.max_win, 'pnl'],
+        ['Max Drawdown', formatMoney(metrics.max_drawdown), -Math.abs(toNum(metrics.max_drawdown)), 'pnl'],
+        ['Max Loss', formatMoney(metrics.max_loss), metrics.max_loss, 'pnl'],
+        ['Avg Hold Time', durationLabel(metrics.avg_hold_seconds), 0, 'neutral'],
     ];
 
     grid.classList.remove('metric-grid--dense-table');
 
-    grid.innerHTML = cards.map(([label, value, pnl], idx) => `
+    grid.innerHTML = cards.map(([label, value, pnl, mode], idx) => `
         <div class="metric-card ${idx < 2 ? 'metric-card--lead' : ''}">
             <div class="label">${label}</div>
-            <div class="value ${label.includes('Hold') || label.includes('Rate') || label.includes('RR') ? '' : pnlClass(pnl)}">${value}</div>
+            <div class="value ${mode === 'pnl' ? pnlClass(pnl) : ''}">${value}</div>
             ${label === 'Win Rate' ? wrTrendHtml : ''}
         </div>
     `).join('');
@@ -1571,20 +1559,19 @@ function updatePositionsTable(positions) {
         const slMoney = pos.sl_amount ?? estimatePositionTargetPnl(pos, pos.avg_sl);
         const tpMoney = pos.tp_amount ?? estimatePositionTargetPnl(pos, pos.avg_tp);
         const childClass = isChild ? ` class="pos-combine-child" data-group-symbol="${normalizeSymbol(pos.symbol)}"` : '';
-        const accountCell = `<td><span class="account-tag">${pos.account_id || (pos._accountCount ? `${pos._accountCount} accts` : '-')}</span></td>`;
+        const accountInner = `<span class="account-tag">${pos.account_id || (pos._accountCount ? `${pos._accountCount} accts` : '-')}</span>`;
         const symbolCell = pos._combined
             ? `<td class="pos-combine-toggle" data-group-symbol="${normalizeSymbol(pos.symbol)}" title="Click to expand">\u25B6 ${pos.symbol} (${pos._children.length})</td>`
-            : `<td>${isChild ? '<span class="cell-muted">-</span>' : pos.symbol}</td>`;
+            : `<td>${isChild ? pos.symbol : pos.symbol}</td>`;
         const entryDecimals = pos._entryDecimals || inferPriceDecimals([pos], 'entry_price');
         const currentDecimals = pos._currentDecimals || inferPriceDecimals([pos], 'current_price');
         const slDecimals = pos._slDecimals || inferPriceDecimals([pos], 'avg_sl');
         const tpDecimals = pos._tpDecimals || inferPriceDecimals([pos], 'avg_tp');
         return `
         <tr${childClass}>
-            ${accountCell}
             ${symbolCell}
             <td><span class="dir-badge ${side === 'BUY' ? 'dir-buy' : side === 'SELL' ? 'dir-sell' : ''}">${side}</span></td>
-            <td class="col-pos-prio-3">${formatSize(pos.size)}</td>
+            <td>${formatSize(pos.size)}</td>
             <td class="col-pos-prio-4">${formatPrice(pos.entry_price, entryDecimals)}</td>
             <td class="col-pos-prio-5">${pos.avg_sl !== null ? formatPrice(pos.avg_sl, slDecimals) : '-'}</td>
             <td class="col-pos-prio-5 ${pnlClass(slMoney || 0)}">${slMoney === null ? '-' : formatMoney(slMoney)}</td>
@@ -1593,6 +1580,7 @@ function updatePositionsTable(positions) {
             <td class="col-pos-prio-7">${ageText}</td>
             <td class="col-pos-prio-7">${pos.current_price !== null ? formatPrice(pos.current_price, currentDecimals) : '-'}</td>
             <td class="${pnlClass(pos.unrealized_pnl || 0)}">${formatMoney(pos.unrealized_pnl || 0)}</td>
+            <td class="col-pos-prio-7">${accountInner}</td>
         </tr>
     `;
     };
@@ -1791,7 +1779,7 @@ function updateTradesTable(trades) {
     }
 
     if (rows.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;">No trades</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;">No trades</td></tr>';
         scheduleAutoFitHistoricTrades();
         return;
     }
@@ -1821,18 +1809,17 @@ function updateTradesTable(trades) {
         const duration = durationLabel(trade.duration_sec);
         const resultShort = formatTradeResultShort(trade.result);
         const childClass = isChild ? ` class="combine-child" data-group-symbol="${normalizeSymbol(trade.symbol)}"` : '';
-        const accountCell = `<td><span class="account-tag">${accountLabel}</span></td>`;
+        const accountInner = `<span class="account-tag">${accountLabel}</span>`;
         const symbolCell = trade._combined
             ? `<td class="combine-toggle" data-group-symbol="${normalizeSymbol(trade.symbol)}" title="Click to expand">▶ ${trade.symbol} (${trade._children.length})</td>`
-            : `<td>${isChild ? '<span class="cell-muted">-</span>' : trade.symbol}</td>`;
+            : `<td>${trade.symbol}</td>`;
         const entryDecimals = trade._entryDecimals || inferPriceDecimals([trade], 'entry_price');
         const exitDecimals = trade._exitDecimals || inferPriceDecimals([trade], 'exit_price');
         return `
         <tr${childClass}>
-            ${accountCell}
             ${symbolCell}
             <td>${dirBadge(trade.direction || deriveDirection(trade))}</td>
-            <td class="col-trades-prio-3">${Number(trade.size || 0).toFixed(2)}</td>
+            <td>${Number(trade.size || 0).toFixed(2)}</td>
             <td class="col-trades-prio-4">${formatPrice(trade.entry_price, entryDecimals)}</td>
             <td class="col-trades-prio-5">${openTime}</td>
             <td class="col-trades-prio-5">${closeTime}</td>
@@ -1840,6 +1827,7 @@ function updateTradesTable(trades) {
             <td class="col-trades-prio-7">${trade.exit_price !== null ? formatPrice(trade.exit_price, exitDecimals) : '-'}</td>
             <td class="col-trades-prio-7">${resultShort}</td>
             <td class="${pnlClass(trade.profit || 0)}">${formatMoney(trade.profit || 0)}</td>
+            <td class="col-trades-prio-7">${accountInner}</td>
         </tr>
     `;
     };
@@ -1911,6 +1899,7 @@ function updateExposureTable(positions) {
     });
 
     const totalSize = source.reduce((s, p) => s + Math.abs(toNum(p.size)), 0);
+    const safeTotal = Math.max(totalSize, 1e-9);
     let rows = [];
 
     for (const [sym, posArr] of symbolGroups) {
@@ -1922,7 +1911,7 @@ function updateExposureTable(positions) {
             isSymbol: true,
             symbol: sym,
             size: symSize,
-            pct: totalSize > 0 ? (symSize / totalSize) * 100 : 0,
+            pct: (symSize / safeTotal) * 100,
             account: accounts.length === 1 ? accounts[0] : `${accounts.length} accts`,
             hasChildren: !state.combineExposure && accounts.length > 1,
         });
@@ -1940,7 +1929,7 @@ function updateExposureTable(positions) {
                         isSymbol: false,
                         symbol: '',
                         size: sz,
-                        pct: totalSize > 0 ? (sz / totalSize) * 100 : 0,
+                        pct: (sz / safeTotal) * 100,
                         account: acct,
                     });
                 }
