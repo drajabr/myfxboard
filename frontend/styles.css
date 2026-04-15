@@ -847,8 +847,14 @@ body[data-layout='dense'] #tradeMetricsGrid .metric-card {
 }
 
 .pos-combine-child {
-    opacity: 0.75;
-    font-size: 0.92em;
+    opacity: 0.85;
+    font-size: 0.9em;
+}
+
+.pos-combine-child td:first-child,
+.combine-child td:first-child {
+    padding-left: 1rem;
+    color: var(--text-muted);
 }
 
 .dense-only {
@@ -1171,12 +1177,52 @@ body[data-layout='dense'] .data-table {
     font-weight: 700;
     cursor: pointer;
     padding: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    line-height: 1;
 }
 
 .sort-btn:hover {
     color: var(--accent-strong);
 }
 
+#positionsTable td:nth-child(2),
+#tradesTable td:nth-child(2) {
+    text-align: center;
+}
+
+#positionsTable td:nth-child(3),
+#positionsTable td:nth-child(5),
+#positionsTable td:nth-child(6),
+#positionsTable td:nth-child(7),
+#positionsTable td:nth-child(8),
+#positionsTable td:nth-child(9),
+#positionsTable td:nth-child(10),
+#tradesTable td:nth-child(3),
+#tradesTable td:nth-child(5),
+#tradesTable td:nth-child(6),
+#tradesTable td:nth-child(7) {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.col-pos-prio-3,
+.col-pos-prio-4,
+.col-trades-prio-3,
+.col-trades-prio-4 {
+    min-width: 86px;
+}
+
+.col-pos-prio-5,
+.col-trades-prio-5 {
+    min-width: 72px;
+}
+
+.col-pos-prio-6,
+.col-trades-prio-6 {
+    min-width: 84px;
+}
 .data-table tbody tr:hover {
     background: rgba(var(--accent-rgb), 0.1);
 }
@@ -1453,6 +1499,10 @@ body[data-layout='dense'] #monthCalendar {
 }
 
 .period-meta--short {
+body[data-layout='dense'] .combine-child,
+body[data-layout='dense'] .pos-combine-child {
+    font-size: 0.95em;
+}
     display: none;
 }
 
@@ -1547,11 +1597,17 @@ body[data-layout='dense'] #monthCalendar {
 
 .combine-child {
     background: color-mix(in srgb, var(--surface-alt) 60%, transparent);
-    font-size: 0.85em;
+    font-size: 0.9em;
+    opacity: 0.88;
 }
 
 .combine-child td:first-child {
     padding-left: 1.2rem;
+}
+
+body[data-layout='dense'] .combine-child,
+body[data-layout='dense'] .pos-combine-child {
+    font-size: 0.95em;
 }
 
 .trades-footer {

@@ -138,12 +138,15 @@ string DC_BuildPositionsJson() {
       if(!first) j += ",";
       first = false;
       ENUM_POSITION_TYPE dir = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      string symbol = PositionGetString(POSITION_SYMBOL);
+      double tick_size = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+      double tick_value = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
       j += StringFormat(
-         "{\"symbol\":\"%s\",\"volume\":%.2f,\"direction\":\"%s\",\"open_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
-         PositionGetString(POSITION_SYMBOL), PositionGetDouble(POSITION_VOLUME),
-         (dir == POSITION_TYPE_BUY) ? "BUY" : "SELL",
-         PositionGetDouble(POSITION_PRICE_OPEN), PositionGetDouble(POSITION_SL),
-         PositionGetDouble(POSITION_TP), (long)PositionGetInteger(POSITION_TIME_MSC),
+         "{\"symbol\":\"%s\",\"volume\":%.2f,\"direction\":\"%s\",\"open_price\":%.5f,\"current_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"tick_size\":%.10f,\"tick_value\":%.10f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
+         symbol, PositionGetDouble(POSITION_VOLUME),
+         dir == POSITION_TYPE_BUY ? "BUY" : "SELL",
+         PositionGetDouble(POSITION_PRICE_OPEN), PositionGetDouble(POSITION_PRICE_CURRENT), PositionGetDouble(POSITION_SL),
+         PositionGetDouble(POSITION_TP), tick_size, tick_value, (long)PositionGetInteger(POSITION_TIME_MSC),
          PositionGetDouble(POSITION_PROFIT));
    }
    return j + "]";
@@ -1258,6 +1261,24 @@ double GetPointValuePerLot() {
    sym.cachedPointValuePerLot = result;
    sym.pointValueCached = true;
    return result;
+}
+
+// Broker-accurate projected PnL for moving from from_price to to_price.
+// Uses OrderCalcProfit first (respects symbol contract/tick settings), then
+// falls back to point-value estimation if OrderCalcProfit is unavailable.
+double CalculateProjectedPnL(bool is_buy, double volume, double from_price, double to_price) {
+   if(volume <= 0 || from_price <= 0 || to_price <= 0) return 0;
+
+   double pnl = 0;
+   ENUM_ORDER_TYPE ot = is_buy ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   if(OrderCalcProfit(ot, _Symbol, volume, from_price, to_price, pnl)) {
+      return pnl;
+   }
+
+   // Fallback: convert price move to points and multiply by point-value-per-lot.
+   double pvl = GetPointValuePerLot();
+   double signed_points = ((to_price - from_price) / sym.point) * (is_buy ? 1.0 : -1.0);
+   return signed_points * pvl * volume;
 }
 
 
@@ -3029,21 +3050,19 @@ void UpdateDashboard() {
    
    double risk = 0, reward = 0;
    double total_vol = MathAbs(state.netVolume);
-   double pvl = GetPointValuePerLot();
-   double sl_value = 0;  // Can be positive (profit) or negative (risk)
+   double sl_value = 0;  // Legacy sign convention: positive = loss, negative = profit
    double display_tp = GetDashboardDisplayTP();
    
    if(state.avgSL > 0 && total_vol > 0) {
-      double diff = GetPriceDiff(state.isBuy, state.avgEntry, state.avgSL);
-      sl_value = (diff / sym.point) * pvl * total_vol;
-      // For display, use absolute value for risk calculation
-      if(diff > 0) risk = MathAbs(sl_value);
+      double projected_sl_pnl = CalculateProjectedPnL(state.isBuy, total_vol, state.avgEntry, state.avgSL);
+      sl_value = -projected_sl_pnl;
+      if(projected_sl_pnl < 0) risk = MathAbs(projected_sl_pnl);
    }
 
    // Dashboard TP is intentionally simplified to one averaged TP level.
    if(display_tp > 0 && total_vol > 0) {
-      double diff = GetPriceDiff(state.isBuy, display_tp, state.avgEntry);
-      if(diff > 0) reward = (diff / sym.point) * pvl * total_vol;
+      double projected_tp_pnl = CalculateProjectedPnL(state.isBuy, total_vol, state.avgEntry, display_tp);
+      if(projected_tp_pnl > 0) reward = projected_tp_pnl;
    }
    
    string currentRR = risk > 0 ? (MathAbs(state.currentPnL) / risk <= 99 ? DoubleToString(MathAbs(state.currentPnL) / risk, 1) : "∞") : "∞";
@@ -3498,16 +3517,15 @@ void UpdatePnLOnly() {
    
    // Multi-line mode: update P&L text and color
    double total_vol = MathAbs(state.netVolume);
-   double pvl = GetPointValuePerLot();
    double risk = 0, reward = 0;
    
    if(state.avgSL > 0 && total_vol > 0) {
-      double diff = GetPriceDiff(state.isBuy, state.avgEntry, state.avgSL);
-      if(diff > 0) risk = (diff / sym.point) * pvl * total_vol;
+      double projected_sl_pnl = CalculateProjectedPnL(state.isBuy, total_vol, state.avgEntry, state.avgSL);
+      if(projected_sl_pnl < 0) risk = MathAbs(projected_sl_pnl);
    }
    if(state.avgTP > 0 && total_vol > 0) {
-      double diff = GetPriceDiff(state.isBuy, state.avgTP, state.avgEntry);
-      if(diff > 0) reward = (diff / sym.point) * pvl * total_vol;
+      double projected_tp_pnl = CalculateProjectedPnL(state.isBuy, total_vol, state.avgEntry, state.avgTP);
+      if(projected_tp_pnl > 0) reward = projected_tp_pnl;
    }
    
    string currentRR = risk > 0 ? (MathAbs(state.currentPnL) / risk <= 99 ? DoubleToString(MathAbs(state.currentPnL) / risk, 1) : "∞") : "∞";
@@ -3636,7 +3654,6 @@ bool DrawPositionSingleTPGroups() {
       }
    }
 
-   double pvl = GetPointValuePerLot();
    double account_balance = AccountInfoDouble(ACCOUNT_BALANCE);
 
    for(int g = 0; g < group_count && g < 10; g++) {
@@ -3659,8 +3676,8 @@ bool DrawPositionSingleTPGroups() {
       double sl = has_sl ? NormalizeDouble(group_sl[g], sym.digits) : 0;
       double base_risk_per_lot = 0;
       if(has_sl) {
-         double risk_diff = GetPriceDiff(is_buy, avg_entry, sl);
-         if(risk_diff > 0) base_risk_per_lot = (risk_diff / sym.point) * pvl;
+         double one_lot_sl_pnl = CalculateProjectedPnL(is_buy, 1.0, avg_entry, sl);
+         if(one_lot_sl_pnl < 0) base_risk_per_lot = MathAbs(one_lot_sl_pnl);
       }
       double total_risk = base_risk_per_lot * group_total_vol;
 
@@ -3713,9 +3730,8 @@ bool DrawPositionSingleTPGroups() {
          double vol = level_tp_vols[i];
          if(tp <= 0 || vol <= 0) continue;
 
-         double reward_points = GetPriceDiff(is_buy, tp, avg_entry) / sym.point;
-         if(reward_points < 0) reward_points = 0;
-         double reward = reward_points * pvl * vol;
+         double reward = CalculateProjectedPnL(is_buy, vol, avg_entry, tp);
+         if(reward < 0) reward = 0;
          double level_risk = base_risk_per_lot * vol;
          cumulative_reward += reward;
 
@@ -3843,22 +3859,21 @@ void UpdateLines() {
 
    ClearEntryGroupLines();
    
-   double pvl = GetPointValuePerLot();
    double vol = MathAbs(state.netVolume);
    int vol_decimals = GetVolumeDisplayDecimals();
    double account_balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double base_risk_per_lot = 0;
    if(state.avgSL > 0) {
-      double risk_diff = GetPriceDiff(state.isBuy, state.avgEntry, state.avgSL);
-      if(risk_diff > 0) base_risk_per_lot = (risk_diff / sym.point) * pvl;
+      double one_lot_sl_pnl = CalculateProjectedPnL(state.isBuy, 1.0, state.avgEntry, state.avgSL);
+      if(one_lot_sl_pnl < 0) base_risk_per_lot = MathAbs(one_lot_sl_pnl);
    }
    double total_risk = base_risk_per_lot * vol;
    
    string sl_label = "";
    bool has_sl = false;
    if(state.avgSL > 0) {
-      double diff = GetPriceDiff(state.isBuy, state.avgEntry, state.avgSL);
-      double sl_value = -MathAbs((diff / sym.point) * pvl * vol);
+      double sl_projected_pnl = CalculateProjectedPnL(state.isBuy, vol, state.avgEntry, state.avgSL);
+      double sl_value = -sl_projected_pnl;
       sl_label = FormatSLLabel(state.avgSL, MathAbs(sl_value), account_balance);
       has_sl = true;
    }
@@ -3913,9 +3928,8 @@ void UpdateLines() {
       for(int i = 0; i < display_partial_count; i++) {
          double level_vol = display_partial_volumes[i];
          if(level_vol <= 0) level_vol = sym.minLot;
-         double reward_points = GetPriceDiff(state.isBuy, display_partial_prices[i], state.avgEntry) / sym.point;
-         if(reward_points < 0) reward_points = 0;
-         double reward = reward_points * pvl * level_vol;
+         double reward = CalculateProjectedPnL(state.isBuy, level_vol, state.avgEntry, display_partial_prices[i]);
+         if(reward < 0) reward = 0;
          double level_risk = base_risk_per_lot * level_vol;
          if(!display_partial_executed[i]) cumulative_partial_reward += reward;
          partial_valid[i] = true;
@@ -3960,9 +3974,8 @@ void UpdateLines() {
          }
       }
       if(final_vol <= 0) final_vol = sym.minLot;
-      double final_points = GetPriceDiff(state.isBuy, state.avgTP, state.avgEntry) / sym.point;
-      if(final_points < 0) final_points = 0;
-      double tp_reward = final_points * pvl * final_vol;
+      double tp_reward = CalculateProjectedPnL(state.isBuy, final_vol, state.avgEntry, state.avgTP);
+      if(tp_reward < 0) tp_reward = 0;
       double final_risk = base_risk_per_lot * final_vol;
       
       // Line 1: Final TP with bar number

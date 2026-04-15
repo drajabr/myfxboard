@@ -135,6 +135,7 @@ describe('validateIngestionAuth', () => {
 
   it('returns 500 when CONNECTOR_SHARED_SECRET is not set', async () => {
     vi.stubEnv('CONNECTOR_SHARED_SECRET', '');
+    vi.stubEnv('INGEST_ALLOWED_TIMESTAMP_DRIFT_MS', '5000');
     const ts = Date.now();
     const req = createMockReq({
       body: { account_number: '123' },

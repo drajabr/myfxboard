@@ -54,6 +54,22 @@ export function getPositions(accountId: string): any[] {
 }
 
 /**
+ * Returns the concatenated position arrays for multiple accounts.
+ * Used by the SSE endpoint so the frontend can patch the open positions table
+ * immediately on each ingestion event without a full analytics fetch.
+ */
+export function getAggregatedPositions(accountIds: string[]): any[] {
+  const positions: any[] = [];
+  for (const id of accountIds) {
+    const accountPositions = positionsByAccount.get(id);
+    if (accountPositions && accountPositions.length > 0) {
+      positions.push(...accountPositions);
+    }
+  }
+  return positions;
+}
+
+/**
  * Called once on server startup: seeds the cache from the last DB state so
  * the analytics endpoint has data before the first connector sync arrives.
  * Does NOT fire the SSE emitter (no clients are connected yet).

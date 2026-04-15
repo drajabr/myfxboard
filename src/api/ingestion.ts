@@ -6,6 +6,7 @@ import { transaction } from '../db/connection.js';
 import { Trade } from '../types/index.js';
 import { updateAccountCache } from '../services/positionCache.js';
 import { bufferSnapshot } from '../services/writeBuffer.js';
+import { emitHistoryUpdate } from '../services/historyEvents.js';
 
 const router = Router();
 const MIN_INGEST_INTERVAL_MS = 0;
@@ -151,9 +152,11 @@ router.post(
           size: p.volume,
           direction: p.direction,
           entry_price: p.open_price,
-          current_price: p.open_price,
+          current_price: p.current_price ?? p.open_price,
           avg_sl: p.avg_sl ?? null,
           avg_tp: p.avg_tp ?? null,
+          tick_size: p.tick_size ?? null,
+          tick_value: p.tick_value ?? null,
           unrealized_pnl: p.pnl,
           open_time_ms: p.open_time_ms,
         }))
@@ -224,6 +227,7 @@ router.post(
       // the next analytics request gets a fresh PERCENTILE_CONT computation.
       if (shouldIncludeHistory && closed_trades.length > 0) {
         invalidateBreakevenCache(accountId);
+        emitHistoryUpdate(accountId);
       }
 
       // Persist identity/display fields for existing accounts.
@@ -305,6 +309,7 @@ router.post(
       // Invalidate cached tolerance so the next analytics request reflects new history.
       if (tradeRecords.length > 0) {
         invalidateBreakevenCache(accountId);
+        emitHistoryUpdate(accountId);
       }
 
       res.status(200).json({

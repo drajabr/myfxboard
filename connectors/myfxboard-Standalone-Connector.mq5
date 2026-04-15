@@ -220,6 +220,9 @@ private:
          string symbol      = PositionGetString(POSITION_SYMBOL);
          double volume      = PositionGetDouble(POSITION_VOLUME);
          double open_price  = PositionGetDouble(POSITION_PRICE_OPEN);
+         double current_price = PositionGetDouble(POSITION_PRICE_CURRENT);
+         double tick_size   = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+         double tick_value  = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
          double sl          = PositionGetDouble(POSITION_SL);
          double tp          = PositionGetDouble(POSITION_TP);
          ulong  open_time_ms = PositionGetInteger(POSITION_TIME_MSC);
@@ -228,8 +231,8 @@ private:
          string direction = (dir == POSITION_TYPE_BUY) ? "BUY" : "SELL";
 
          positions_json += StringFormat(
-            "{\"symbol\":\"%s\",\"volume\":%.2f,\"direction\":\"%s\",\"open_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
-            symbol, volume, direction, open_price, sl, tp, open_time_ms, pnl
+            "{\"symbol\":\"%s\",\"volume\":%.2f,\"direction\":\"%s\",\"open_price\":%.5f,\"current_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"tick_size\":%.10f,\"tick_value\":%.10f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
+            symbol, volume, direction, open_price, current_price, sl, tp, tick_size, tick_value, open_time_ms, pnl
          );
       }
       positions_json += "]";

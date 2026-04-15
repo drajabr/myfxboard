@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { accountQueries, positionQueries, tradeQueries, snapshotQueries } from '../db/queries.js';
 import { DashboardSummary } from '../types/index.js';
-import { pnlEmitter, getAggregated, getPositions } from '../services/positionCache.js';
+import { pnlEmitter, getAggregated, getAggregatedPositions, getPositions } from '../services/positionCache.js';
+import { historyEmitter } from '../services/historyEvents.js';
 
 const router = Router();
 const DEFAULT_BREAKEVEN_TOLERANCE_FLOOR = 1.0;
@@ -111,6 +112,8 @@ const normalizePosition = (p: any) => ({
   current_price: p.current_price === null ? null : toNum(p.current_price),
   avg_sl: p.avg_sl === null ? null : toNum(p.avg_sl),
   avg_tp: p.avg_tp === null ? null : toNum(p.avg_tp),
+  tick_size: p.tick_size === null || p.tick_size === undefined ? null : toNum(p.tick_size),
+  tick_value: p.tick_value === null || p.tick_value === undefined ? null : toNum(p.tick_value),
   unrealized_pnl: toNum(p.unrealized_pnl),
   open_time_ms: toNum(p.open_time_ms),
   updated_at_ms: toNum(p.updated_at_ms),
@@ -985,9 +988,31 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
     res.setHeader('X-Accel-Buffering', 'no'); // disable nginx proxy buffering
     res.flushHeaders();
 
+    let scheduledSend: NodeJS.Timeout | null = null;
+    let lastSentAt = 0;
+
     const send = () => {
       const snap = getAggregated(accountIds);
-      res.write(`data: ${JSON.stringify({ floating_pnl: snap.floatingPnl, open_positions: snap.openPositions })}\n\n`);
+      const positions = getAggregatedPositions(accountIds).map(normalizePosition);
+      res.write(`data: ${JSON.stringify({
+        floating_pnl: snap.floatingPnl,
+        open_positions: snap.openPositions,
+        positions,
+      })}\n\n`);
+      lastSentAt = Date.now();
+      scheduledSend = null;
+    };
+
+    const scheduleSend = () => {
+      const elapsed = Date.now() - lastSentAt;
+      if (elapsed >= 100) {
+        send();
+        return;
+      }
+      if (scheduledSend) {
+        return;
+      }
+      scheduledSend = setTimeout(send, 100 - elapsed);
     };
 
     // Send current snapshot immediately on connect
@@ -995,7 +1020,7 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
 
     const onUpdate = (updatedAccountId: string) => {
       if (accountIdParam === 'all' || accountIds.includes(updatedAccountId)) {
-        send();
+        scheduleSend();
       }
     };
 
@@ -1007,6 +1032,9 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
     }, 25000);
 
     req.on('close', () => {
+      if (scheduledSend) {
+        clearTimeout(scheduledSend);
+      }
       clearInterval(heartbeat);
       pnlEmitter.off('update', onUpdate);
     });
@@ -1014,6 +1042,74 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
     console.error('Live PnL stream error:', error);
     if (!res.headersSent) {
       res.status(500).json({ error: 'Failed to open live PnL stream' });
+    }
+  }
+});
+
+router.get('/history/stream', async (req: Request, res: Response) => {
+  try {
+    const accountIdParam = (req.query.accountId as string) || 'all';
+    let accountIds: string[] = [];
+    if (accountIdParam === 'all') {
+      const allAccounts = await accountQueries.list();
+      accountIds = allAccounts.map((a) => a.account_id);
+    } else {
+      const account = await accountQueries.findById(accountIdParam);
+      accountIds = account ? [account.account_id] : [];
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    let scheduledSend: NodeJS.Timeout | null = null;
+    let lastSentAt = 0;
+
+    const send = (changedAccountId: string | null = null) => {
+      res.write(`data: ${JSON.stringify({ changed: true, account_id: changedAccountId, updated_at_ms: Date.now() })}\n\n`);
+      lastSentAt = Date.now();
+      scheduledSend = null;
+    };
+
+    const scheduleSend = (changedAccountId: string) => {
+      const elapsed = Date.now() - lastSentAt;
+      if (elapsed >= 250) {
+        send(changedAccountId);
+        return;
+      }
+      if (scheduledSend) {
+        return;
+      }
+      scheduledSend = setTimeout(() => send(changedAccountId), 250 - elapsed);
+    };
+
+    res.write(': connected\n\n');
+
+    const onUpdate = (updatedAccountId: string) => {
+      if (accountIdParam === 'all' || accountIds.includes(updatedAccountId)) {
+        scheduleSend(updatedAccountId);
+      }
+    };
+
+    historyEmitter.on('update', onUpdate);
+
+    const heartbeat = setInterval(() => {
+      res.write(': heartbeat\n\n');
+    }, 25000);
+
+    req.on('close', () => {
+      if (scheduledSend) {
+        clearTimeout(scheduledSend);
+      }
+      clearInterval(heartbeat);
+      historyEmitter.off('update', onUpdate);
+    });
+  } catch (error) {
+    console.error('History stream error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to open history stream' });
     }
   }
 });

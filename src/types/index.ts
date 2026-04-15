@@ -88,8 +88,11 @@ export interface IngestPayload {
     volume: number;
     direction: 'BUY' | 'SELL';
     open_price: number;
+    current_price?: number;
     avg_sl: number | null;
     avg_tp: number | null;
+    tick_size?: number;
+    tick_value?: number;
     open_time_ms: number;
     pnl: number;
   }>;

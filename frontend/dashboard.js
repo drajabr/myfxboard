@@ -6,8 +6,8 @@ const FONT_KEY = 'fontPreference';
 const FONT_SIZE_KEY = 'fontSizePreference';
 const QUICK_CONTROLS_COLLAPSED_KEY = 'quickControlsCollapsed';
 const LAYOUT_KEY = 'layoutPreference';
-const UI_VERSION = 'v1.3';
-const DASHBOARD_REFRESH_MS = 1000;
+const UI_VERSION = 'v1.5';
+const DASHBOARD_REFRESH_MS = 30000;
 const ACCOUNTS_REFRESH_MS = 60000;
 const LAYOUT_MODES = ['normal', 'compact', 'wide', 'dense'];
 const MAX_PNL_CURVE_POINTS = 180;
@@ -121,11 +121,15 @@ const BACKGROUND_PRESETS = [
 const state = {
     autoRefreshInterval: null,
     livePnlSource: null,
+    historySource: null,
+    liveStreamHealthy: false,
+    historyStreamHealthy: false,
     monthShift: 0,
     yearShift: 0,
     tradesLimit: 50,
     activeTradeFilter: null,
     exposureSort: { key: 'size', direction: 'desc' },
+    positionsSort: { key: 'symbol', direction: 'asc' },
     tradesSort: { key: 'exit_time_ms', direction: 'desc' },
     combinePositions: true,
     combineOpenPositions: true,
@@ -172,6 +176,10 @@ function formatPrice(value, decimals = 5) {
     return Number(value || 0).toFixed(decimals);
 }
 
+function formatSize(value) {
+    return Number(value || 0).toFixed(2);
+}
+
 function decimalPlaces(value) {
     const str = String(value ?? '');
     if (!str.includes('.')) {
@@ -197,6 +205,39 @@ function inferPriceDecimals(rows, key, fallback = 5) {
 function toNum(value, fallback = 0) {
     const n = Number(value);
     return Number.isFinite(n) ? n : fallback;
+}
+
+function estimatePositionTargetPnl(position, targetPrice) {
+    if (targetPrice === null || targetPrice === undefined) {
+        return null;
+    }
+    const entryPrice = toNum(position?.entry_price, NaN);
+    const currentPrice = toNum(position?.current_price, NaN);
+    const unrealizedPnl = toNum(position?.unrealized_pnl, NaN);
+    const target = toNum(targetPrice, NaN);
+    const direction = String(position?.direction || '').toUpperCase() === 'SELL' ? -1 : 1;
+    const tickSize = toNum(position?.tick_size, NaN);
+    const tickValue = toNum(position?.tick_value, NaN);
+    const size = Math.abs(toNum(position?.size, 0));
+
+    if (!Number.isFinite(entryPrice) || !Number.isFinite(target)) {
+        return null;
+    }
+
+    // Broker-accurate path: use tick geometry if provided by MT5 connector.
+    // This avoids contract-size assumptions that can be off by 10x/100x on some brokers.
+    if (Number.isFinite(tickSize) && tickSize > 0 && Number.isFinite(tickValue) && tickValue > 0 && size > 0) {
+        const ticks = ((target - entryPrice) * direction) / tickSize;
+        return ticks * tickValue * size;
+    }
+
+    const liveMove = (currentPrice - entryPrice) * direction;
+    if (Number.isFinite(currentPrice) && Number.isFinite(unrealizedPnl) && Math.abs(liveMove) > 1e-12) {
+        const pnlPerPriceUnit = unrealizedPnl / liveMove;
+        return (target - entryPrice) * direction * pnlPerPriceUnit;
+    }
+
+    return (target - entryPrice) * direction * size;
 }
 
 function formatDateTimeMs(value) {
@@ -883,6 +924,7 @@ function setupEventListeners() {
         state.yearShift = 0;
         loadDashboard();
         startLivePnlPolling(); // reconnect SSE for the newly selected account
+        startHistoryPolling(); // reconnect history invalidation SSE for the newly selected account
     });
 
     document.getElementById('monthPrevBtn').addEventListener('click', () => {
@@ -970,6 +1012,24 @@ function setupEventListeners() {
                 state.exposureSort.direction = key === 'symbol' ? 'asc' : 'desc';
             }
             loadDashboard();
+        });
+    });
+
+    document.querySelectorAll('[data-positions-sort]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const key = btn.getAttribute('data-positions-sort');
+            if (!key) {
+                return;
+            }
+            if (state.positionsSort.key === key) {
+                state.positionsSort.direction = state.positionsSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                state.positionsSort.key = key;
+                state.positionsSort.direction = key === 'symbol' || key === 'direction' || key === 'account_id' ? 'asc' : 'desc';
+            }
+            if (state.lastData) {
+                updatePositionsTable(state.lastData.positions || []);
+            }
         });
     });
 
@@ -1406,18 +1466,24 @@ function scheduleAutoFitHistoricTrades() {
 function updatePositionsTable(positions) {
     const tbody = document.getElementById('positionsTable');
     if (!positions || positions.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;">No open positions</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;">No open positions</td></tr>';
         scheduleAutoFitOpenPositions();
         return;
     }
 
     const nowMs = Date.now();
-    let rows = [...positions];
+    let rows = [...positions].map((pos) => ({
+        ...pos,
+        _combined: false,
+        _sortSymbol: normalizeSymbol(pos.symbol),
+        sl_amount: estimatePositionTargetPnl(pos, pos.avg_sl),
+        tp_amount: estimatePositionTargetPnl(pos, pos.avg_tp),
+    }));
 
     if (state.combineOpenPositions && rows.length > 1) {
         const groups = {};
         for (const pos of rows) {
-            const normSym = normalizeSymbol(pos.symbol);
+            const normSym = pos._sortSymbol || normalizeSymbol(pos.symbol);
             if (!groups[normSym]) {
                 groups[normSym] = { symbol: pos.symbol, normSymbol: normSym, children: [] };
             }
@@ -1427,6 +1493,7 @@ function updatePositionsTable(positions) {
             if (g.children.length === 1) {
                 return { ...g.children[0], _combined: false };
             }
+            const children = g.children.slice().sort((a, b) => String(a.account_id || '-').localeCompare(String(b.account_id || '-')) || (toNum(b.unrealized_pnl) - toNum(a.unrealized_pnl)));
             const totalSize = g.children.reduce((s, p) => s + toNum(p.size), 0);
             const totalPnl = g.children.reduce((s, p) => s + toNum(p.unrealized_pnl || 0), 0);
             const avgEntry = totalSize > 0
@@ -1443,12 +1510,13 @@ function updatePositionsTable(positions) {
                 : null;
             const earliestOpen = Math.min(...g.children.map(p => toNum(p.open_time_ms)).filter(t => t > 0));
             const accounts = [...new Set(g.children.map((p) => String(p.account_id || '-')))];
-            return {
+            const combinedRow = {
                 _combined: true,
-                _children: g.children,
+                _children: children,
                 _accountCount: accounts.length,
                 account_id: accounts.length === 1 ? accounts[0] : '',
                 symbol: g.symbol,
+                _sortSymbol: g.normSymbol,
                 direction: g.children[0]?.direction || '-',
                 size: totalSize,
                 entry_price: avgEntry,
@@ -1456,22 +1524,40 @@ function updatePositionsTable(positions) {
                 unrealized_pnl: totalPnl,
                 avg_sl: avgSl,
                 avg_tp: avgTp,
+                tick_size: toNum(g.children[0]?.tick_size, NaN),
+                tick_value: toNum(g.children[0]?.tick_value, NaN),
                 _entryDecimals: inferPriceDecimals(g.children, 'entry_price'),
                 _currentDecimals: inferPriceDecimals(g.children, 'current_price'),
                 _slDecimals: inferPriceDecimals(g.children, 'avg_sl'),
                 _tpDecimals: inferPriceDecimals(g.children, 'avg_tp'),
                 open_time_ms: earliestOpen === Infinity ? 0 : earliestOpen,
             };
+            combinedRow.sl_amount = estimatePositionTargetPnl(combinedRow, combinedRow.avg_sl);
+            combinedRow.tp_amount = estimatePositionTargetPnl(combinedRow, combinedRow.avg_tp);
+            return combinedRow;
         });
     }
+
+    rows.sort((a, b) => {
+        const key = state.positionsSort.key;
+        const aVal = key === 'symbol' ? (a._sortSymbol || normalizeSymbol(a.symbol)) : a[key];
+        const bVal = key === 'symbol' ? (b._sortSymbol || normalizeSymbol(b.symbol)) : b[key];
+        let cmp = 0;
+        if (key === 'symbol' || key === 'direction' || key === 'account_id') {
+            cmp = String(aVal || '').localeCompare(String(bVal || ''));
+        } else {
+            cmp = toNum(aVal) - toNum(bVal);
+        }
+        return state.positionsSort.direction === 'asc' ? cmp : -cmp;
+    });
 
     const renderPosRow = (pos, isChild) => {
         const openMs = toNum(pos.open_time_ms);
         const ageSec = openMs > 0 ? Math.max(0, (nowMs - openMs) / 1000) : 0;
         const ageText = openMs > 0 ? durationLabel(ageSec) : '-';
         const side = String(pos.direction || '-').toUpperCase();
-        const slMoney = pos.avg_sl !== null ? (toNum(pos.avg_sl) - toNum(pos.entry_price)) * toNum(pos.size) : null;
-        const tpMoney = pos.avg_tp !== null ? (toNum(pos.avg_tp) - toNum(pos.entry_price)) * toNum(pos.size) : null;
+        const slMoney = pos.sl_amount ?? estimatePositionTargetPnl(pos, pos.avg_sl);
+        const tpMoney = pos.tp_amount ?? estimatePositionTargetPnl(pos, pos.avg_tp);
         const childClass = isChild ? ` class="pos-combine-child" data-group-symbol="${normalizeSymbol(pos.symbol)}"` : '';
         const symbolCell = pos._combined
             ? `<td class="pos-combine-toggle" data-group-symbol="${normalizeSymbol(pos.symbol)}" title="Click to expand">\u25B6 ${pos.symbol} (${pos._children.length})</td>`
@@ -1488,6 +1574,7 @@ function updatePositionsTable(positions) {
             <td class="col-pos-prio-2">${ageText}</td>
             <td class="col-pos-prio-3">${formatPrice(pos.entry_price, entryDecimals)}</td>
             <td class="col-pos-prio-4">${pos.current_price !== null ? formatPrice(pos.current_price, currentDecimals) : '-'}</td>
+            <td class="col-pos-prio-5">${formatSize(pos.size)}</td>
             <td class="col-pos-prio-5">${pos.avg_sl !== null ? formatPrice(pos.avg_sl, slDecimals) : '-'}</td>
             <td class="col-pos-prio-5">${pos.avg_tp !== null ? formatPrice(pos.avg_tp, tpDecimals) : '-'}</td>
             <td class="col-pos-prio-6 ${pnlClass(slMoney || 0)}">${slMoney === null ? '-' : formatMoney(slMoney)}</td>
@@ -1498,7 +1585,7 @@ function updatePositionsTable(positions) {
     };
 
     if (!state.combineOpenPositions) {
-        tbody.innerHTML = positions.map((pos) => {
+        tbody.innerHTML = rows.map((pos) => {
             return renderPosRow(pos, false);
         }).join('');
         scheduleAutoFitOpenPositions();
@@ -1722,7 +1809,7 @@ function updateTradesTable(trades) {
         const childClass = isChild ? ` class="combine-child" data-group-symbol="${normalizeSymbol(trade.symbol)}"` : '';
         const symbolCell = trade._combined
             ? `<td class="combine-toggle" data-group-symbol="${normalizeSymbol(trade.symbol)}" title="Click to expand">▶ ${trade.symbol} (${trade._children.length})</td>`
-            : `<td>${isChild ? `${trade.symbol} • ${accountLabel}` : trade.symbol}</td>`;
+            : `<td>${isChild ? accountLabel : trade.symbol}</td>`;
         const entryDecimals = trade._entryDecimals || inferPriceDecimals([trade], 'entry_price');
         const exitDecimals = trade._exitDecimals || inferPriceDecimals([trade], 'exit_price');
         return `
@@ -1746,7 +1833,8 @@ function updateTradesTable(trades) {
     for (const trade of rows) {
         html += renderRow(trade, false);
         if (trade._combined && trade._children) {
-            for (const child of trade._children) {
+            const children = trade._children.slice().sort((a, b) => String(a.account_id || '-').localeCompare(String(b.account_id || '-')) || (toNum(b.exit_time_ms) - toNum(a.exit_time_ms)));
+            for (const child of children) {
                 html += renderRow({ ...child, direction: deriveDirection(child) }, true);
             }
         }
@@ -3141,10 +3229,24 @@ async function loadDashboard() {
 }
 
 function startAutoRefresh(interval) {
+    if (state.autoRefreshInterval) return;
+    state.autoRefreshInterval = setInterval(loadDashboard, interval);
+}
+
+function stopAutoRefresh() {
     if (state.autoRefreshInterval) {
         clearInterval(state.autoRefreshInterval);
+        state.autoRefreshInterval = null;
     }
-    state.autoRefreshInterval = setInterval(loadDashboard, interval);
+}
+
+function syncAdaptiveRefreshMode() {
+    const streamsHealthy = state.liveStreamHealthy && state.historyStreamHealthy;
+    if (streamsHealthy) {
+        stopAutoRefresh();
+    } else {
+        startAutoRefresh(DASHBOARD_REFRESH_MS);
+    }
 }
 
 async function fetchLivePnl() {}
@@ -3158,12 +3260,34 @@ function applyLivePnl(data) {
     const balance = toNum(state.lastData?.summary?.balance, 0);
     const balanceBase = Math.max(Math.abs(balance), 1);
     const floatingPct = (floatingPnl / balanceBase) * 100;
+
+    if (state.lastData && state.lastData.summary) {
+        state.lastData.summary.floating_pnl = floatingPnl;
+        state.lastData.summary.open_positions = toNum(data.open_positions, state.lastData.summary.open_positions || 0);
+        if (Array.isArray(data.positions)) {
+            state.lastData.positions = data.positions;
+        }
+    }
+
     floatingEl.textContent = formatMoney(floatingPnl);
     applyPnlClass(floatingEl, floatingPnl);
     if (floatingMetaEl) {
         floatingMetaEl.textContent = formatDeltaPct(floatingPct);
         floatingMetaEl.className = `label metric-card__meta ${pnlClass(floatingPnl)}`;
     }
+
+    const balanceMetaEl = document.getElementById('balanceMeta');
+    if (balanceMetaEl && state.lastData?.summary) {
+        balanceMetaEl.textContent = `Accounts ${toNum(state.lastData.summary.accounts_count)} · Open ${toNum(state.lastData.summary.open_positions)}`;
+        balanceMetaEl.className = 'label metric-card__meta';
+    }
+
+    if (Array.isArray(data.positions)) {
+        updatePositionsTable(data.positions);
+        updateExposureTable(data.positions);
+    }
+
+    updateLastUpdatedLabel(Date.now());
 }
 
 /**
@@ -3178,17 +3302,51 @@ function startLivePnlPolling() {
         state.livePnlSource.close();
         state.livePnlSource = null;
     }
+    state.liveStreamHealthy = false;
+    syncAdaptiveRefreshMode();
     const selectedAccount = document.getElementById('accountSelector')?.value || localStorage.getItem('selectedAccount') || '';
     const scope = selectedAccount || 'all';
     const url = `${API_URL}/account/live-pnl/stream?accountId=${encodeURIComponent(scope)}`;
     const es = new EventSource(url);
+    es.onopen = () => {
+        state.liveStreamHealthy = true;
+        syncAdaptiveRefreshMode();
+    };
     es.onmessage = (event) => {
         try {
             applyLivePnl(JSON.parse(event.data));
         } catch (_) {}
     };
-    // onerror: browser will auto-reconnect per SSE spec — no manual action needed
+    es.onerror = () => {
+        state.liveStreamHealthy = false;
+        syncAdaptiveRefreshMode();
+    };
     state.livePnlSource = es;
+}
+
+function startHistoryPolling() {
+    if (state.historySource) {
+        state.historySource.close();
+        state.historySource = null;
+    }
+    state.historyStreamHealthy = false;
+    syncAdaptiveRefreshMode();
+    const selectedAccount = document.getElementById('accountSelector')?.value || localStorage.getItem('selectedAccount') || '';
+    const scope = selectedAccount || 'all';
+    const url = `${API_URL}/account/history/stream?accountId=${encodeURIComponent(scope)}`;
+    const es = new EventSource(url);
+    es.onopen = () => {
+        state.historyStreamHealthy = true;
+        syncAdaptiveRefreshMode();
+    };
+    es.onmessage = () => {
+        loadDashboard();
+    };
+    es.onerror = () => {
+        state.historyStreamHealthy = false;
+        syncAdaptiveRefreshMode();
+    };
+    state.historySource = es;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -3207,8 +3365,9 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error('Error loading accounts:', error);
     });
     loadDashboard();
-    startAutoRefresh(DASHBOARD_REFRESH_MS);
+    syncAdaptiveRefreshMode();
     startLivePnlPolling();
+    startHistoryPolling();
 });
 
 
