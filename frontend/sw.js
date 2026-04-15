@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'myfxboard-v1';
+const CACHE_VERSION = 'myfxboard-v2';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -7,7 +7,21 @@ const APP_SHELL = [
   '/manifest.webmanifest',
   '/favicon.svg',
   '/icons/icon-192.png',
-  '/icons/icon-512.png'
+  '/icons/icon-512.png',
+  '/fonts/manrope-400.woff2',
+  '/fonts/manrope-700.woff2',
+  '/fonts/sora-400.woff2',
+  '/fonts/sora-700.woff2',
+  '/fonts/jetbrains-mono-400.woff2',
+  '/fonts/jetbrains-mono-700.woff2',
+  '/fonts/inter-400.woff2',
+  '/fonts/inter-700.woff2',
+  '/fonts/dm-sans-400.woff2',
+  '/fonts/dm-sans-700.woff2',
+  '/fonts/fira-code-400.woff2',
+  '/fonts/fira-code-700.woff2',
+  '/fonts/barlow-condensed-400.woff2',
+  '/fonts/barlow-condensed-700.woff2',
 ];
 
 self.addEventListener('install', (event) => {

@@ -46,6 +46,70 @@
     font-display: swap;
 }
 
+@font-face {
+    font-family: 'Inter';
+    src: url('./fonts/inter-400.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Inter';
+    src: url('./fonts/inter-700.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'DM Sans';
+    src: url('./fonts/dm-sans-400.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'DM Sans';
+    src: url('./fonts/dm-sans-700.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Fira Code';
+    src: url('./fonts/fira-code-400.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Fira Code';
+    src: url('./fonts/fira-code-700.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Barlow Condensed';
+    src: url('./fonts/barlow-condensed-400.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Barlow Condensed';
+    src: url('./fonts/barlow-condensed-700.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+}
+
 :root {
     --bg: #f3f8f5;
     --surface: #ffffff;
@@ -58,7 +122,7 @@
     --accent-strong: #25754f;
     --accent-rgb: 47, 143, 98;
     --bg-tint-rgb: 47, 143, 98;
-    --app-font: 'Manrope', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    --app-font: 'Manrope', 'Inter', Arial, sans-serif;
     --app-font-size: 16px;
     --pnl-positive: #2f8f62;
     --pnl-negative: #e04848;
@@ -125,6 +189,22 @@ body[data-layout='dense'] {
     --chart-height: 212px;
 }
 
+body[data-layout='wide'] {
+    --layout-gap: 0.85rem;
+    --layout-block-pad: 0.88rem;
+    --layout-card-pad: 0.64rem;
+    --layout-row-min-h: 290px;
+    --layout-head-size: 0.9rem;
+    --layout-cell-pad: 0.52rem;
+    --chart-height: 290px;
+}
+
+@media (min-width: 1440px) {
+    body[data-layout='wide'] .charts-row > * {
+        grid-column: span 4;
+    }
+}
+
 .app-container {
     display: flex;
     flex-direction: column;
@@ -144,6 +224,12 @@ body[data-layout='dense'] {
     position: sticky;
     top: 0;
     z-index: 18;
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform;
+}
+
+.header--hidden {
+    transform: translateY(-100%);
 }
 
 .header-left {
@@ -167,7 +253,7 @@ body[data-layout='dense'] {
     margin: 0;
     line-height: 1;
     text-transform: lowercase;
-    font-family: 'Sora', 'Manrope', 'Arial Narrow', 'Segoe UI', sans-serif;
+    font-family: 'Sora', 'Manrope', 'Inter', Arial, sans-serif;
     font-style: italic;
     font-size: 2.05rem;
     letter-spacing: 0.01em;

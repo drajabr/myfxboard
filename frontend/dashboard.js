@@ -9,13 +9,19 @@ const LAYOUT_KEY = 'layoutPreference';
 const UI_VERSION = 'v1.3';
 const DASHBOARD_REFRESH_MS = 1000;
 const ACCOUNTS_REFRESH_MS = 60000;
-const LAYOUT_MODES = ['compact'];
+const LAYOUT_MODES = ['normal', 'compact', 'wide', 'dense'];
 const MAX_PNL_CURVE_POINTS = 180;
 const LAYOUT_BUTTON_LABELS = {
+    normal: '\u25a1',
     compact: 'P',
+    wide: '\u229f',
+    dense: '\u229e',
 };
 const LAYOUT_NAME_LABELS = {
+    normal: 'Spacious',
     compact: 'Compact',
+    wide: 'Wide',
+    dense: 'Dense',
 };
 
 const ACCENT_PRESETS = [
@@ -57,17 +63,18 @@ const ACCENT_PRESETS = [
 ];
 
 const FONT_PRESETS = [
-    { key: 'manrope', label: 'M', fontFamily: "'Manrope', 'Segoe UI', Tahoma, sans-serif" },
-    { key: 'sora', label: 'R', fontFamily: "'Sora', 'Segoe UI', Tahoma, sans-serif" },
-    { key: 'jetbrains', label: 'J', fontFamily: "'JetBrains Mono', 'Consolas', monospace" },
-    { key: 'bahnschrift', label: 'B', fontFamily: "'Bahnschrift', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" },
-    { key: 'sans', label: 'S', fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" },
-    { key: 'arial', label: 'A', fontFamily: "Arial, 'Segoe UI', Tahoma, sans-serif" },
-    { key: 'verdana', label: 'V', fontFamily: "Verdana, 'Segoe UI', Tahoma, sans-serif" },
-    { key: 'courier', label: 'C', fontFamily: "'Courier New', Courier, monospace" },
-    { key: 'consolas', label: 'N', fontFamily: "Consolas, 'Courier New', monospace" },
-    { key: 'georgia', label: 'G', fontFamily: "Georgia, 'Times New Roman', serif" },
-    { key: 'times', label: 'T', fontFamily: "'Times New Roman', Times, serif" },
+    { key: 'manrope',     label: 'M', fontFamily: "'Manrope', 'Inter', Arial, sans-serif" },
+    { key: 'sora',        label: 'R', fontFamily: "'Sora', 'Inter', Arial, sans-serif" },
+    { key: 'inter',       label: 'I', fontFamily: "'Inter', Arial, sans-serif" },
+    { key: 'dm-sans',     label: 'D', fontFamily: "'DM Sans', 'Inter', Arial, sans-serif" },
+    { key: 'jetbrains',   label: 'J', fontFamily: "'JetBrains Mono', 'Fira Code', monospace" },
+    { key: 'fira-code',   label: 'F', fontFamily: "'Fira Code', 'JetBrains Mono', monospace" },
+    { key: 'bahnschrift', label: 'B', fontFamily: "'Bahnschrift', 'Barlow Condensed', Arial, sans-serif" },
+    { key: 'arial',       label: 'A', fontFamily: "Arial, sans-serif" },
+    { key: 'verdana',     label: 'V', fontFamily: "Verdana, Arial, sans-serif" },
+    { key: 'courier',     label: 'C', fontFamily: "'Courier New', Courier, monospace" },
+    { key: 'georgia',     label: 'G', fontFamily: "Georgia, 'Times New Roman', serif" },
+    { key: 'times',       label: 'T', fontFamily: "'Times New Roman', Times, serif" },
 ];
 
 const FONT_SIZE_PRESETS = [
@@ -358,7 +365,8 @@ function getPreferredFontSize() {
 }
 
 function getPreferredLayout() {
-    return 'compact';
+    const saved = localStorage.getItem(LAYOUT_KEY);
+    return LAYOUT_MODES.includes(saved) ? saved : 'compact';
 }
 
 function getAccentPreset(key) {
@@ -558,6 +566,10 @@ function applyControlSelection(type, key) {
         localStorage.setItem(FONT_SIZE_KEY, key);
         applyFontSize(key);
     }
+    if (type === 'layout') {
+        setLayout(key);
+        return;
+    }
     if (state.lastData) {
         renderDashboard(state.lastData);
     }
@@ -630,6 +642,16 @@ function showQuickPicker(type, triggerEl) {
             labelStyle: `font-size:${preset.size}`,
         }));
     }
+    if (type === 'layout') {
+        activeKey = getPreferredLayout();
+        options = LAYOUT_MODES.map((key) => ({
+            key,
+            label: LAYOUT_NAME_LABELS[key] || key,
+            swatchStyle: `font-weight:700; color:var(--text); background:none; border-color:transparent; width:auto; height:auto; padding:0 4px`,
+            previewText: LAYOUT_BUTTON_LABELS[key] || key,
+            labelStyle: '',
+        }));
+    }
 
     picker.innerHTML = options.map((option) => `
         <button class="quick-picker-option ${option.key === activeKey ? 'is-active' : ''}" type="button" data-picker-type="${type}" data-picker-key="${option.key}" title="${option.label}">
@@ -680,14 +702,14 @@ function applyTheme(theme) {
 }
 
 function applyLayout(layoutMode) {
-    const mode = 'compact';
+    const mode = LAYOUT_MODES.includes(layoutMode) ? layoutMode : 'compact';
     document.body.setAttribute('data-layout', mode);
     const layoutBtn = document.getElementById('layoutCycleBtn');
     const layoutModeLabel = document.getElementById('layoutModeLabel');
     if (layoutBtn) {
         layoutBtn.textContent = LAYOUT_BUTTON_LABELS[mode] || 'P';
-        layoutBtn.title = `Layout locked to ${mode}`;
-        layoutBtn.setAttribute('aria-label', `Layout locked to ${mode}`);
+        layoutBtn.title = `Layout: ${LAYOUT_NAME_LABELS[mode] || mode}`;
+        layoutBtn.setAttribute('aria-label', `Layout: ${LAYOUT_NAME_LABELS[mode] || mode}`);
     }
     if (layoutModeLabel) {
         layoutModeLabel.textContent = LAYOUT_NAME_LABELS[mode] || 'Compact';
@@ -695,7 +717,7 @@ function applyLayout(layoutMode) {
 }
 
 function setLayout(layoutMode) {
-    const mode = 'compact';
+    const mode = LAYOUT_MODES.includes(layoutMode) ? layoutMode : 'compact';
     localStorage.setItem(LAYOUT_KEY, mode);
     applyLayout(mode);
     Object.values(charts).forEach((chart) => {
@@ -709,7 +731,10 @@ function setLayout(layoutMode) {
 }
 
 function cycleLayoutMode() {
-    setLayout('compact');
+    const current = document.body.getAttribute('data-layout') || 'compact';
+    const idx = LAYOUT_MODES.indexOf(current);
+    const next = LAYOUT_MODES[(idx + 1) % LAYOUT_MODES.length];
+    setLayout(next);
 }
 
 function toggleTheme() {
@@ -787,6 +812,10 @@ function setupEventListeners() {
     document.getElementById('accentCycleBtn').addEventListener('click', (e) => showQuickPicker('accent', e.currentTarget));
     document.getElementById('fontCycleBtn').addEventListener('click', (e) => showQuickPicker('font', e.currentTarget));
     document.getElementById('fontSizeCycleBtn').addEventListener('click', (e) => showQuickPicker('fontSize', e.currentTarget));
+    const layoutCycleBtn = document.getElementById('layoutCycleBtn');
+    if (layoutCycleBtn) {
+        layoutCycleBtn.addEventListener('click', (e) => showQuickPicker('layout', e.currentTarget));
+    }
     document.getElementById('uiControlsToggleBtn').addEventListener('click', toggleQuickControls);
 
     const refreshNowBtn = document.getElementById('refreshNowBtn');
@@ -993,6 +1022,29 @@ function setupEventListeners() {
         scheduleAutoFitOpenPositions();
         scheduleAutoFitHistoricTrades();
     });
+
+    // Auto-hide header on scroll down, re-show on scroll up
+    (function setupScrollHideHeader() {
+        const header = document.querySelector('.header');
+        if (!header) return;
+        let lastScrollY = window.scrollY;
+        let ticking = false;
+        window.addEventListener('scroll', () => {
+            if (!ticking) {
+                window.requestAnimationFrame(() => {
+                    const y = window.scrollY;
+                    if (y > lastScrollY && y > 80) {
+                        header.classList.add('header--hidden');
+                    } else if (y < lastScrollY - 4) {
+                        header.classList.remove('header--hidden');
+                    }
+                    lastScrollY = y;
+                    ticking = false;
+                });
+                ticking = true;
+            }
+        }, { passive: true });
+    })();
 }
 
 async function loadAccounts() {
@@ -1878,7 +1930,7 @@ function getChartColorVar(name) {
 function getChartFontSpec() {
     const rootStyles = getComputedStyle(document.documentElement);
     const bodyStyles = getComputedStyle(document.body);
-    const family = bodyStyles.getPropertyValue('font-family').trim() || 'Segoe UI, sans-serif';
+    const family = bodyStyles.getPropertyValue('font-family').trim() || 'Inter, Arial, sans-serif';
     const baseSizePx = toNum(parseFloat(rootStyles.getPropertyValue('--app-font-size')) || parseFloat(rootStyles.fontSize), 16);
     const size = Math.max(11, Math.min(15, Math.round(baseSizePx * 0.78)));
     return { family, size };
@@ -3140,7 +3192,6 @@ function startLivePnlPolling() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    localStorage.setItem(LAYOUT_KEY, 'compact');
     applyTheme(getPreferredTheme());
     applyLayout(getPreferredLayout());
     applyBackgroundTheme(getPreferredBackground());

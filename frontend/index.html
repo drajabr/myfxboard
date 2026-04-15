@@ -56,6 +56,9 @@
                         <div class="quick-control-item">
                             <button id="fontSizeCycleBtn" class="icon-btn icon-btn--square" type="button" aria-label="Select font size" title="Select font size">3</button>
                         </div>
+                        <div class="quick-control-item">
+                            <button id="layoutCycleBtn" class="icon-btn icon-btn--square" type="button" aria-label="Select layout mode" title="Select layout mode">▤</button>
+                        </div>
                         <div id="quickControlPicker" class="quick-control-picker is-collapsed" aria-live="polite"></div>
                     </div>
                 </div>
@@ -83,48 +86,6 @@
                     </div>
                 </div>
                 <div class="metric-grid" id="periodStatsGrid"></div>
-            </section>
-
-            <section class="charts-row">
-                <div class="table-section calendar-card">
-                    <div class="calendar-head calendar-head--inline">
-                        <h3 class="calendar-head__title">Monthly Calendar</h3>
-                        <div class="calendar-head__center">
-                            <button id="monthPrevBtn" class="icon-btn icon-btn--square" type="button" aria-label="Previous month">&lt;</button>
-                            <div id="monthCalendarTitle" class="calendar-center-label calendar-center-label--boxed">Month 26</div>
-                            <button id="monthNextBtn" class="icon-btn icon-btn--square" type="button" aria-label="Next month">&gt;</button>
-                        </div>
-                        <div class="calendar-head__actions">
-                            <button id="monthResetFilterBtn" class="icon-btn icon-btn--square" type="button" aria-label="Reset month filter">↺</button>
-                        </div>
-                    </div>
-                    <div id="monthCalendar" class="calendar-grid"></div>
-                </div>
-                <div class="table-section calendar-card">
-                    <div class="calendar-head calendar-head--inline">
-                        <h3 class="calendar-head__title">Yearly Calendar</h3>
-                        <div class="calendar-head__center">
-                            <button id="yearPrevBtn" class="icon-btn icon-btn--square" type="button" aria-label="Previous year">&lt;</button>
-                            <div id="yearCalendarTitle" class="calendar-center-label calendar-center-label--boxed">Year 26</div>
-                            <button id="yearNextBtn" class="icon-btn icon-btn--square" type="button" aria-label="Next year">&gt;</button>
-                        </div>
-                        <div class="calendar-head__actions">
-                            <button id="yearResetFilterBtn" class="icon-btn icon-btn--square" type="button" aria-label="Reset year filter">↺</button>
-                        </div>
-                    </div>
-                    <div id="yearCalendar" class="year-grid"></div>
-                </div>
-            </section>
-
-            <section class="charts-row">
-                <div class="table-section">
-                    <h3>Trade Metrics</h3>
-                    <div class="metric-grid" id="tradeMetricsGrid"></div>
-                </div>
-                <div class="chart-container">
-                    <h3 id="pnlCurveTitle">PnL Curve</h3>
-                    <canvas id="pnlCurveChart"></canvas>
-                </div>
             </section>
 
             <section class="charts-row">
@@ -174,6 +135,48 @@
                             <tr><td colspan="4" style="text-align:center;">No exposure</td></tr>
                         </tbody>
                     </table>
+                </div>
+            </section>
+
+            <section class="charts-row">
+                <div class="table-section calendar-card">
+                    <div class="calendar-head calendar-head--inline">
+                        <h3 class="calendar-head__title">Monthly Calendar</h3>
+                        <div class="calendar-head__center">
+                            <button id="monthPrevBtn" class="icon-btn icon-btn--square" type="button" aria-label="Previous month">&lt;</button>
+                            <div id="monthCalendarTitle" class="calendar-center-label calendar-center-label--boxed">Month 26</div>
+                            <button id="monthNextBtn" class="icon-btn icon-btn--square" type="button" aria-label="Next month">&gt;</button>
+                        </div>
+                        <div class="calendar-head__actions">
+                            <button id="monthResetFilterBtn" class="icon-btn icon-btn--square" type="button" aria-label="Reset month filter">↺</button>
+                        </div>
+                    </div>
+                    <div id="monthCalendar" class="calendar-grid"></div>
+                </div>
+                <div class="table-section calendar-card">
+                    <div class="calendar-head calendar-head--inline">
+                        <h3 class="calendar-head__title">Yearly Calendar</h3>
+                        <div class="calendar-head__center">
+                            <button id="yearPrevBtn" class="icon-btn icon-btn--square" type="button" aria-label="Previous year">&lt;</button>
+                            <div id="yearCalendarTitle" class="calendar-center-label calendar-center-label--boxed">Year 26</div>
+                            <button id="yearNextBtn" class="icon-btn icon-btn--square" type="button" aria-label="Next year">&gt;</button>
+                        </div>
+                        <div class="calendar-head__actions">
+                            <button id="yearResetFilterBtn" class="icon-btn icon-btn--square" type="button" aria-label="Reset year filter">↺</button>
+                        </div>
+                    </div>
+                    <div id="yearCalendar" class="year-grid"></div>
+                </div>
+            </section>
+
+            <section class="charts-row">
+                <div class="table-section">
+                    <h3>Trade Metrics</h3>
+                    <div class="metric-grid" id="tradeMetricsGrid"></div>
+                </div>
+                <div class="chart-container">
+                    <h3 id="pnlCurveTitle">PnL Curve</h3>
+                    <canvas id="pnlCurveChart"></canvas>
                 </div>
             </section>
 
