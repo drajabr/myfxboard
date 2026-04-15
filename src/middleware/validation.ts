@@ -52,6 +52,7 @@ export const ingestPayloadSchema = z.object({
     avg_tp: z.number().nullable(),
     tick_size: z.number().optional(),
     tick_value: z.number().optional(),
+    margin: z.number().optional(),
     open_time_ms: z.number(),
     pnl: z.number(),
   })),

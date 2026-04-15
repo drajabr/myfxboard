@@ -125,6 +125,14 @@ router.post(
         `[INGEST] account=${accountId} sync_id=${req.body.sync_id || '-'} ip=${sourceIp} positions=${req.body.positions?.length || 0} closed_trades=${req.body.closed_trades?.length || 0}`
       );
 
+      // Debug: log first position's tick specs, SL/TP, and margin
+      if (req.body.positions?.length > 0) {
+        const p0 = req.body.positions[0];
+        console.log(
+          `[INGEST][DEBUG] pos[0] sym=${p0.symbol} sl=${p0.avg_sl} tp=${p0.avg_tp} tick_size=${p0.tick_size} tick_value=${p0.tick_value} margin=${p0.margin} current_price=${p0.current_price}`
+        );
+      }
+
       const {
         positions,
         closed_trades,
