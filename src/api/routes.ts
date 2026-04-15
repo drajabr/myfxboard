@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { accountQueries, positionQueries, tradeQueries, snapshotQueries } from '../db/queries.js';
 import { DashboardSummary } from '../types/index.js';
+import { pnlEmitter, getAggregated, getPositions } from '../services/positionCache.js';
 
 const router = Router();
 const DEFAULT_BREAKEVEN_TOLERANCE_FLOOR = 1.0;
@@ -452,7 +453,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const yearMonthMap = new Map<number, { pnl: number; trades: number; wins: number }>();
 
     const filterStartMs = Number.isFinite(tradeFromMs) ? tradeFromMs : 0;
-    const filterEndMs = Number.isFinite(tradeToMs) ? tradeToMs : nowMs;
+    // Add 24-hour buffer when no explicit filter to include trades with minor broker clock skew
+    const filterEndMs = Number.isFinite(tradeToMs) ? tradeToMs : nowMs + (24 * 60 * 60 * 1000);
     const breakevenToleranceFloor = resolveBreakevenToleranceFloor();
     const breakevenToleranceMax = resolveBreakevenToleranceMax(breakevenToleranceFloor);
     let maxAccountBeTolerance = breakevenToleranceFloor;
@@ -513,15 +515,22 @@ router.get('/analytics', async (req: Request, res: Response) => {
     yearBase.setFullYear(yearBase.getFullYear() + yearShift);
     const targetYear = yearBase.getFullYear();
 
+    // Fetch all breakeven tolerances in parallel before the account loop so serial
+    // awaits don't stack up when there are multiple accounts.
+    const toleranceMap = new Map<string, number>();
+    await Promise.all(accountIds.map(async (accountId) => {
+      const t = await tradeQueries.getBreakevenTolerance(accountId, breakevenToleranceFloor, breakevenToleranceMax);
+      toleranceMap.set(accountId, t);
+      if (t > maxAccountBeTolerance) maxAccountBeTolerance = t;
+    }));
+
     for (const accountId of accountIds) {
-      const breakevenTolerance = await tradeQueries.getBreakevenTolerance(accountId, breakevenToleranceFloor, breakevenToleranceMax);
-      if (breakevenTolerance > maxAccountBeTolerance) maxAccountBeTolerance = breakevenTolerance;
+      const breakevenTolerance = toleranceMap.get(accountId)!;
       const [
         accPositionsRaw,
         latestSnapshotRaw,
         recentTradesRaw,
         curveTradesRaw,
-        filteredCount,
         filteredSummary,
         filteredDirectionSummary,
         filteredDirectionOutcomeSummary,
@@ -532,17 +541,12 @@ router.get('/analytics', async (req: Request, res: Response) => {
         monthRows,
         yearRows,
         metricsRow,
-        todayStats,
-        last7dStats,
-        last30dStats,
-        ytdStats,
-        allTimeStats,
+        allPeriodStats,
       ] = await Promise.all([
-        positionQueries.findByAccount(accountId),
+        Promise.resolve(getPositions(accountId)),
         snapshotQueries.findLatestByAccount(accountId),
         tradeQueries.findWindowedByEventTime(accountId, filterStartMs, filterEndMs, recentTradesLimit),
         tradeQueries.findByEventTimeRange(accountId, filterStartMs, filterEndMs),
-        tradeQueries.countByEventTimeRange(accountId, filterStartMs, filterEndMs),
         tradeQueries.summarizeByEventTimeRange(accountId, filterStartMs, filterEndMs, breakevenTolerance),
         tradeQueries.summarizeDirectionDistributionByEventTimeRange(accountId, filterStartMs, filterEndMs),
         tradeQueries.summarizeDirectionOutcomeDistributionByEventTimeRange(accountId, filterStartMs, filterEndMs, breakevenTolerance),
@@ -553,12 +557,10 @@ router.get('/analytics', async (req: Request, res: Response) => {
         tradeQueries.summarizeMonthCalendar(accountId, monthStart, monthEnd),
         tradeQueries.summarizeYearCalendar(accountId, targetYear),
         tradeQueries.summarizeMetrics(accountId, breakevenTolerance),
-        tradeQueries.summarizeByEventTimeRange(accountId, todayStartMs, nowMs, breakevenTolerance),
-        tradeQueries.summarizeByEventTimeRange(accountId, last7dStartMs, nowMs, breakevenTolerance),
-        tradeQueries.summarizeByEventTimeRange(accountId, last30dStartMs, nowMs, breakevenTolerance),
-        tradeQueries.summarizeByEventTimeRange(accountId, ytdStartMs, nowMs, breakevenTolerance),
-        tradeQueries.summarizeByEventTimeRange(accountId, 0, nowMs, breakevenTolerance),
+        tradeQueries.summarizeAllPeriodStats(accountId, todayStartMs, last7dStartMs, last30dStartMs, ytdStartMs, nowMs, breakevenTolerance),
       ]);
+
+      const { today: todayStats, last7d: last7dStats, last30d: last30dStats, ytd: ytdStats, all_time: allTimeStats } = allPeriodStats;
 
       const accPositions = accPositionsRaw.map(normalizePosition);
       const accRecentTrades = recentTradesRaw.map(normalizeTrade);
@@ -570,7 +572,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
       allFilteredTrades.push(...curveTrades);
       equity += latestSnapshot?.equity || latestSnapshot?.balance || 0;
       balance += latestSnapshot?.balance || 0;
-      filteredTradesTotal += filteredCount;
+      filteredTradesTotal += toNum(filteredSummary.trades_count);
       filteredSummaryTotals.pnl += toNum(filteredSummary.pnl);
       filteredSummaryTotals.trades_count += toNum(filteredSummary.trades_count);
       filteredSummaryTotals.wins += toNum(filteredSummary.wins);
@@ -775,17 +777,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
       const avgLoss = metricsTotals.avg_loss_count > 0 ? metricsTotals.avg_loss_sum / metricsTotals.avg_loss_count : 0;
       const avgRr = avgLoss !== 0 ? Math.abs(avgWin / avgLoss) : (avgWin > 0 ? 999 : 0);
 
-      let peak = 0;
-      let maxDrawdown = 0;
-      let cumPnl = 0;
-      const sortedForDD = allFilteredTrades.slice().sort((a: any, b: any) => toNum(a.exit_time_ms || a.entry_time_ms) - toNum(b.exit_time_ms || b.entry_time_ms));
-      for (const t of sortedForDD) {
-        cumPnl += toNum(t.profit);
-        if (cumPnl > peak) peak = cumPnl;
-        const dd = peak - cumPnl;
-        if (dd > maxDrawdown) maxDrawdown = dd;
-      }
-
+      // maxDrawdown is computed below as part of the tradePnlCurve reduce (same chronological pass).
       return {
         win_rate_pct: (metricsTotals.win_count / metricsTotals.trade_count) * 100,
         avg_win: avgWin,
@@ -796,7 +788,6 @@ router.get('/analytics', async (req: Request, res: Response) => {
         profit_factor: metricsTotals.gross_loss > 0 ? metricsTotals.gross_profit / metricsTotals.gross_loss : (metricsTotals.gross_profit > 0 ? 999 : 0),
         avg_hold_seconds: metricsTotals.hold_count > 0 ? metricsTotals.hold_sum / metricsTotals.hold_count : 0,
         avg_rr: avgRr,
-        max_drawdown: maxDrawdown,
       };
     })() : {
       win_rate_pct: 0,
@@ -808,7 +799,6 @@ router.get('/analytics', async (req: Request, res: Response) => {
       profit_factor: 0,
       avg_hold_seconds: 0,
       avg_rr: 0,
-      max_drawdown: 0,
     };
 
     const exposureMap = new Map<string, number>();
@@ -843,16 +833,20 @@ router.get('/analytics', async (req: Request, res: Response) => {
       };
     });
 
+    // tradePnlCurve is already sorted chronologically — compute maxDrawdown in the same
+    // pass to avoid a second .slice().sort() over allFilteredTrades.
+    let ddPeak = 0;
+    let maxDrawdown = 0;
     const tradePnlCurve = tradeCurveEvents
       .slice()
       .sort((a, b) => a.ts - b.ts)
       .reduce<Array<{ ts: number; pnl: number; cumulative_pnl: number }>>((acc, point) => {
         const previous = acc.length > 0 ? acc[acc.length - 1].cumulative_pnl : 0;
-        acc.push({
-          ts: point.ts,
-          pnl: point.pnl,
-          cumulative_pnl: previous + point.pnl,
-        });
+        const cumPnl = previous + point.pnl;
+        if (cumPnl > ddPeak) ddPeak = cumPnl;
+        const dd = ddPeak - cumPnl;
+        if (dd > maxDrawdown) maxDrawdown = dd;
+        acc.push({ ts: point.ts, pnl: point.pnl, cumulative_pnl: cumPnl });
         return acc;
       }, []);
 
@@ -868,15 +862,16 @@ router.get('/analytics', async (req: Request, res: Response) => {
 
     const winRateByTradeDuration = buildWinRateByTradeDuration(allFilteredTrades, aggregatedBreakevenTolerance);
     const pnlHistogram = buildPnlHistogram(allFilteredTrades, HISTOGRAM_BIN_COUNT);
-    const tradeDurationScatter = allFilteredTrades.map((t) => ({
-      duration_sec: Math.max(0, toNum(t.duration_sec)),
-      profit: toNum(t.profit),
-      symbol: t.symbol || 'Unknown',
-    }));
 
-    // Symbol-level aggregation
+    // Single pass over allFilteredTrades for both tradeDurationScatter and symbolMap.
+    const tradeDurationScatter: Array<{ duration_sec: number; profit: number; symbol: string }> = [];
     const symbolMap = new Map<string, { pnl: number; wins: number; losses: number; total: number; win_pnl: number; loss_pnl: number; be_pnl: number }>();
     for (const t of allFilteredTrades) {
+      tradeDurationScatter.push({
+        duration_sec: Math.max(0, toNum(t.duration_sec)),
+        profit: toNum(t.profit),
+        symbol: t.symbol || 'Unknown',
+      });
       const sym = t.symbol || 'Unknown';
       if (!symbolMap.has(sym)) symbolMap.set(sym, { pnl: 0, wins: 0, losses: 0, total: 0, win_pnl: 0, loss_pnl: 0, be_pnl: 0 });
       const entry = symbolMap.get(sym)!;
@@ -912,7 +907,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
         floating_pnl: floatingPnl,
       },
       periods,
-      trade_metrics: tradeMetrics,
+      trade_metrics: { ...tradeMetrics, max_drawdown: maxDrawdown },
       positions,
       recent_trades: recentTrades,
       trades_total_matching: filteredTradesTotal,
@@ -964,6 +959,63 @@ router.get('/analytics', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Analytics endpoint error:', error);
     res.status(500).json({ error: 'Failed to fetch analytics' });
+  }
+});
+
+/**
+ * GET /api/account/live-pnl/stream
+ * Server-Sent Events stream: pushes floating PnL instantly when ingestion updates positions.
+ * Falls back to a 30-second keepalive heartbeat between connector syncs.
+ * The client connects once; no repeated DB reads or HTTP polling needed.
+ */
+router.get('/live-pnl/stream', async (req: Request, res: Response) => {
+  try {
+    const accountIdParam = (req.query.accountId as string) || 'all';
+    let accountIds: string[] = [];
+    if (accountIdParam === 'all') {
+      const allAccounts = await accountQueries.list();
+      accountIds = allAccounts.map((a) => a.account_id);
+    } else {
+      const account = await accountQueries.findById(accountIdParam);
+      accountIds = account ? [account.account_id] : [];
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // disable nginx proxy buffering
+    res.flushHeaders();
+
+    const send = () => {
+      const snap = getAggregated(accountIds);
+      res.write(`data: ${JSON.stringify({ floating_pnl: snap.floatingPnl, open_positions: snap.openPositions })}\n\n`);
+    };
+
+    // Send current snapshot immediately on connect
+    send();
+
+    const onUpdate = (updatedAccountId: string) => {
+      if (accountIdParam === 'all' || accountIds.includes(updatedAccountId)) {
+        send();
+      }
+    };
+
+    pnlEmitter.on('update', onUpdate);
+
+    // Heartbeat keeps the TCP connection alive through proxies (comment line, not a data event)
+    const heartbeat = setInterval(() => {
+      res.write(': heartbeat\n\n');
+    }, 25000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      pnlEmitter.off('update', onUpdate);
+    });
+  } catch (error) {
+    console.error('Live PnL stream error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to open live PnL stream' });
+    }
   }
 });
 

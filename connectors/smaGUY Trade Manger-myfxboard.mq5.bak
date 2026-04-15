@@ -20,361 +20,574 @@ string SanitizeUrl(string url) {
 #include <Trade\OrderInfo.mqh>
 #include <Trade\DealInfo.mqh>
 
-// === DASHBOARD CONNECTOR ===
-// State is held in a plain DcState struct; all operations are DC_-prefixed free functions.
-struct DcState {
-   string url;
-   string psk;
-   int    sync_interval_ms;
-   ulong  last_sync_ms;
-   bool   in_flight;
-   int    success_count;
-   int    error_count;
-   bool   debug_log;
-   ulong  last_log_ms;
-   uint   last_live_payload_hash;
-   long   last_live_payload_sent_ms;
-   string last_ack_history_hash;
-   bool   startup_health_checked;
-   bool   last_sync_ok;
-   long   history_start_time_ms;
-};
-DcState g_dc;
+//+------------------------------------------------------------------+
+//| DashboardConnector - inlined (no external .mqh dependency)       |
+//+------------------------------------------------------------------+
+class DashboardConnector {
+private:
+   static string   s_url;
+   static string   s_psk;
+   static int      s_sync_interval_ms;
+   static ulong    s_last_sync_ms;
+   static bool     s_in_flight;
+   static int      s_success_count;
+   static int      s_error_count;
+   static bool     s_debug_log;
+   static ulong    s_last_log_ms;
+   static uint     s_last_live_payload_hash;
+   static long     s_last_live_payload_sent_ms;
+   static string   s_last_ack_history_hash;
+   static bool     s_startup_health_checked;
+   static bool     s_last_sync_ok;
+   static long     s_history_start_time_ms;
 
-uint DC_HashPayload(const string payload) {
-   uchar bytes[];
-   int n = StringToCharArray(payload, bytes, 0, WHOLE_ARRAY, CP_UTF8);
-   if(n <= 1) return 0;
-   uint hash = 2166136261;
-   for(int i = 0; i < n - 1; i++) { hash ^= (uint)bytes[i]; hash *= 16777619; }
-   return hash;
-}
+   static uint HashPayload(const string payload) {
+      uchar bytes[];
+      int n = StringToCharArray(payload, bytes, 0, WHOLE_ARRAY, CP_UTF8);
+      if(n <= 1)
+         return 0;
 
-string DC_ExtractJsonString(const string json, const string key) {
-   string token = "\"" + key + "\":\"";
-   int start = StringFind(json, token);
-   if(start < 0) return "";
-   start += StringLen(token);
-   int finish = StringFind(json, "\"", start);
-   if(finish < 0) return "";
-   return StringSubstr(json, start, finish - start);
-}
-
-bool DC_ExtractJsonBool(const string json, const string key, bool default_value = false) {
-   if(StringFind(json, "\"" + key + "\":true")  >= 0) return true;
-   if(StringFind(json, "\"" + key + "\":false") >= 0) return false;
-   return default_value;
-}
-
-string DC_ToHex(const uchar &bytes[]) {
-   string out = "";
-   int n = ArraySize(bytes);
-   for(int i = 0; i < n; i++) out += StringFormat("%02x", bytes[i]);
-   return out;
-}
-
-bool DC_Sha256(const uchar &payload_bytes[], uchar &digest[]) {
-   uchar no_key[];
-   ArrayResize(no_key, 0, 0);
-   return CryptEncode(CRYPT_HASH_SHA256, payload_bytes, no_key, digest) > 0;
-}
-
-bool DC_BuildHmacSha256(const uchar &key[], const uchar &message[], uchar &out_digest[]) {
-   const int BLOCK_SIZE = 64;
-   uchar normalized_key[];
-   ArrayCopy(normalized_key, key);
-   if(ArraySize(normalized_key) > BLOCK_SIZE) {
-      uchar key_hash[];
-      if(!DC_Sha256(normalized_key, key_hash)) return false;
-      ArrayFree(normalized_key);
-      ArrayCopy(normalized_key, key_hash);
-   }
-   if(ArraySize(normalized_key) < BLOCK_SIZE) {
-      int old_size = ArraySize(normalized_key);
-      ArrayResize(normalized_key, BLOCK_SIZE, 0);
-      for(int i = old_size; i < BLOCK_SIZE; i++) normalized_key[i] = 0;
-   }
-   uchar ipad[], opad[];
-   ArrayResize(ipad, BLOCK_SIZE, 0);
-   ArrayResize(opad, BLOCK_SIZE, 0);
-   for(int i = 0; i < BLOCK_SIZE; i++) {
-      ipad[i] = normalized_key[i] ^ 0x36;
-      opad[i] = normalized_key[i] ^ 0x5c;
-   }
-   uchar inner_data[];
-   int message_size = ArraySize(message);
-   ArrayResize(inner_data, BLOCK_SIZE + message_size, 0);
-   for(int i = 0; i < BLOCK_SIZE; i++) inner_data[i] = ipad[i];
-   for(int i = 0; i < message_size; i++) inner_data[BLOCK_SIZE + i] = message[i];
-   uchar inner_hash[];
-   if(!DC_Sha256(inner_data, inner_hash)) return false;
-   uchar outer_data[];
-   int inner_size = ArraySize(inner_hash);
-   ArrayResize(outer_data, BLOCK_SIZE + inner_size, 0);
-   for(int i = 0; i < BLOCK_SIZE; i++) outer_data[i] = opad[i];
-   for(int i = 0; i < inner_size; i++) outer_data[BLOCK_SIZE + i] = inner_hash[i];
-   return DC_Sha256(outer_data, out_digest);
-}
-
-string DC_CreateSignature(string account_number, long timestamp_ms) {
-   string message = account_number + ":" + StringFormat("%lld", timestamp_ms);
-   uchar message_bytes[], key_bytes[], digest[];
-   int n = StringToCharArray(message, message_bytes, 0, WHOLE_ARRAY, CP_UTF8);
-   if(n > 0) ArrayResize(message_bytes, n - 1, 0);
-   int k = StringToCharArray(g_dc.psk, key_bytes, 0, WHOLE_ARRAY, CP_UTF8);
-   if(k > 0) ArrayResize(key_bytes, k - 1, 0);
-   if(!DC_BuildHmacSha256(key_bytes, message_bytes, digest)) {
-      if(g_dc.debug_log) Print("[DC] Failed to build HMAC signature");
-      return "";
-   }
-   return DC_ToHex(digest);
-}
-
-string DC_BuildPositionsJson() {
-   string j = "[";
-   bool first = true;
-   for(int i = 0; i < PositionsTotal(); i++) {
-      if(!PositionSelectByTicket(PositionGetTicket(i))) continue;
-      if(!first) j += ",";
-      first = false;
-      ENUM_POSITION_TYPE dir = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-      j += StringFormat(
-         "{\"symbol\":\"%s\",\"volume\":%.2f,\"direction\":\"%s\",\"open_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
-         PositionGetString(POSITION_SYMBOL), PositionGetDouble(POSITION_VOLUME),
-         (dir == POSITION_TYPE_BUY) ? "BUY" : "SELL",
-         PositionGetDouble(POSITION_PRICE_OPEN), PositionGetDouble(POSITION_SL),
-         PositionGetDouble(POSITION_TP), (long)PositionGetInteger(POSITION_TIME_MSC),
-         PositionGetDouble(POSITION_PROFIT));
-   }
-   return j + "]";
-}
-
-string DC_BuildClosedTradesJson(long &latest_closed_time_ms, string &latest_closed_deal_id) {
-   string j = "[";
-   bool first_trade = true;
-   latest_closed_time_ms = 0;
-   latest_closed_deal_id = "";
-   long history_start_ms = g_dc.history_start_time_ms;
-   datetime hist_select_start = (history_start_ms > 0) ? (datetime)(history_start_ms / 1000) : 0;
-   if(!HistorySelect(hist_select_start, TimeCurrent())) return j + "]";
-   int deals_total = HistoryDealsTotal();
-   struct PositionEntry {
-      long position_id;
-      string symbol;
-      double avg_entry_price;
-      double open_volume;
-      long first_entry_time_ms;
-      bool active;
-   };
-   PositionEntry entries[2000];
-   int entry_count = 0;
-   for(int i = 0; i < deals_total; i++) {
-      ulong deal_ticket = HistoryDealGetTicket(i);
-      if(deal_ticket == 0) continue;
-      int deal_type  = (int)HistoryDealGetInteger(deal_ticket, DEAL_TYPE);
-      if(deal_type != DEAL_TYPE_BUY && deal_type != DEAL_TYPE_SELL) continue;
-      int deal_entry = (int)HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
-      long position_id = (long)HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
-      string deal_symbol = HistoryDealGetString(deal_ticket, DEAL_SYMBOL);
-      if(deal_symbol == "" || position_id <= 0) continue;
-      double deal_volume  = HistoryDealGetDouble(deal_ticket, DEAL_VOLUME);
-      double deal_price   = HistoryDealGetDouble(deal_ticket, DEAL_PRICE);
-      long   deal_time_ms = HistoryDealGetInteger(deal_ticket, DEAL_TIME_MSC);
-      double deal_profit  = HistoryDealGetDouble(deal_ticket, DEAL_PROFIT)
-                          + HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION)
-                          + HistoryDealGetDouble(deal_ticket, DEAL_SWAP);
-      int pos_idx = -1;
-      for(int idx = 0; idx < entry_count; idx++) {
-         if(entries[idx].active && entries[idx].position_id == position_id) { pos_idx = idx; break; }
+      uint hash = 2166136261;
+      for(int i = 0; i < n - 1; i++) {
+         hash ^= (uint)bytes[i];
+         hash *= 16777619;
       }
-      if(deal_entry == DEAL_ENTRY_IN) {
-         if(pos_idx >= 0) {
-            double new_total = entries[pos_idx].open_volume + deal_volume;
-            if(new_total > 0.0) {
-               entries[pos_idx].avg_entry_price = (entries[pos_idx].avg_entry_price * entries[pos_idx].open_volume + deal_price * deal_volume) / new_total;
-               entries[pos_idx].open_volume = new_total;
-               if(deal_time_ms < entries[pos_idx].first_entry_time_ms) entries[pos_idx].first_entry_time_ms = deal_time_ms;
+      return hash;
+   }
+
+   static string ExtractJsonString(const string json, const string key) {
+      string token = "\"" + key + "\":\"";
+      int start = StringFind(json, token);
+      if(start < 0)
+         return "";
+      start += StringLen(token);
+      int finish = StringFind(json, "\"", start);
+      if(finish < 0)
+         return "";
+      return StringSubstr(json, start, finish - start);
+   }
+
+   static bool ExtractJsonBool(const string json, const string key, bool default_value = false) {
+      string true_token = "\"" + key + "\":true";
+      if(StringFind(json, true_token) >= 0)
+         return true;
+      string false_token = "\"" + key + "\":false";
+      if(StringFind(json, false_token) >= 0)
+         return false;
+      return default_value;
+   }
+
+public:
+   static void Init(string url, string psk, int interval_sec, bool debug = false, datetime history_start_date = 0) {
+      s_url              = SanitizeUrl(url);
+      s_psk              = psk;
+      s_sync_interval_ms = interval_sec * 1000;
+      s_debug_log        = debug;
+      s_last_sync_ms     = 0;
+      s_in_flight        = false;
+      s_success_count    = 0;
+      s_error_count      = 0;
+      s_last_live_payload_hash = 0;
+      s_last_live_payload_sent_ms = 0;
+      s_last_ack_history_hash = "";
+      s_startup_health_checked = false;
+      s_last_sync_ok            = false;
+      s_history_start_time_ms = history_start_date > 0 ? ((long)history_start_date * 1000) : 0;
+      if(s_debug_log)
+         Print("[DashboardConnector] Initialized: url=", s_url, " interval=", interval_sec, "s");
+   }
+
+   static bool Sync() {
+      if(s_url == "" || s_psk == "") return false;
+      ulong now_ms = GetTickCount64();
+      if(s_in_flight) {
+         if(s_debug_log && now_ms - s_last_log_ms > 60000) {
+            Print("[DashboardConnector] Sync in flight, skipping");
+            s_last_log_ms = now_ms;
+         }
+         return false;
+      }
+      if(s_last_sync_ms > 0 && now_ms < s_last_sync_ms + s_sync_interval_ms)
+         return false;
+
+      // Backend auth expects unix epoch milliseconds, not terminal uptime milliseconds.
+      long timestamp_ms = (long)TimeGMT() * 1000;
+      string current_account = StringFormat("%lld", (long)AccountInfoInteger(ACCOUNT_LOGIN));
+
+      long latest_closed_time_ms = 0;
+      string latest_closed_deal_id = "";
+      string positions_json = BuildPositionsJson();
+      string closed_trades_json = BuildClosedTradesJson(latest_closed_time_ms, latest_closed_deal_id);
+      string account_json = BuildAccountJson();
+
+      // Hash live positions and account data to detect any PnL/equity/balance changes.
+      // This ensures sync is sent whenever position PnL, equity, or balance updates.
+      uint live_payload_hash = HashPayload(positions_json + "|acct:" + account_json + "|ct:" + StringFormat("%lld", latest_closed_time_ms));
+      string history_hash = StringFormat("%u", HashPayload(closed_trades_json));
+
+      if(!s_startup_health_checked) {
+         // Keep a one-time health probe only for observability, never short-circuit syncing.
+         s_startup_health_checked = true;
+         bool history_sync_required = true;
+         string server_history_hash = "";
+         if(PostHealthCheck(current_account, timestamp_ms, history_hash, history_sync_required, server_history_hash)) {
+            if(server_history_hash != "")
+               s_last_ack_history_hash = server_history_hash;
+         }
+      }
+
+      // Skip sync if nothing changed since last successful push,
+      // but still send at least once per 60s to keep online status alive.
+      bool payload_unchanged = (live_payload_hash == s_last_live_payload_hash && live_payload_hash != 0
+                                && history_hash == s_last_ack_history_hash);
+      long since_last_push_ms = (s_last_live_payload_sent_ms > 0) ? (timestamp_ms - s_last_live_payload_sent_ms) : 60001;
+      if(payload_unchanged && since_last_push_ms < 60000) {
+         if(s_debug_log)
+            Print("[DashboardConnector] Payload unchanged, skipping sync");
+         s_last_sync_ms = now_ms;
+         return false;
+      }
+
+      bool include_history = (history_hash != s_last_ack_history_hash);
+
+      string payload = BuildPayload(
+         timestamp_ms,
+         current_account,
+         positions_json,
+         closed_trades_json,
+         account_json,
+         latest_closed_time_ms,
+         latest_closed_deal_id,
+         include_history,
+         history_hash
+      );
+
+      string signature = CreateSignature(current_account, timestamp_ms, s_psk);
+      s_last_sync_ms = now_ms;
+      s_in_flight    = true;
+      PostSync(payload, current_account, signature, timestamp_ms, live_payload_hash, include_history, history_hash);
+      return true;
+   }
+
+   static int  GetSuccessCount()         { return s_success_count; }
+   static int  GetErrorCount()           { return s_error_count; }
+   static bool GetLastSyncOk()           { return s_last_sync_ok; }
+   static void SetDebugLog(bool enabled) { s_debug_log = enabled; }
+
+private:
+   static string BuildPositionsJson() {
+      string positions_json = "[";
+      bool first_pos = true;
+      for(int i = 0; i < PositionsTotal(); i++) {
+         if(!PositionSelectByTicket(PositionGetTicket(i))) continue;
+         if(!first_pos) positions_json += ",";
+         first_pos = false;
+         string symbol       = PositionGetString(POSITION_SYMBOL);
+         double volume       = PositionGetDouble(POSITION_VOLUME);
+         double open_price   = PositionGetDouble(POSITION_PRICE_OPEN);
+         double sl           = PositionGetDouble(POSITION_SL);
+         double tp           = PositionGetDouble(POSITION_TP);
+         ulong  open_time_ms = PositionGetInteger(POSITION_TIME_MSC);
+         double pnl          = PositionGetDouble(POSITION_PROFIT);
+         ENUM_POSITION_TYPE dir = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+         string direction = (dir == POSITION_TYPE_BUY) ? "BUY" : "SELL";
+         positions_json += StringFormat(
+            "{\"symbol\":\"%s\",\"volume\":%.2f,\"direction\":\"%s\",\"open_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
+            symbol, volume, direction, open_price, sl, tp, open_time_ms, pnl
+         );
+      }
+      positions_json += "]";
+
+      return positions_json;
+   }
+
+   static string BuildClosedTradesJson(long &latest_closed_time_ms, string &latest_closed_deal_id) {
+      // Collect closed trades from deal history, paired by position id.
+      string closed_trades_json = "[";
+      bool first_trade = true;
+      latest_closed_time_ms = 0;
+      latest_closed_deal_id = "";
+      long history_start_ms = s_history_start_time_ms;
+
+      // HistorySelect expects datetime seconds, not unix milliseconds.
+      // Pass the configured history start so MT5 only loads deals from that date;
+      // otherwise it loads the entire account history every sync.
+      datetime hist_select_start = (history_start_ms > 0) ? (datetime)(history_start_ms / 1000) : 0;
+      if(HistorySelect(hist_select_start, TimeCurrent())) {
+         int deals_total = HistoryDealsTotal();
+
+         struct PositionEntry {
+            long position_id;
+            string symbol;
+            double avg_entry_price;
+            double open_volume;
+            long first_entry_time_ms;
+            bool active;
+         };
+         PositionEntry entries[2000];
+         int entry_count = 0;
+
+         for(int i = 0; i < deals_total; i++) {
+            ulong deal_ticket = HistoryDealGetTicket(i);
+            if(deal_ticket == 0) continue;
+
+            int deal_type = (int)HistoryDealGetInteger(deal_ticket, DEAL_TYPE);
+            if(deal_type != DEAL_TYPE_BUY && deal_type != DEAL_TYPE_SELL)
+               continue;
+
+            int deal_entry = (int)HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
+            long position_id = (long)HistoryDealGetInteger(deal_ticket, DEAL_POSITION_ID);
+            string deal_symbol = HistoryDealGetString(deal_ticket, DEAL_SYMBOL);
+            if(deal_symbol == "")
+               continue;
+
+            double deal_volume = HistoryDealGetDouble(deal_ticket, DEAL_VOLUME);
+            double deal_price = HistoryDealGetDouble(deal_ticket, DEAL_PRICE);
+            long deal_time_ms = HistoryDealGetInteger(deal_ticket, DEAL_TIME_MSC);
+            double deal_profit = HistoryDealGetDouble(deal_ticket, DEAL_PROFIT) + HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION) + HistoryDealGetDouble(deal_ticket, DEAL_SWAP);
+
+            if(position_id <= 0)
+               continue;
+
+            int pos_idx = -1;
+            for(int idx = 0; idx < entry_count; idx++) {
+               if(entries[idx].active && entries[idx].position_id == position_id) {
+                  pos_idx = idx;
+                  break;
+               }
             }
-         } else if(entry_count < 2000) {
-            entries[entry_count].position_id         = position_id;
-            entries[entry_count].symbol              = deal_symbol;
-            entries[entry_count].avg_entry_price     = deal_price;
-            entries[entry_count].open_volume         = deal_volume;
-            entries[entry_count].first_entry_time_ms = deal_time_ms;
-            entries[entry_count].active              = true;
-            entry_count++;
+
+            if(deal_entry == DEAL_ENTRY_IN) {
+               if(pos_idx >= 0) {
+                  double new_total_volume = entries[pos_idx].open_volume + deal_volume;
+                  if(new_total_volume > 0.0) {
+                     entries[pos_idx].avg_entry_price = ((entries[pos_idx].avg_entry_price * entries[pos_idx].open_volume) + (deal_price * deal_volume)) / new_total_volume;
+                     entries[pos_idx].open_volume = new_total_volume;
+                     if(deal_time_ms < entries[pos_idx].first_entry_time_ms)
+                        entries[pos_idx].first_entry_time_ms = deal_time_ms;
+                  }
+               } else if(entry_count < 2000) {
+                  entries[entry_count].position_id = position_id;
+                  entries[entry_count].symbol = deal_symbol;
+                  entries[entry_count].avg_entry_price = deal_price;
+                  entries[entry_count].open_volume = deal_volume;
+                  entries[entry_count].first_entry_time_ms = deal_time_ms;
+                  entries[entry_count].active = true;
+                  entry_count++;
+               }
+            }
+
+            if(deal_entry == DEAL_ENTRY_OUT || deal_entry == DEAL_ENTRY_OUT_BY) {
+               long entry_time = deal_time_ms;
+               double entry_price = deal_price;
+
+               if(pos_idx >= 0) {
+                  entry_time = entries[pos_idx].first_entry_time_ms;
+                  entry_price = entries[pos_idx].avg_entry_price;
+
+                  entries[pos_idx].open_volume -= deal_volume;
+                  if(entries[pos_idx].open_volume <= 0.00000001) {
+                     entries[pos_idx].open_volume = 0.0;
+                     entries[pos_idx].active = false;
+                  }
+               }
+
+               if(history_start_ms > 0 && deal_time_ms < history_start_ms)
+                  continue;
+
+               long duration_ms = deal_time_ms - entry_time;
+               long duration_sec = duration_ms / 1000;
+               if(duration_sec < 0) duration_sec = 0;
+
+               if(!first_trade) closed_trades_json += ",";
+               first_trade = false;
+
+               closed_trades_json += StringFormat(
+                  "{\"symbol\":\"%s\",\"volume\":%.2f,\"entry\":%.5f,\"exit\":%.5f,\"profit\":%.5f,\"entry_time_ms\":%lld,\"exit_time_ms\":%lld,\"duration_sec\":%lld,\"method\":\"deal_out\"}",
+                  deal_symbol, deal_volume, entry_price, deal_price, deal_profit, entry_time, deal_time_ms, duration_sec
+               );
+
+               if(deal_time_ms > latest_closed_time_ms) {
+                  latest_closed_time_ms = deal_time_ms;
+                  latest_closed_deal_id = StringFormat("%llu", deal_ticket);
+               }
+            }
          }
       }
-      if(deal_entry == DEAL_ENTRY_OUT || deal_entry == DEAL_ENTRY_OUT_BY) {
-         long   entry_time  = deal_time_ms;
-         double entry_price = deal_price;
-         if(pos_idx >= 0) {
-            entry_time  = entries[pos_idx].first_entry_time_ms;
-            entry_price = entries[pos_idx].avg_entry_price;
-            entries[pos_idx].open_volume -= deal_volume;
-            if(entries[pos_idx].open_volume <= 0.00000001) { entries[pos_idx].open_volume = 0.0; entries[pos_idx].active = false; }
-         }
-         if(history_start_ms > 0 && deal_time_ms < history_start_ms) continue;
-         long duration_sec = MathMax(0, (deal_time_ms - entry_time) / 1000);
-         if(!first_trade) j += ",";
-         first_trade = false;
-         j += StringFormat(
-            "{\"symbol\":\"%s\",\"volume\":%.2f,\"entry\":%.5f,\"exit\":%.5f,\"profit\":%.5f,\"entry_time_ms\":%lld,\"exit_time_ms\":%lld,\"duration_sec\":%lld,\"method\":\"deal_out\"}",
-            deal_symbol, deal_volume, entry_price, deal_price, deal_profit, entry_time, deal_time_ms, duration_sec);
-         if(deal_time_ms > latest_closed_time_ms) {
-            latest_closed_time_ms = deal_time_ms;
-            latest_closed_deal_id = StringFormat("%llu", deal_ticket);
-         }
-      }
+      closed_trades_json += "]";
+
+      return closed_trades_json;
    }
-   return j + "]";
-}
 
-string DC_BuildAccountJson() {
-   double equity      = AccountInfoDouble(ACCOUNT_EQUITY);
-   double balance     = AccountInfoDouble(ACCOUNT_BALANCE);
-   double margin_used = AccountInfoDouble(ACCOUNT_MARGIN);
-   double margin_free = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
-   double margin_level = (margin_used > 0) ? (equity * 100.0 / margin_used) : 0;
-   string nickname = InpAccountNickname;
-   StringTrimRight(nickname); StringTrimLeft(nickname);
-   string display_name = (nickname != "") ? nickname : AccountInfoString(ACCOUNT_COMPANY);
-   return StringFormat(
-      "{\"equity\":%.2f,\"balance\":%.2f,\"margin_used\":%.2f,\"margin_free\":%.2f,\"margin_level\":%.2f,\"nickname\":\"%s\"}",
-      equity, balance, margin_used, margin_free, margin_level, display_name);
-}
+   static string BuildAccountJson() {
+      double equity       = AccountInfoDouble(ACCOUNT_EQUITY);
+      double balance      = AccountInfoDouble(ACCOUNT_BALANCE);
+      double margin_used  = AccountInfoDouble(ACCOUNT_MARGIN);
+      double margin_free  = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+      double margin_level = (margin_used > 0) ? (equity * 100.0 / margin_used) : 0;
 
-void DC_PostSync(string payload, string account_number, string signature, long timestamp_ms,
-                 uint live_payload_hash, bool include_history, string history_hash) {
-   uchar req[], resp[];
-   string resp_hdrs = "";
-   string hdrs = "Content-Type: application/json\r\n"
-                 "Authorization: HMAC-SHA256 " + signature + "\r\n"
-                 "X-Signature-Timestamp: " + (string)timestamp_ms + "\r\n";
-   int n = StringToCharArray(payload, req, 0, WHOLE_ARRAY, CP_UTF8);
-   if(n > 0) ArrayResize(req, n - 1, 0);
-   int res = WebRequest("POST", g_dc.url + "/api/ingestion", hdrs, 5000, req, resp, resp_hdrs);
-   if(res == -1) {
-      g_dc.error_count++;
-      g_dc.last_sync_ok = false;
-      if(g_dc.debug_log) { Print("[DC] WebRequest error: ", GetLastError()); ResetLastError(); }
-   } else {
-      string body = CharArrayToString(resp, 0, WHOLE_ARRAY, CP_UTF8);
-      if(res >= 200 && res < 300) {
-         string srv_hash = DC_ExtractJsonString(body, "server_history_hash");
-         if(srv_hash != "") g_dc.last_ack_history_hash = srv_hash;
-         else if(include_history) g_dc.last_ack_history_hash = history_hash;
-         g_dc.success_count++;
-         g_dc.last_sync_ok = true;
-         g_dc.last_live_payload_hash = live_payload_hash;
-         g_dc.last_live_payload_sent_ms = timestamp_ms;
-         if(g_dc.debug_log)
-            Print("[DC] Sync accepted (", StringLen(payload), " bytes, status=", res, ")");
+
+
+      string broker_name  = AccountInfoString(ACCOUNT_COMPANY);
+      string nickname     = InpAccountNickname;
+      StringTrimRight(nickname);
+      StringTrimLeft(nickname);
+      string display_name = (nickname != "") ? nickname : broker_name;
+
+
+
+
+      string account_json =
+         "{\"equity\":" + DoubleToString((double)equity, 2) +
+         ",\"balance\":" + DoubleToString((double)balance, 2) +
+         ",\"margin_used\":" + DoubleToString((double)margin_used, 2) +
+         ",\"margin_free\":" + DoubleToString((double)margin_free, 2) +
+         ",\"margin_level\":" + DoubleToString((double)margin_level, 2) +
+         ",\"nickname\":\"" + display_name + "\"}";
+
+      return account_json;
+   }
+
+   static string BuildPayload(
+      long sync_time_ms,
+      string account_number,
+      string positions_json,
+      string closed_trades_json,
+      string account_json,
+      long latest_closed_time_ms,
+      string latest_closed_deal_id,
+      bool include_history,
+      string history_hash
+   ) {
+      string payload = StringFormat(
+         "{\"account_number\":\"%s\",\"positions\":%s,\"closed_trades\":%s,\"account\":%s,\"sync_id\":\"%lld\",\"ea_latest_closed_time_ms\":%lld,\"ea_latest_closed_deal_id\":\"%s\",\"open_positions_hash\":\"\",\"include_history\":%s,\"history_hash\":\"%s\"}",
+         account_number,
+         positions_json,
+         closed_trades_json,
+         account_json,
+         sync_time_ms,
+         latest_closed_time_ms,
+         latest_closed_deal_id,
+         include_history ? "true" : "false",
+         history_hash
+      );
+      if(s_debug_log)
+         Print("[DashboardConnector] Payload: ", StringLen(payload), " bytes, include_history=", include_history ? "true" : "false");
+      return payload;
+   }
+
+   static string ToHex(const uchar &bytes[]) {
+      string out = "";
+      int n = ArraySize(bytes);
+      for(int i = 0; i < n; i++)
+         out += StringFormat("%02x", bytes[i]);
+      return out;
+   }
+
+   static bool Sha256(const uchar &payload_bytes[], uchar &digest[]) {
+      uchar no_key[];
+      ArrayResize(no_key, 0, 0);
+      return CryptEncode(CRYPT_HASH_SHA256, payload_bytes, no_key, digest) > 0;
+   }
+
+   static bool BuildHmacSha256(const uchar &key[], const uchar &message[], uchar &out_digest[]) {
+      const int BLOCK_SIZE = 64;
+      uchar normalized_key[];
+      ArrayCopy(normalized_key, key);
+
+      if(ArraySize(normalized_key) > BLOCK_SIZE) {
+         uchar key_hash[];
+         if(!Sha256(normalized_key, key_hash))
+            return false;
+         ArrayFree(normalized_key);
+         ArrayCopy(normalized_key, key_hash);
+      }
+
+      if(ArraySize(normalized_key) < BLOCK_SIZE) {
+         int old_size = ArraySize(normalized_key);
+         ArrayResize(normalized_key, BLOCK_SIZE, 0);
+         for(int i = old_size; i < BLOCK_SIZE; i++)
+            normalized_key[i] = 0;
+      }
+
+      uchar ipad[];
+      uchar opad[];
+      ArrayResize(ipad, BLOCK_SIZE, 0);
+      ArrayResize(opad, BLOCK_SIZE, 0);
+      for(int i = 0; i < BLOCK_SIZE; i++) {
+         ipad[i] = normalized_key[i] ^ 0x36;
+         opad[i] = normalized_key[i] ^ 0x5c;
+      }
+
+      uchar inner_data[];
+      int message_size = ArraySize(message);
+      ArrayResize(inner_data, BLOCK_SIZE + message_size, 0);
+      for(int i = 0; i < BLOCK_SIZE; i++)
+         inner_data[i] = ipad[i];
+      for(int i = 0; i < message_size; i++)
+         inner_data[BLOCK_SIZE + i] = message[i];
+
+      uchar inner_hash[];
+      if(!Sha256(inner_data, inner_hash))
+         return false;
+
+      uchar outer_data[];
+      int inner_size = ArraySize(inner_hash);
+      ArrayResize(outer_data, BLOCK_SIZE + inner_size, 0);
+      for(int i = 0; i < BLOCK_SIZE; i++)
+         outer_data[i] = opad[i];
+      for(int i = 0; i < inner_size; i++)
+         outer_data[BLOCK_SIZE + i] = inner_hash[i];
+
+      return Sha256(outer_data, out_digest);
+   }
+
+   static string CreateSignature(string account_number, long timestamp_ms, string psk) {
+      string message = account_number + ":" + StringFormat("%lld", timestamp_ms);
+      uchar message_bytes[];
+      uchar key_bytes[];
+      uchar digest[];
+
+      int message_len = StringToCharArray(message, message_bytes, 0, WHOLE_ARRAY, CP_UTF8);
+      if(message_len > 0)
+         ArrayResize(message_bytes, message_len - 1, 0);
+
+      int key_len = StringToCharArray(psk, key_bytes, 0, WHOLE_ARRAY, CP_UTF8);
+      if(key_len > 0)
+         ArrayResize(key_bytes, key_len - 1, 0);
+
+      if(!BuildHmacSha256(key_bytes, message_bytes, digest)) {
+         if(s_debug_log)
+            Print("[DashboardConnector] Failed to build HMAC signature");
+         return "";
+      }
+
+      return ToHex(digest);
+   }
+
+   static void PostSync(
+      string payload,
+      string account_number,
+      string signature,
+      long timestamp_ms,
+      uint live_payload_hash,
+      bool include_history,
+      string history_hash
+   ) {
+      string url = s_url + "/api/ingestion";
+      uchar request_data[];
+      uchar response_data[];
+      string response_headers = "";
+      string headers  = "Content-Type: application/json\r\n";
+      headers        += "Authorization: HMAC-SHA256 " + signature + "\r\n";
+      headers        += "X-Signature-Timestamp: " + (string)timestamp_ms + "\r\n";
+      int payload_size = StringToCharArray(payload, request_data, 0, WHOLE_ARRAY, CP_UTF8);
+      if(payload_size > 0)
+         ArrayResize(request_data, payload_size - 1, 0);
+      int res = WebRequest("POST", url, headers, 5000, request_data, response_data, response_headers);
+      if(res == -1) {
+         s_error_count++;
+         s_last_sync_ok = false;
+         if(s_debug_log) { Print("[DashboardConnector] Error: ", GetLastError()); ResetLastError(); }
       } else {
-         g_dc.error_count++;
-         g_dc.last_sync_ok = false;
-         if(g_dc.debug_log) Print("[DC] Sync rejected (status=", res, ", body=", body, ")");
+         string response_text = CharArrayToString(response_data, 0, WHOLE_ARRAY, CP_UTF8);
+         if(res >= 200 && res < 300) {
+            string server_history_hash = ExtractJsonString(response_text, "server_history_hash");
+            if(server_history_hash != "")
+               s_last_ack_history_hash = server_history_hash;
+            else if(include_history)
+               s_last_ack_history_hash = history_hash;
+
+            bool history_sync_required = ExtractJsonBool(response_text, "history_sync_required", false);
+            if(s_debug_log)
+               Print("[DashboardConnector] Sync accepted for account ", account_number,
+                     " (", StringLen(payload), " bytes, status=", res, ")");
+            s_success_count++;
+            s_last_sync_ok = true;
+            s_last_live_payload_hash = live_payload_hash;
+            s_last_live_payload_sent_ms = timestamp_ms;
+            if(history_sync_required && s_debug_log)
+               Print("[DashboardConnector] Server requested history resend (hash mismatch)");
+         } else {
+            s_error_count++;
+            s_last_sync_ok = false;
+            if(s_debug_log)
+               Print("[DashboardConnector] Sync rejected for account ", account_number,
+                     " (status=", res, ", body=", response_text, ")");
+         }
       }
+      s_in_flight = false;
    }
-   g_dc.in_flight = false;
-}
 
-bool DC_PostHealthCheck(string account_number, long timestamp_ms, string history_hash,
-                        bool &history_sync_required, string &server_history_hash) {
-   string sig = DC_CreateSignature(account_number, timestamp_ms);
-   string payload = StringFormat(
-      "{\"account_number\":\"%s\",\"sync_id\":\"%lld\",\"history_hash\":\"%s\"}",
-      account_number, timestamp_ms, history_hash);
-   uchar req[], resp[];
-   string resp_hdrs = "";
-   string hdrs = "Content-Type: application/json\r\n"
-                 "Authorization: HMAC-SHA256 " + sig + "\r\n"
-                 "X-Signature-Timestamp: " + (string)timestamp_ms + "\r\n";
-   int n = StringToCharArray(payload, req, 0, WHOLE_ARRAY, CP_UTF8);
-   if(n > 0) ArrayResize(req, n - 1, 0);
-   int res = WebRequest("POST", g_dc.url + "/api/ingestion/health", hdrs, 5000, req, resp, resp_hdrs);
-   if(res == -1) {
-      if(g_dc.debug_log) { Print("[DC] Health check error: ", GetLastError()); ResetLastError(); }
-      return false;
-   }
-   if(res < 200 || res >= 300) {
-      if(g_dc.debug_log) Print("[DC] Health check rejected (status=", res, ")");
-      return false;
-   }
-   string body = CharArrayToString(resp, 0, WHOLE_ARRAY, CP_UTF8);
-   server_history_hash   = DC_ExtractJsonString(body, "server_history_hash");
-   history_sync_required = DC_ExtractJsonBool(body, "history_sync_required", true);
-   return true;
-}
+   static bool PostHealthCheck(
+      string account_number,
+      long timestamp_ms,
+      string history_hash,
+      bool &history_sync_required,
+      string &server_history_hash
+   ) {
+      string url = s_url + "/api/ingestion/health";
+      string signature = CreateSignature(account_number, timestamp_ms, s_psk);
 
-void DC_Init(string url, string psk, int interval_sec, bool debug, datetime history_start_date) {
-   g_dc.url                       = SanitizeUrl(url);
-   g_dc.psk                       = psk;
-   g_dc.sync_interval_ms          = interval_sec * 1000;
-   g_dc.debug_log                 = debug;
-   g_dc.last_sync_ms              = 0;
-   g_dc.in_flight                 = false;
-   g_dc.success_count             = 0;
-   g_dc.error_count               = 0;
-   g_dc.last_live_payload_hash    = 0;
-   g_dc.last_live_payload_sent_ms = 0;
-   g_dc.last_ack_history_hash     = "";
-   g_dc.startup_health_checked    = false;
-   g_dc.last_sync_ok              = false;
-   g_dc.history_start_time_ms     = (history_start_date > 0) ? ((long)history_start_date * 1000) : 0;
-   if(g_dc.debug_log) Print("[DC] Initialized: url=", g_dc.url, " interval=", interval_sec, "s");
-}
+      string payload = StringFormat(
+         "{\"account_number\":\"%s\",\"sync_id\":\"%lld\",\"history_hash\":\"%s\"}",
+         account_number,
+         timestamp_ms,
+         history_hash
+      );
 
-bool DC_Sync() {
-   if(g_dc.url == "" || g_dc.psk == "") return false;
-   ulong now_ms = GetTickCount64();
-   if(g_dc.in_flight) {
-      if(g_dc.debug_log && now_ms - g_dc.last_log_ms > 60000) {
-         Print("[DC] Sync in flight, skipping");
-         g_dc.last_log_ms = now_ms;
+      uchar request_data[];
+      uchar response_data[];
+      string response_headers = "";
+
+      string headers  = "Content-Type: application/json\r\n";
+      headers        += "Authorization: HMAC-SHA256 " + signature + "\r\n";
+      headers        += "X-Signature-Timestamp: " + (string)timestamp_ms + "\r\n";
+
+      int payload_size = StringToCharArray(payload, request_data, 0, WHOLE_ARRAY, CP_UTF8);
+      if(payload_size > 0)
+         ArrayResize(request_data, payload_size - 1, 0);
+
+      int res = WebRequest("POST", url, headers, 5000, request_data, response_data, response_headers);
+      if(res == -1) {
+         if(s_debug_log) {
+            Print("[DashboardConnector] Health check transport error: ", GetLastError());
+            ResetLastError();
+         }
+         return false;
       }
-      return false;
+
+      if(res < 200 || res >= 300) {
+         if(s_debug_log) {
+            string response_text = CharArrayToString(response_data, 0, WHOLE_ARRAY, CP_UTF8);
+            Print("[DashboardConnector] Health check rejected (status=", res, ", body=", response_text, ")");
+         }
+         return false;
+      }
+
+      string response_text = CharArrayToString(response_data, 0, WHOLE_ARRAY, CP_UTF8);
+      server_history_hash = ExtractJsonString(response_text, "server_history_hash");
+      history_sync_required = ExtractJsonBool(response_text, "history_sync_required", true);
+      return true;
    }
-   if(g_dc.last_sync_ms > 0 && now_ms < g_dc.last_sync_ms + (ulong)g_dc.sync_interval_ms) return false;
-   long   timestamp_ms     = (long)TimeGMT() * 1000;
-   string current_account  = StringFormat("%lld", (long)AccountInfoInteger(ACCOUNT_LOGIN));
-   long   latest_closed_ms = 0;
-   string latest_closed_id = "";
-   string positions_json     = DC_BuildPositionsJson();
-   string closed_trades_json = DC_BuildClosedTradesJson(latest_closed_ms, latest_closed_id);
-   string account_json       = DC_BuildAccountJson();
-   uint   live_hash    = DC_HashPayload(positions_json + "|acct:" + account_json + "|ct:" + StringFormat("%lld", latest_closed_ms));
-   string history_hash = StringFormat("%u", DC_HashPayload(closed_trades_json));
-   if(!g_dc.startup_health_checked) {
-      g_dc.startup_health_checked = true;
-      bool   hsr = true;
-      string srv_hash = "";
-      if(DC_PostHealthCheck(current_account, timestamp_ms, history_hash, hsr, srv_hash))
-         if(srv_hash != "") g_dc.last_ack_history_hash = srv_hash;
-   }
-   bool payload_unchanged = (live_hash == g_dc.last_live_payload_hash && live_hash != 0
-                              && history_hash == g_dc.last_ack_history_hash);
-   long since_ms = (g_dc.last_live_payload_sent_ms > 0) ? (timestamp_ms - g_dc.last_live_payload_sent_ms) : 60001;
-   if(payload_unchanged && since_ms < 60000) {
-      if(g_dc.debug_log) Print("[DC] Payload unchanged, skipping sync");
-      g_dc.last_sync_ms = now_ms;
-      return false;
-   }
-   bool include_history = (history_hash != g_dc.last_ack_history_hash);
-   string payload = StringFormat(
-      "{\"account_number\":\"%s\",\"positions\":%s,\"closed_trades\":%s,\"account\":%s,"
-      "\"sync_id\":\"%lld\",\"ea_latest_closed_time_ms\":%lld,\"ea_latest_closed_deal_id\":\"%s\","
-      "\"open_positions_hash\":\"\",\"include_history\":%s,\"history_hash\":\"%s\"}",
-      current_account, positions_json, closed_trades_json, account_json,
-      timestamp_ms, latest_closed_ms, latest_closed_id,
-      include_history ? "true" : "false", history_hash);
-   if(g_dc.debug_log) Print("[DC] Payload: ", StringLen(payload), " bytes, include_history=", include_history ? "true" : "false");
-   string signature  = DC_CreateSignature(current_account, timestamp_ms);
-   g_dc.last_sync_ms = now_ms;
-   g_dc.in_flight    = true;
-   DC_PostSync(payload, current_account, signature, timestamp_ms, live_hash, include_history, history_hash);
-   return true;
-}
+};
+
+// Static member initialization
+string DashboardConnector::s_url              = "";
+string DashboardConnector::s_psk              = "";
+int    DashboardConnector::s_sync_interval_ms = 1000;
+ulong  DashboardConnector::s_last_sync_ms     = 0;
+bool   DashboardConnector::s_in_flight        = false;
+int    DashboardConnector::s_success_count    = 0;
+int    DashboardConnector::s_error_count      = 0;
+bool   DashboardConnector::s_debug_log        = false;
+ulong  DashboardConnector::s_last_log_ms      = 0;
+uint   DashboardConnector::s_last_live_payload_hash = 0;
+long   DashboardConnector::s_last_live_payload_sent_ms = 0;
+string DashboardConnector::s_last_ack_history_hash = "";
+bool   DashboardConnector::s_startup_health_checked = false;
+bool   DashboardConnector::s_last_sync_ok            = false;
+long   DashboardConnector::s_history_start_time_ms = 0;
 
 #define MFXB_DOT_OBJ "myfxboard_status_dot"
 int   g_dot_seen_success = -1;
@@ -389,8 +602,8 @@ datetime g_cached_label_time      = 0;
 void UpdateStatusDot() {
    ulong now_ms = GetTickCount64();
 
-   int success_count = g_dc.success_count;
-   int error_count   = g_dc.error_count;
+   int success_count = DashboardConnector::GetSuccessCount();
+   int error_count   = DashboardConnector::GetErrorCount();
 
    if(g_dot_seen_success < 0 || g_dot_seen_error < 0) {
       g_dot_seen_success = success_count;
@@ -408,7 +621,7 @@ void UpdateStatusDot() {
    if(success_count == 0 && error_count == 0)
       dot_color = clrRed;
    else {
-      bool is_positive = g_dc.last_sync_ok;
+      bool is_positive = DashboardConnector::GetLastSyncOk();
       color settled_color = is_positive ? clrLime : clrRed;
       color pulse_color   = is_positive ? C'0,160,0' : C'120,0,0';
       dot_color = (now_ms < g_dot_blink_until_ms) ? pulse_color : settled_color;
@@ -659,78 +872,87 @@ double SnapToExecutedPrice(double price) {
    return price;
 }
 
-// === PARTIAL STATE PERSISTENCE (file-based) ===
-// Uses a binary file in MQL5/Files/ instead of MT5 GlobalVariables.
-// This keeps the MT5 Globals list clean and is more reliable across restarts.
+// === PARTIAL STATE PERSISTENCE ===
+string GetGVPrefix() {
+   return "STM17_" + _Symbol + "_";
+}
 
 void SavePartialState() {
    if(!state.exists || !state.partialsValid) return;
-   int h = FileOpen("STM17_" + _Symbol + ".bin", FILE_BIN | FILE_WRITE);
-   if(h == INVALID_HANDLE) {
-      Print("[STM] SavePartialState: cannot open file, error=", GetLastError());
-      return;
+   string pfx = GetGVPrefix();
+
+   GlobalVariableSet(pfx + "EPC", (double)state.executedPartialCount);
+   for(int i = 0; i < 10; i++)
+      GlobalVariableSet(pfx + "EP" + IntegerToString(i), state.executedPartialPrices[i]);
+
+   GlobalVariableSet(pfx + "PV", 1.0);
+   GlobalVariableSet(pfx + "PC", (double)state.partialCount);
+   GlobalVariableSet(pfx + "PM", (double)state.partialMethod);
+   GlobalVariableSet(pfx + "PFV", state.partialFinalVolume);
+   GlobalVariableSet(pfx + "LPS", state.lastPlannedPositionSize);
+   GlobalVariableSet(pfx + "LPT", state.lastPlannedTP);
+
+   for(int i = 0; i < 10; i++) {
+      GlobalVariableSet(pfx + "PP" + IntegerToString(i), state.partialPrices[i]);
+      GlobalVariableSet(pfx + "PVol" + IntegerToString(i), state.partialVolumes[i]);
+      GlobalVariableSet(pfx + "PE" + IntegerToString(i), state.partialExecuted[i] ? 1.0 : 0.0);
+      GlobalVariableSet(pfx + "POT" + IntegerToString(i), (double)state.partialOrderTickets[i]);
+      GlobalVariableSet(pfx + "PPT" + IntegerToString(i), (double)state.partialPositionTickets[i]);
    }
-   FileWriteInteger(h, 1);  // version
-   FileWriteInteger(h, state.partialCount);
-   FileWriteInteger(h, state.partialMethod);
-   FileWriteInteger(h, state.partialsValid ? 1 : 0);
-   FileWriteDouble(h, state.partialFinalVolume);
-   FileWriteDouble(h, state.lastPlannedPositionSize);
-   FileWriteDouble(h, state.lastPlannedTP);
-   for(int i = 0; i < 10; i++) FileWriteDouble(h, state.partialPrices[i]);
-   for(int i = 0; i < 10; i++) FileWriteDouble(h, state.partialVolumes[i]);
-   for(int i = 0; i < 10; i++) FileWriteInteger(h, state.partialExecuted[i] ? 1 : 0);
-   for(int i = 0; i < 10; i++) FileWriteLong(h, (long)state.partialOrderTickets[i]);
-   for(int i = 0; i < 10; i++) FileWriteLong(h, (long)state.partialPositionTickets[i]);
-   FileWriteInteger(h, state.originalPartialCount);
-   FileWriteDouble(h, state.originalPlannedPositionSize);
-   FileWriteDouble(h, state.originalPartialFinalVolume);
-   for(int i = 0; i < 10; i++) FileWriteDouble(h, state.originalPartialVolumes[i]);
-   FileWriteInteger(h, state.beSet ? 1 : 0);
-   FileWriteInteger(h, state.trailingActive ? 1 : 0);
-   FileWriteDouble(h, state.trailingBestPrice);
-   FileWriteDouble(h, state.userOverrideSL);
-   FileWriteDouble(h, state.userOverrideTP);
-   FileWriteInteger(h, state.executedPartialCount);
-   for(int i = 0; i < 10; i++) FileWriteDouble(h, state.executedPartialPrices[i]);
-   FileClose(h);
+
+   GlobalVariableSet(pfx + "OPC", (double)state.originalPartialCount);
+   GlobalVariableSet(pfx + "OPS", state.originalPlannedPositionSize);
+   GlobalVariableSet(pfx + "OPFV", state.originalPartialFinalVolume);
+   for(int i = 0; i < 10; i++)
+      GlobalVariableSet(pfx + "OPV" + IntegerToString(i), state.originalPartialVolumes[i]);
+
+   GlobalVariableSet(pfx + "BE", state.beSet ? 1.0 : 0.0);
+   GlobalVariableSet(pfx + "TBP", state.trailingBestPrice);
+   GlobalVariableSet(pfx + "TA", state.trailingActive ? 1.0 : 0.0);
+   GlobalVariableSet(pfx + "UOSL", state.userOverrideSL);
+   GlobalVariableSet(pfx + "UOTP", state.userOverrideTP);
+
+   GlobalVariableSet(pfx + "SAVED", 1.0);
 }
 
 bool IsPartialPosition(ulong ticket);
 void MarkPartialExecuted(int index);
 
 bool LoadPartialState() {
-   string path = "STM17_" + _Symbol + ".bin";
-   if(!FileIsExist(path)) return false;
-   int h = FileOpen(path, FILE_BIN | FILE_READ);
-   if(h == INVALID_HANDLE) return false;
-   int ver = FileReadInteger(h);
-   if(ver != 1) { FileClose(h); FileDelete(path); return false; }
-   state.partialCount            = FileReadInteger(h);
-   state.partialMethod           = FileReadInteger(h);
-   state.partialsValid           = (FileReadInteger(h) != 0);
-   state.partialFinalVolume      = FileReadDouble(h);
-   state.lastPlannedPositionSize = FileReadDouble(h);
-   state.lastPlannedTP           = FileReadDouble(h);
-   for(int i = 0; i < 10; i++) state.partialPrices[i]  = FileReadDouble(h);
-   for(int i = 0; i < 10; i++) state.partialVolumes[i] = FileReadDouble(h);
-   for(int i = 0; i < 10; i++) state.partialExecuted[i] = (FileReadInteger(h) != 0);
-   for(int i = 0; i < 10; i++) state.partialOrderTickets[i]   = (ulong)FileReadLong(h);
-   for(int i = 0; i < 10; i++) state.partialPositionTickets[i] = (ulong)FileReadLong(h);
-   state.originalPartialCount        = FileReadInteger(h);
-   state.originalPlannedPositionSize = FileReadDouble(h);
-   state.originalPartialFinalVolume  = FileReadDouble(h);
-   for(int i = 0; i < 10; i++) state.originalPartialVolumes[i] = FileReadDouble(h);
-   state.beSet            = (FileReadInteger(h) != 0);
-   state.trailingActive   = (FileReadInteger(h) != 0);
-   state.trailingBestPrice = FileReadDouble(h);
-   state.userOverrideSL   = FileReadDouble(h);
-   state.userOverrideTP   = FileReadDouble(h);
-   state.executedPartialCount = FileReadInteger(h);
-   for(int i = 0; i < 10; i++) state.executedPartialPrices[i] = FileReadDouble(h);
-   FileClose(h);
+   string pfx = GetGVPrefix();
+   if(!GlobalVariableCheck(pfx + "SAVED")) return false;
 
-   // Reconcile tickets: if a partial order was filled, find the resulting position
+   state.executedPartialCount = (int)GlobalVariableGet(pfx + "EPC");
+   for(int i = 0; i < 10; i++)
+      state.executedPartialPrices[i] = GlobalVariableGet(pfx + "EP" + IntegerToString(i));
+
+   state.partialsValid = (GlobalVariableGet(pfx + "PV") > 0.5);
+   state.partialCount = (int)GlobalVariableGet(pfx + "PC");
+   state.partialMethod = (int)GlobalVariableGet(pfx + "PM");
+   state.partialFinalVolume = GlobalVariableGet(pfx + "PFV");
+   state.lastPlannedPositionSize = GlobalVariableGet(pfx + "LPS");
+   state.lastPlannedTP = GlobalVariableGet(pfx + "LPT");
+
+   for(int i = 0; i < 10; i++) {
+      state.partialPrices[i] = GlobalVariableGet(pfx + "PP" + IntegerToString(i));
+      state.partialVolumes[i] = GlobalVariableGet(pfx + "PVol" + IntegerToString(i));
+      state.partialExecuted[i] = (GlobalVariableGet(pfx + "PE" + IntegerToString(i)) > 0.5);
+      state.partialOrderTickets[i] = (ulong)GlobalVariableGet(pfx + "POT" + IntegerToString(i));
+      state.partialPositionTickets[i] = (ulong)GlobalVariableGet(pfx + "PPT" + IntegerToString(i));
+   }
+
+   state.originalPartialCount = (int)GlobalVariableGet(pfx + "OPC");
+   state.originalPlannedPositionSize = GlobalVariableGet(pfx + "OPS");
+   state.originalPartialFinalVolume = GlobalVariableGet(pfx + "OPFV");
+   for(int i = 0; i < 10; i++)
+      state.originalPartialVolumes[i] = GlobalVariableGet(pfx + "OPV" + IntegerToString(i));
+
+   state.beSet = (GlobalVariableGet(pfx + "BE") > 0.5);
+   state.trailingBestPrice = GlobalVariableGet(pfx + "TBP");
+   state.trailingActive = (GlobalVariableGet(pfx + "TA") > 0.5);
+   state.userOverrideSL = GlobalVariableGet(pfx + "UOSL");
+   state.userOverrideTP = GlobalVariableGet(pfx + "UOTP");
+
    for(int i = 0; i < state.partialCount && i < 10; i++) {
       if(state.partialOrderTickets[i] > 0 && !OrderSelect(state.partialOrderTickets[i])) {
          bool found_pos = false;
@@ -750,12 +972,38 @@ bool LoadPartialState() {
          if(!found_pos) state.partialOrderTickets[i] = 0;
       }
    }
+
    Print("Partial state loaded: ", state.partialCount, " levels, ", state.executedPartialCount, " executed");
    return true;
 }
 
 void ClearSavedPartialState() {
-   FileDelete("STM17_" + _Symbol + ".bin");
+   string pfx = GetGVPrefix();
+   GlobalVariableDel(pfx + "SAVED");
+   GlobalVariableDel(pfx + "EPC");
+   GlobalVariableDel(pfx + "PV");
+   GlobalVariableDel(pfx + "PC");
+   GlobalVariableDel(pfx + "PM");
+   GlobalVariableDel(pfx + "PFV");
+   GlobalVariableDel(pfx + "LPS");
+   GlobalVariableDel(pfx + "LPT");
+   GlobalVariableDel(pfx + "OPC");
+   GlobalVariableDel(pfx + "OPS");
+   GlobalVariableDel(pfx + "OPFV");
+   GlobalVariableDel(pfx + "BE");
+   GlobalVariableDel(pfx + "TBP");
+   GlobalVariableDel(pfx + "TA");
+   GlobalVariableDel(pfx + "UOSL");
+   GlobalVariableDel(pfx + "UOTP");
+   for(int i = 0; i < 10; i++) {
+      GlobalVariableDel(pfx + "EP" + IntegerToString(i));
+      GlobalVariableDel(pfx + "PP" + IntegerToString(i));
+      GlobalVariableDel(pfx + "PVol" + IntegerToString(i));
+      GlobalVariableDel(pfx + "PE" + IntegerToString(i));
+      GlobalVariableDel(pfx + "POT" + IntegerToString(i));
+      GlobalVariableDel(pfx + "PPT" + IntegerToString(i));
+      GlobalVariableDel(pfx + "OPV" + IntegerToString(i));
+   }
 }
 
 // Forward declarations for UI functions
@@ -2711,7 +2959,7 @@ if(state.exists) {
    
    // Dashboard sync
    if(InpEnableDashboardSync) {
-      DC_Sync();
+      DashboardConnector::Sync();
       UpdateStatusDot();
    }
 }
@@ -2872,7 +3120,7 @@ int OnInit() {
    EventSetMillisecondTimer(g_timerBaseIntervalMs);
 
    if(InpEnableDashboardSync) {
-      DC_Init(
+      DashboardConnector::Init(
          InpDashboardUrl,
          InpDashboardPSK,
          InpDashboardSyncIntervalSec,

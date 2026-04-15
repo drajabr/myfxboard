@@ -1,9 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { validateRequestBody, ingestPayloadSchema, ingestHealthPayloadSchema } from '../middleware/validation.js';
 import { validateIngestionAuth } from '../middleware/auth.js';
-import { accountQueries, positionQueries, tradeQueries, snapshotQueries } from '../db/queries.js';
+import { accountQueries, positionQueries, tradeQueries, snapshotQueries, invalidateBreakevenCache } from '../db/queries.js';
 import { transaction } from '../db/connection.js';
 import { Trade } from '../types/index.js';
+import { updateAccountCache } from '../services/positionCache.js';
+import { bufferSnapshot } from '../services/writeBuffer.js';
 
 const router = Router();
 const MIN_INGEST_INTERVAL_MS = 0;
@@ -60,12 +62,11 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      const sharedSecret = requireSharedSecret();
 
-      const account = await accountQueries.ensureByAccountNumber(accountId, sharedSecret);
-      const serverHistoryHash = String(account.last_history_hash || '');
+      const account = await accountQueries.findById(accountId);
+      const serverHistoryHash = String(account?.last_history_hash || '');
       const clientHistoryHash = String(req.body.history_hash || '').trim();
-      const historySyncRequired = serverHistoryHash.length === 0 || serverHistoryHash !== clientHistoryHash;
+      const historySyncRequired = !account || serverHistoryHash.length === 0 || serverHistoryHash !== clientHistoryHash;
 
       res.status(200).json({
         status: 'ok',
@@ -139,24 +140,51 @@ router.post(
       const dayStartMs = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
       const dayEndMs = new Date(new Date().setHours(23, 59, 59, 999)).getTime();
 
-      const savedIngestion = await transaction(async (client) => {
-        await positionQueries.deleteByAccount(accountId, client);
+      // ── HOT PATH: purely in-memory, zero I/O ─────────────────────────────
+      // Store full position objects in cache; fires SSE push immediately.
+      // Positions never touch the DB here — they live in memory until shutdown.
+      updateAccountCache(
+        accountId,
+        positions.map((p: any) => ({
+          account_id: accountId,
+          symbol: p.symbol,
+          size: p.volume,
+          direction: p.direction,
+          entry_price: p.open_price,
+          current_price: p.open_price,
+          avg_sl: p.avg_sl ?? null,
+          avg_tp: p.avg_tp ?? null,
+          unrealized_pnl: p.pnl,
+          open_time_ms: p.open_time_ms,
+        }))
+      );
 
-        for (const pos of positions) {
-          await positionQueries.upsertPosition({
+      // Snapshot (daily equity/balance record) — idempotent day-keyed upsert, buffered at 5s.
+      // The trade count query is fire-and-forget: the buffer flushes 5s later so the query
+      // always completes well before the flush, and we don't need to block the response for it.
+      const safeEquity = asFiniteNumber(accountData?.equity, 0);
+      const safeBalance = asFiniteNumber(accountData?.balance, 0);
+      const snapshotDate = new Date().toISOString().split('T')[0];
+      tradeQueries.summarizeByExitRange(accountId, dayStartMs, dayEndMs, breakevenTolerance)
+        .then((daySummary) => {
+          bufferSnapshot({
             account_id: accountId,
-            symbol: pos.symbol,
-            size: pos.volume,
-            direction: pos.direction,
-            entry_price: pos.open_price,
-            current_price: pos.open_price,
-            avg_sl: pos.avg_sl,
-            avg_tp: pos.avg_tp,
-            unrealized_pnl: pos.pnl,
-            open_time_ms: pos.open_time_ms,
-          }, client);
-        }
+            date: snapshotDate,
+            snapshot_time_ms: nowMs,
+            equity: safeEquity,
+            balance: safeBalance,
+            return_pct: safeBalance > 0 ? ((safeEquity - safeBalance) / safeBalance) * 100 : 0,
+            trades_count: daySummary.trades_count,
+            wins: daySummary.wins,
+            losses: daySummary.losses,
+          });
+        })
+        .catch((err) => console.error('[INGEST] snapshot query failed:', err));
 
+      // ── CRITICAL PATH: trades + accounting state (still synchronous) ─────────
+      // Closed trades are the permanent record; write them immediately.
+      // Transaction is now tiny: just N trade inserts + 2 account row updates.
+      const savedIngestion = await transaction(async (client) => {
         if (shouldIncludeHistory) {
           for (const trade of closed_trades) {
             const tradeRecord: Omit<Trade, 'id'> = {
@@ -177,22 +205,6 @@ router.post(
           }
         }
 
-        const today = new Date().toISOString().split('T')[0];
-        const daySummary = await tradeQueries.summarizeByExitRange(accountId, dayStartMs, dayEndMs, breakevenTolerance, client);
-        const safeEquity = asFiniteNumber(accountData?.equity, 0);
-        const safeBalance = asFiniteNumber(accountData?.balance, 0);
-        await snapshotQueries.insertSnapshot({
-          account_id: accountId,
-          date: today,
-          snapshot_time_ms: Date.now(),
-          equity: safeEquity,
-          balance: safeBalance,
-          return_pct: safeBalance > 0 ? ((safeEquity - safeBalance) / safeBalance) * 100 : 0,
-          trades_count: daySummary.trades_count,
-          wins: daySummary.wins,
-          losses: daySummary.losses,
-        }, client);
-
         await accountQueries.updateWatermarks(
           accountId,
           ea_latest_closed_deal_id,
@@ -207,6 +219,12 @@ router.post(
           client
         );
       });
+
+      // Invalidate cached breakeven tolerance when new trades were committed so
+      // the next analytics request gets a fresh PERCENTILE_CONT computation.
+      if (shouldIncludeHistory && closed_trades.length > 0) {
+        invalidateBreakevenCache(accountId);
+      }
 
       // Persist identity/display fields for existing accounts.
       const nickname = String(accountData?.nickname || '').trim();
@@ -267,23 +285,26 @@ router.post(
       const breakevenToleranceMax = resolveBreakevenToleranceMax(breakevenToleranceFloor);
       const breakevenTolerance = await tradeQueries.getBreakevenTolerance(accountId, breakevenToleranceFloor, breakevenToleranceMax);
 
-      // Insert closed trades (idempotent -- duplicates rejected)
-      for (const trade of closed_trades) {
-        const tradeRecord: Omit<Trade, 'id'> = {
-          account_id: accountId,
-          symbol: trade.symbol,
-          size: trade.volume,
-          entry_price: trade.entry,
-          exit_price: trade.exit,
-          profit: trade.profit,
-          profit_pct: trade.volume > 0 && trade.entry > 0 ? (trade.profit / (trade.volume * trade.entry)) * 100 : 0,
-          entry_time_ms: trade.entry_time_ms,
-          exit_time_ms: trade.exit_time_ms,
-          duration_sec: trade.duration_sec,
-          result: classifyTradeResult(trade.profit, breakevenTolerance),
-          close_method: trade.method,
-        };
-        await tradeQueries.insertTrade(tradeRecord);
+      // Build all trade records first, then insert in a single batch statement.
+      const tradeRecords: Array<Omit<Trade, 'id'>> = closed_trades.map((trade: any) => ({
+        account_id: accountId,
+        symbol: trade.symbol,
+        size: trade.volume,
+        entry_price: trade.entry,
+        exit_price: trade.exit,
+        profit: trade.profit,
+        profit_pct: trade.volume > 0 && trade.entry > 0 ? (trade.profit / (trade.volume * trade.entry)) * 100 : 0,
+        entry_time_ms: trade.entry_time_ms,
+        exit_time_ms: trade.exit_time_ms,
+        duration_sec: trade.duration_sec,
+        result: classifyTradeResult(trade.profit, breakevenTolerance),
+        close_method: trade.method,
+      }));
+      await tradeQueries.insertTradeBatch(tradeRecords);
+
+      // Invalidate cached tolerance so the next analytics request reflects new history.
+      if (tradeRecords.length > 0) {
+        invalidateBreakevenCache(accountId);
       }
 
       res.status(200).json({

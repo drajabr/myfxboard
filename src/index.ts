@@ -10,6 +10,9 @@ import ingestionRoutes from './api/ingestion.js';
 import { validateDashboardEditToken } from './middleware/auth.js';
 import { ensureDatabaseSchema } from './db/bootstrap.js';
 import { isDatabaseReady } from './db/connection.js';
+import { startWriteBuffer, flushAndStop } from './services/writeBuffer.js';
+import { seedAccountPositions } from './services/positionCache.js';
+import { positionQueries } from './db/queries.js';
 
 config();
 
@@ -99,9 +102,41 @@ app.use((err: any, _req: any, res: any, _next: any) => {
 async function start() {
   await ensureDatabaseSchema();
 
-  app.listen(PORT, () => {
+  // Warm the position cache from DB before accepting traffic so the analytics
+  // endpoint has data immediately after restart, without waiting for the first
+  // connector sync (which arrives within ~1 second anyway).
+  // Single query fetches all accounts' positions instead of one query per account.
+  try {
+    const allPositions = await positionQueries.findAll();
+    const byAccount = new Map<string, typeof allPositions>();
+    for (const pos of allPositions) {
+      const list = byAccount.get(pos.account_id) ?? [];
+      list.push(pos);
+      byAccount.set(pos.account_id, list);
+    }
+    for (const [accountId, positions] of byAccount) {
+      seedAccountPositions(accountId, positions);
+    }
+    console.log(`[positionCache] seeded ${byAccount.size} account(s) from DB`);
+  } catch (err) {
+    // Non-fatal: cache will fill on first sync
+    console.warn('[positionCache] seed failed (will recover on first sync):', (err as Error).message);
+  }
+
+  startWriteBuffer();
+
+  const server = app.listen(PORT, () => {
     console.log(`myfxboard server running on port ${PORT} (${NODE_ENV})`);
   });
+
+  const shutdown = async (signal: string) => {
+    console.log(`[${signal}] shutting down — flushing write buffer...`);
+    server.close();
+    await flushAndStop().catch(console.error);
+    process.exit(0);
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 }
 
 start().catch((error) => {

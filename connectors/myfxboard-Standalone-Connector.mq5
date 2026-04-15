@@ -14,7 +14,7 @@ input group "myfxboard Dashboard Connection"
 input string InpDashboardUrl         = "http://localhost:3000"; // Server URL
 input string InpDashboardPSK         = "";                      // Shared Secret (PSK)
 input string InpAccountNickname      = "";                      // Account Nickname (optional)
-input int    InpSyncIntervalSec      = 3;                       // Sync Interval (seconds)
+input int    InpSyncIntervalSec      = 1;                       // Sync Interval (seconds)
 input int    InpKeepaliveSec         = 0;                       // Legacy unused field
 input datetime InpHistoryStartDate   = 0;                       // History Start Date (0=all history)
 input bool   InpDebugLog             = false;                   // Debug Logging
@@ -247,7 +247,10 @@ private:
       long history_start_ms = s_history_start_time_ms;
 
       // HistorySelect expects datetime seconds, not unix milliseconds.
-      if(HistorySelect(0, TimeCurrent())) {
+      // Pass the configured history start so MT5 only loads deals from that date;
+      // otherwise it loads the entire account history every sync.
+      datetime hist_select_start = (history_start_ms > 0) ? (datetime)(history_start_ms / 1000) : 0;
+      if(HistorySelect(hist_select_start, TimeCurrent())) {
          int deals_total = HistoryDealsTotal();
 
          struct PositionEntry {
@@ -609,7 +612,7 @@ private:
 // Static member initialization
 string DashboardConnector::s_url              = "";
 string DashboardConnector::s_psk              = "";
-int    DashboardConnector::s_sync_interval_ms = 3000;
+int    DashboardConnector::s_sync_interval_ms = 1000;
 int    DashboardConnector::s_keepalive_ms     = 0;
 ulong  DashboardConnector::s_last_sync_ms     = 0;
 bool   DashboardConnector::s_in_flight        = false;

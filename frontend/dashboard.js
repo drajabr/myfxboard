@@ -7,7 +7,7 @@ const FONT_SIZE_KEY = 'fontSizePreference';
 const QUICK_CONTROLS_COLLAPSED_KEY = 'quickControlsCollapsed';
 const LAYOUT_KEY = 'layoutPreference';
 const UI_VERSION = 'v1.3';
-const DASHBOARD_REFRESH_MS = 5000;
+const DASHBOARD_REFRESH_MS = 1000;
 const ACCOUNTS_REFRESH_MS = 60000;
 const LAYOUT_MODES = ['compact'];
 const MAX_PNL_CURVE_POINTS = 180;
@@ -113,6 +113,7 @@ const BACKGROUND_PRESETS = [
 
 const state = {
     autoRefreshInterval: null,
+    livePnlSource: null,
     monthShift: 0,
     yearShift: 0,
     tradesLimit: 50,
@@ -852,6 +853,7 @@ function setupEventListeners() {
         state.monthShift = 0;
         state.yearShift = 0;
         loadDashboard();
+        startLivePnlPolling(); // reconnect SSE for the newly selected account
     });
 
     document.getElementById('monthPrevBtn').addEventListener('click', () => {
@@ -3093,6 +3095,50 @@ function startAutoRefresh(interval) {
     state.autoRefreshInterval = setInterval(loadDashboard, interval);
 }
 
+async function fetchLivePnl() {}
+
+function applyLivePnl(data) {
+    if (state.inflight) return;
+    const floatingEl = document.getElementById('floatingPnl');
+    const floatingMetaEl = document.getElementById('floatingPnlMeta');
+    if (!floatingEl) return;
+    const floatingPnl = toNum(data.floating_pnl, 0);
+    const balance = toNum(state.lastData?.summary?.balance, 0);
+    const balanceBase = Math.max(Math.abs(balance), 1);
+    const floatingPct = (floatingPnl / balanceBase) * 100;
+    floatingEl.textContent = formatMoney(floatingPnl);
+    applyPnlClass(floatingEl, floatingPnl);
+    if (floatingMetaEl) {
+        floatingMetaEl.textContent = formatDeltaPct(floatingPct);
+        floatingMetaEl.className = `label metric-card__meta ${pnlClass(floatingPnl)}`;
+    }
+}
+
+/**
+ * Opens an SSE connection to /api/account/live-pnl/stream.
+ * The server pushes a JSON event every time ingestion updates positions,
+ * so no periodic HTTP polling is needed.
+ * Automatically reconnects (browser SSE behaviour) on transient failures.
+ * Call again whenever the selected account changes.
+ */
+function startLivePnlPolling() {
+    if (state.livePnlSource) {
+        state.livePnlSource.close();
+        state.livePnlSource = null;
+    }
+    const selectedAccount = document.getElementById('accountSelector')?.value || localStorage.getItem('selectedAccount') || '';
+    const scope = selectedAccount || 'all';
+    const url = `${API_URL}/account/live-pnl/stream?accountId=${encodeURIComponent(scope)}`;
+    const es = new EventSource(url);
+    es.onmessage = (event) => {
+        try {
+            applyLivePnl(JSON.parse(event.data));
+        } catch (_) {}
+    };
+    // onerror: browser will auto-reconnect per SSE spec — no manual action needed
+    state.livePnlSource = es;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     localStorage.setItem(LAYOUT_KEY, 'compact');
     applyTheme(getPreferredTheme());
@@ -3111,6 +3157,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     loadDashboard();
     startAutoRefresh(DASHBOARD_REFRESH_MS);
+    startLivePnlPolling();
 });
 
 

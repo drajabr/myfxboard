@@ -5,6 +5,16 @@ import pg from 'pg';
 
 type QueryFn = (text: string, params?: any[]) => Promise<any>;
 
+// ── Breakeven tolerance in-memory cache ──────────────────────────────────────
+// PERCENTILE_CONT over all trades is expensive. The result changes only when
+// new trades are inserted, so cache it per account and invalidate on insert.
+const beToleranceCache = new Map<string, { value: number; expiresAt: number }>();
+const BE_CACHE_TTL_MS = 10 * 60 * 1000; // 10-minute safety TTL
+
+export function invalidateBreakevenCache(account_id: string): void {
+  beToleranceCache.delete(account_id);
+}
+
 const getQueryFn = (client?: pg.PoolClient): QueryFn => {
   if (client) {
     return client.query.bind(client);
@@ -160,6 +170,11 @@ export const positionQueries = {
     return result.rows;
   },
 
+  async findAll(): Promise<Position[]> {
+    const result = await query('SELECT * FROM positions ORDER BY account_id, open_time_ms DESC');
+    return result.rows;
+  },
+
   async deleteByAccount(account_id: string, client?: pg.PoolClient) {
     const q = getQueryFn(client);
     await q('DELETE FROM positions WHERE account_id = $1', [account_id]);
@@ -168,6 +183,14 @@ export const positionQueries = {
 
 export const tradeQueries = {
   async getBreakevenTolerance(account_id: string, floor: number = 1.0, maxTolerance: number = 5.0): Promise<number> {
+    const safeFloor = Number.isFinite(floor) && floor >= 0 ? floor : 1.0;
+    const safeMax = Number.isFinite(maxTolerance) && maxTolerance >= safeFloor ? maxTolerance : 5.0;
+
+    const cached = beToleranceCache.get(account_id);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+
     const result = await query(
       `SELECT
           COALESCE(PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY ABS(profit)) FILTER (WHERE profit < 0), 0)::float8 AS be_abs_loss_percentile
@@ -176,10 +199,10 @@ export const tradeQueries = {
       [account_id]
     );
     const percentileTolerance = Number(result.rows[0]?.be_abs_loss_percentile || 0);
-    const safeFloor = Number.isFinite(floor) && floor >= 0 ? floor : 1.0;
-    const safeMax = Number.isFinite(maxTolerance) && maxTolerance >= safeFloor ? maxTolerance : 5.0;
     const boundedPercentile = Math.min(Number.isFinite(percentileTolerance) ? percentileTolerance : 0, safeMax);
-    return Math.max(safeFloor, boundedPercentile);
+    const value = Math.max(safeFloor, boundedPercentile);
+    beToleranceCache.set(account_id, { value, expiresAt: Date.now() + BE_CACHE_TTL_MS });
+    return value;
   },
 
   async deleteByAccount(account_id: string) {
@@ -197,6 +220,26 @@ export const tradeQueries = {
        trade.profit_pct, trade.entry_time_ms, trade.exit_time_ms, trade.duration_sec, trade.result, trade.close_method]
     );
     return result.rows[0] || null;
+  },
+
+  async insertTradeBatch(trades: Array<Omit<Trade, 'id'>>, client?: pg.PoolClient): Promise<void> {
+    if (trades.length === 0) return;
+    const q = getQueryFn(client);
+    const COLS = 12;
+    const valuesClauses = trades.map((_, i) => {
+      const b = i * COLS;
+      return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12})`;
+    });
+    const params = trades.flatMap(t => [
+      t.account_id, t.symbol, t.size, t.entry_price, t.exit_price, t.profit,
+      t.profit_pct, t.entry_time_ms, t.exit_time_ms, t.duration_sec, t.result, t.close_method,
+    ]);
+    await q(
+      `INSERT INTO trades (account_id, symbol, size, entry_price, exit_price, profit, profit_pct, entry_time_ms, exit_time_ms, duration_sec, result, close_method)
+       VALUES ${valuesClauses.join(',')}
+       ON CONFLICT ON CONSTRAINT trades_unique_trade_event DO NOTHING`,
+      params
+    );
   },
 
   async findRecentByAccount(account_id: string, limit: number = 50): Promise<Trade[]> {
@@ -398,6 +441,92 @@ export const tradeQueries = {
       short_wins: 0,
       short_losses: 0,
       short_neutral: 0,
+    };
+  },
+
+  async summarizeAllTimeStats(
+    account_id: string,
+    breakeven_tolerance: number
+  ): Promise<{ pnl: number; trades_count: number; wins: number; losses: number; neutral: number }> {
+    const result = await query(
+      `SELECT
+          COALESCE(SUM(profit), 0)::float8 AS pnl,
+          COUNT(*)::int AS trades_count,
+          COUNT(*) FILTER (WHERE profit > $2)::int AS wins,
+          COUNT(*) FILTER (WHERE profit < -$2)::int AS losses,
+          COUNT(*) FILTER (WHERE ABS(profit) <= $2)::int AS neutral
+         FROM trades
+        WHERE account_id = $1`,
+      [account_id, breakeven_tolerance]
+    );
+    return result.rows[0] || { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0 };
+  },
+
+  // Single-scan replacement for 5 separate summarizeByEventTimeRange calls (today / 7d / 30d / ytd / all-time).
+  // One table scan, conditional FILTER aggregation — 5× fewer DB round-trips per account per analytics request.
+  async summarizeAllPeriodStats(
+    account_id: string,
+    todayStartMs: number,
+    last7dStartMs: number,
+    last30dStartMs: number,
+    ytdStartMs: number,
+    upperBoundMs: number,
+    breakeven_tolerance: number
+  ): Promise<{
+    today: { pnl: number; trades_count: number; wins: number; losses: number; neutral: number };
+    last7d: { pnl: number; trades_count: number; wins: number; losses: number; neutral: number };
+    last30d: { pnl: number; trades_count: number; wins: number; losses: number; neutral: number };
+    ytd: { pnl: number; trades_count: number; wins: number; losses: number; neutral: number };
+    all_time: { pnl: number; trades_count: number; wins: number; losses: number; neutral: number };
+  }> {
+    const result = await query(
+      `SELECT
+          /* today */
+          COALESCE(SUM(profit) FILTER (WHERE ts BETWEEN $2 AND $6), 0)::float8 AS today_pnl,
+          COUNT(*) FILTER (WHERE ts BETWEEN $2 AND $6)::int AS today_trades,
+          COUNT(*) FILTER (WHERE ts BETWEEN $2 AND $6 AND profit > $7)::int AS today_wins,
+          COUNT(*) FILTER (WHERE ts BETWEEN $2 AND $6 AND profit < -$7)::int AS today_losses,
+          COUNT(*) FILTER (WHERE ts BETWEEN $2 AND $6 AND ABS(profit) <= $7)::int AS today_neutral,
+          /* last 7 days */
+          COALESCE(SUM(profit) FILTER (WHERE ts BETWEEN $3 AND $6), 0)::float8 AS last7d_pnl,
+          COUNT(*) FILTER (WHERE ts BETWEEN $3 AND $6)::int AS last7d_trades,
+          COUNT(*) FILTER (WHERE ts BETWEEN $3 AND $6 AND profit > $7)::int AS last7d_wins,
+          COUNT(*) FILTER (WHERE ts BETWEEN $3 AND $6 AND profit < -$7)::int AS last7d_losses,
+          COUNT(*) FILTER (WHERE ts BETWEEN $3 AND $6 AND ABS(profit) <= $7)::int AS last7d_neutral,
+          /* last 30 days */
+          COALESCE(SUM(profit) FILTER (WHERE ts BETWEEN $4 AND $6), 0)::float8 AS last30d_pnl,
+          COUNT(*) FILTER (WHERE ts BETWEEN $4 AND $6)::int AS last30d_trades,
+          COUNT(*) FILTER (WHERE ts BETWEEN $4 AND $6 AND profit > $7)::int AS last30d_wins,
+          COUNT(*) FILTER (WHERE ts BETWEEN $4 AND $6 AND profit < -$7)::int AS last30d_losses,
+          COUNT(*) FILTER (WHERE ts BETWEEN $4 AND $6 AND ABS(profit) <= $7)::int AS last30d_neutral,
+          /* ytd */
+          COALESCE(SUM(profit) FILTER (WHERE ts BETWEEN $5 AND $6), 0)::float8 AS ytd_pnl,
+          COUNT(*) FILTER (WHERE ts BETWEEN $5 AND $6)::int AS ytd_trades,
+          COUNT(*) FILTER (WHERE ts BETWEEN $5 AND $6 AND profit > $7)::int AS ytd_wins,
+          COUNT(*) FILTER (WHERE ts BETWEEN $5 AND $6 AND profit < -$7)::int AS ytd_losses,
+          COUNT(*) FILTER (WHERE ts BETWEEN $5 AND $6 AND ABS(profit) <= $7)::int AS ytd_neutral,
+          /* all time (no upper bound — fixes broker clock-skew exclusions) */
+          COALESCE(SUM(profit), 0)::float8 AS all_time_pnl,
+          COUNT(*)::int AS all_time_trades,
+          COUNT(*) FILTER (WHERE profit > $7)::int AS all_time_wins,
+          COUNT(*) FILTER (WHERE profit < -$7)::int AS all_time_losses,
+          COUNT(*) FILTER (WHERE ABS(profit) <= $7)::int AS all_time_neutral
+         FROM (
+           SELECT profit, COALESCE(exit_time_ms, entry_time_ms) AS ts
+             FROM trades
+            WHERE account_id = $1
+         ) t`,
+      [account_id, todayStartMs, last7dStartMs, last30dStartMs, ytdStartMs, upperBoundMs, breakeven_tolerance]
+    );
+    const r = result.rows[0];
+    const empty = { pnl: 0, trades_count: 0, wins: 0, losses: 0, neutral: 0 };
+    if (!r) return { today: empty, last7d: empty, last30d: empty, ytd: empty, all_time: empty };
+    return {
+      today:    { pnl: Number(r.today_pnl),    trades_count: r.today_trades,    wins: r.today_wins,    losses: r.today_losses,    neutral: r.today_neutral },
+      last7d:   { pnl: Number(r.last7d_pnl),   trades_count: r.last7d_trades,   wins: r.last7d_wins,   losses: r.last7d_losses,   neutral: r.last7d_neutral },
+      last30d:  { pnl: Number(r.last30d_pnl),  trades_count: r.last30d_trades,  wins: r.last30d_wins,  losses: r.last30d_losses,  neutral: r.last30d_neutral },
+      ytd:      { pnl: Number(r.ytd_pnl),      trades_count: r.ytd_trades,      wins: r.ytd_wins,      losses: r.ytd_losses,      neutral: r.ytd_neutral },
+      all_time: { pnl: Number(r.all_time_pnl), trades_count: r.all_time_trades, wins: r.all_time_wins, losses: r.all_time_losses, neutral: r.all_time_neutral },
     };
   },
 
