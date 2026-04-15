@@ -1740,6 +1740,7 @@ body[data-layout='dense'] .pos-combine-child {
 
 @media (max-width: 1380px) {
     .col-pos-prio-7,
+    .col-pos-prio-8,
     .col-trades-prio-7 {
         display: none;
     }
@@ -1783,6 +1784,7 @@ body[data-layout='dense'] .pos-combine-child {
 @supports (container-type: inline-size) {
     @container panel (max-width: 780px) {
         .col-pos-prio-7,
+        .col-pos-prio-8,
         .col-trades-prio-7 {
             display: none;
         }

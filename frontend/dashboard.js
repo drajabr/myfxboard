@@ -1589,7 +1589,7 @@ function updatePositionsTable(positions) {
     const prevPositionValues = state.livePositionValues || new Map();
     const nextPositionValues = new Map();
     if (!positions || positions.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;">No open positions</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;">No open positions</td></tr>';
         state.livePositionValues = nextPositionValues;
         scheduleAutoFitOpenPositions();
         return;
@@ -1626,12 +1626,17 @@ function updatePositionsTable(positions) {
             const avgCurrent = totalSize > 0
                 ? g.children.reduce((s, p) => s + toNum(p.current_price || p.entry_price) * toNum(p.size), 0) / totalSize
                 : 0;
-            const avgSl = g.children.some(p => p.avg_sl !== null)
-                ? (totalSize > 0 ? g.children.reduce((s, p) => s + toNum(p.avg_sl || 0) * toNum(p.size), 0) / totalSize : null)
+            const slChildren = g.children.filter(p => p.avg_sl != null && p.avg_sl !== 0);
+            const tpChildren = g.children.filter(p => p.avg_tp != null && p.avg_tp !== 0);
+            const slSize = slChildren.reduce((s, p) => s + toNum(p.size), 0);
+            const tpSize = tpChildren.reduce((s, p) => s + toNum(p.size), 0);
+            const avgSl = slChildren.length > 0 && slSize > 0
+                ? slChildren.reduce((s, p) => s + toNum(p.avg_sl) * toNum(p.size), 0) / slSize
                 : null;
-            const avgTp = g.children.some(p => p.avg_tp !== null)
-                ? (totalSize > 0 ? g.children.reduce((s, p) => s + toNum(p.avg_tp || 0) * toNum(p.size), 0) / totalSize : null)
+            const avgTp = tpChildren.length > 0 && tpSize > 0
+                ? tpChildren.reduce((s, p) => s + toNum(p.avg_tp) * toNum(p.size), 0) / tpSize
                 : null;
+            const totalMargin = g.children.reduce((s, p) => s + toNum(p.margin || 0), 0);
             const earliestOpen = Math.min(...g.children.map(p => toNum(p.open_time_ms)).filter(t => t > 0));
             const accounts = [...new Set(g.children.map((p) => String(p.account_id || '-')))];
             const combinedRow = {
@@ -1650,14 +1655,17 @@ function updatePositionsTable(positions) {
                 avg_tp: avgTp,
                 tick_size: toNum(g.children[0]?.tick_size, NaN),
                 tick_value: toNum(g.children[0]?.tick_value, NaN),
+                margin: totalMargin || null,
                 _entryDecimals: inferPriceDecimals(g.children, 'entry_price'),
                 _currentDecimals: inferPriceDecimals(g.children, 'current_price'),
                 _slDecimals: inferPriceDecimals(g.children, 'avg_sl'),
                 _tpDecimals: inferPriceDecimals(g.children, 'avg_tp'),
                 open_time_ms: earliestOpen === Infinity ? 0 : earliestOpen,
             };
-            combinedRow.sl_amount = estimatePositionTargetPnl(combinedRow, combinedRow.avg_sl);
-            combinedRow.tp_amount = estimatePositionTargetPnl(combinedRow, combinedRow.avg_tp);
+            const slMoneyParts = g.children.map(c => c.sl_amount).filter(v => v !== null && v !== undefined);
+            combinedRow.sl_amount = slMoneyParts.length > 0 ? slMoneyParts.reduce((a, b) => a + b, 0) : null;
+            const tpMoneyParts = g.children.map(c => c.tp_amount).filter(v => v !== null && v !== undefined);
+            combinedRow.tp_amount = tpMoneyParts.length > 0 ? tpMoneyParts.reduce((a, b) => a + b, 0) : null;
             return combinedRow;
         });
     }
@@ -1698,29 +1706,26 @@ function updatePositionsTable(positions) {
         const currentValue = pos.current_price !== null ? toNum(pos.current_price, NaN) : NaN;
         const pnlValue = toNum(pos.unrealized_pnl || 0);
         const previous = prevPositionValues.get(rowKey);
-        const currentClass = Number.isFinite(currentValue) && previous && Number.isFinite(previous.current_price)
-            ? (currentValue > previous.current_price ? 'live-num-up' : currentValue < previous.current_price ? 'live-num-down' : '')
-            : '';
-        const pnlDeltaClass = previous
-            ? (pnlValue > previous.unrealized_pnl ? 'live-num-up' : pnlValue < previous.unrealized_pnl ? 'live-num-down' : '')
-            : '';
+        const currentPnlClass = pnlClass(pnlValue);
         nextPositionValues.set(rowKey, {
             current_price: Number.isFinite(currentValue) ? currentValue : NaN,
             unrealized_pnl: pnlValue,
         });
+        const marginValue = toNum(pos.margin, 0);
         return `
         <tr${childClass}>
             ${symbolCell}
             <td><span class="dir-badge ${side === 'BUY' ? 'dir-buy' : side === 'SELL' ? 'dir-sell' : ''}">${side}</span></td>
             <td>${formatSize(pos.size)}</td>
             <td class="col-pos-prio-4">${formatPrice(pos.entry_price, entryDecimals)}</td>
-            <td class="col-pos-prio-5">${pos.avg_sl !== null ? formatPrice(pos.avg_sl, slDecimals) : '-'}</td>
+            <td class="col-pos-prio-5">${pos.avg_sl !== null && pos.avg_sl !== 0 ? formatPrice(pos.avg_sl, slDecimals) : '-'}</td>
             <td class="col-pos-prio-5 ${pnlClass(slMoney || 0)}">${slMoney === null ? '-' : formatMoney(slMoney)}</td>
-            <td class="col-pos-prio-6">${pos.avg_tp !== null ? formatPrice(pos.avg_tp, tpDecimals) : '-'}</td>
+            <td class="col-pos-prio-6">${pos.avg_tp !== null && pos.avg_tp !== 0 ? formatPrice(pos.avg_tp, tpDecimals) : '-'}</td>
             <td class="col-pos-prio-6 ${pnlClass(tpMoney || 0)}">${tpMoney === null ? '-' : formatMoney(tpMoney)}</td>
             <td class="col-pos-prio-7">${ageText}</td>
-            <td class="col-pos-prio-7 ${currentClass}">${pos.current_price !== null ? formatPrice(pos.current_price, currentDecimals) : '-'}</td>
-            <td class="${pnlClass(pos.unrealized_pnl || 0)} ${pnlDeltaClass}">${formatMoney(pos.unrealized_pnl || 0)}</td>
+            <td class="col-pos-prio-7 ${currentPnlClass}">${pos.current_price !== null ? formatPrice(pos.current_price, currentDecimals) : '-'}</td>
+            <td class="col-pos-prio-8">${marginValue > 0 ? formatMoney(marginValue) : '-'}</td>
+            <td class="${pnlClass(pnlValue)}">${formatMoney(pnlValue)}</td>
             <td class="col-pos-prio-7">${accountInner}</td>
         </tr>
     `;
