@@ -6,6 +6,9 @@ const FONT_KEY = 'fontPreference';
 const FONT_SIZE_KEY = 'fontSizePreference';
 const QUICK_CONTROLS_COLLAPSED_KEY = 'quickControlsCollapsed';
 const LAYOUT_KEY = 'layoutPreference';
+const COMBINE_TRADES_KEY = 'combineTradesPreference';
+const COMBINE_POSITIONS_KEY = 'combineOpenPositionsPreference';
+const COMBINE_EXPOSURE_KEY = 'combineExposurePreference';
 const UI_VERSION = 'v1.6';
 const DASHBOARD_REFRESH_MS = 30000;
 const ACCOUNTS_REFRESH_MS = 60000;
@@ -479,6 +482,50 @@ function getPreferredFontSize() {
 function getPreferredLayout() {
     const saved = localStorage.getItem(LAYOUT_KEY);
     return LAYOUT_MODES.includes(saved) ? saved : 'default';
+}
+
+function getStoredBoolean(key, defaultValue) {
+    const saved = localStorage.getItem(key);
+    if (saved === '1') {
+        return true;
+    }
+    if (saved === '0') {
+        return false;
+    }
+    return defaultValue;
+}
+
+function saveStoredBoolean(key, value) {
+    localStorage.setItem(key, value ? '1' : '0');
+}
+
+function applyGroupingButtonState() {
+    const tradesBtn = document.getElementById('combineTradesBtn');
+    if (tradesBtn) {
+        tradesBtn.textContent = state.combinePositions ? '❯' : '❮';
+        tradesBtn.title = state.combinePositions ? 'Showing combined positions' : 'Showing individual trades';
+        tradesBtn.setAttribute('aria-label', tradesBtn.title);
+    }
+
+    const positionsBtn = document.getElementById('combinePositionsBtn');
+    if (positionsBtn) {
+        positionsBtn.textContent = state.combineOpenPositions ? '❯' : '❮';
+        positionsBtn.title = state.combineOpenPositions ? 'Showing combined positions' : 'Showing individual positions';
+        positionsBtn.setAttribute('aria-label', positionsBtn.title);
+    }
+
+    const exposureBtn = document.getElementById('combineExposureBtn');
+    if (exposureBtn) {
+        exposureBtn.textContent = state.combineExposure ? '❯' : '❮';
+        exposureBtn.title = state.combineExposure ? 'Showing grouped by account exposure' : 'Showing account + symbol exposure';
+        exposureBtn.setAttribute('aria-label', exposureBtn.title);
+    }
+}
+
+function loadGroupingPreferences() {
+    state.combinePositions = getStoredBoolean(COMBINE_TRADES_KEY, true);
+    state.combineOpenPositions = getStoredBoolean(COMBINE_POSITIONS_KEY, true);
+    state.combineExposure = getStoredBoolean(COMBINE_EXPOSURE_KEY, true);
 }
 
 function getAccentPreset(key) {
@@ -1049,9 +1096,8 @@ function setupEventListeners() {
 
     document.getElementById('combineTradesBtn').addEventListener('click', () => {
         state.combinePositions = !state.combinePositions;
-        const btn = document.getElementById('combineTradesBtn');
-        btn.textContent = state.combinePositions ? '❯' : '❮';
-        btn.title = state.combinePositions ? 'Showing combined positions' : 'Showing individual trades';
+        saveStoredBoolean(COMBINE_TRADES_KEY, state.combinePositions);
+        applyGroupingButtonState();
         if (state.lastData) {
             updateTradesTable(getRecentTrades(state.lastData));
             updateTradeControls(state.lastData);
@@ -1060,9 +1106,8 @@ function setupEventListeners() {
 
     document.getElementById('combinePositionsBtn').addEventListener('click', () => {
         state.combineOpenPositions = !state.combineOpenPositions;
-        const btn = document.getElementById('combinePositionsBtn');
-        btn.textContent = state.combineOpenPositions ? '❯' : '❮';
-        btn.title = state.combineOpenPositions ? 'Showing combined positions' : 'Showing individual positions';
+        saveStoredBoolean(COMBINE_POSITIONS_KEY, state.combineOpenPositions);
+        applyGroupingButtonState();
         if (state.lastData) {
             updatePositionsTable(state.lastData.positions);
         }
@@ -1079,9 +1124,8 @@ function setupEventListeners() {
 
     document.getElementById('combineExposureBtn').addEventListener('click', () => {
         state.combineExposure = !state.combineExposure;
-        const btn = document.getElementById('combineExposureBtn');
-        btn.textContent = state.combineExposure ? '❯' : '❮';
-        btn.title = state.combineExposure ? 'Showing grouped by account exposure' : 'Showing account + symbol exposure';
+        saveStoredBoolean(COMBINE_EXPOSURE_KEY, state.combineExposure);
+        applyGroupingButtonState();
         if (state.lastData) {
             updateExposureTable(state.lastData.positions || []);
         }
@@ -2469,9 +2513,17 @@ function updateSymbolPanels(symbolStats) {
         });
     };
 
-    // PnL panel — sorted by PnL, labels show money amounts
-    const byPnl = symbolStats.slice().sort((a, b) => b.pnl - a.pnl);
-    const pnlBlocks = byPnl.map((s) => {
+    // Keep both symbol panels in the exact same order for easier visual comparison.
+    const symbolOrder = symbolStats.slice().sort((a, b) => {
+        const pnlDiff = toNum(b.pnl) - toNum(a.pnl);
+        if (pnlDiff !== 0) {
+            return pnlDiff;
+        }
+        return String(a.symbol || '').localeCompare(String(b.symbol || ''));
+    });
+
+    // PnL panel — ordered by the shared symbol order, labels show money amounts
+    const pnlBlocks = symbolOrder.map((s) => {
         const neutralCount = Math.max(0, s.trades - s.wins - s.losses);
         const wPct = s.trades > 0 ? (s.wins / s.trades) * 100 : 0;
         const lPct = s.trades > 0 ? (s.losses / s.trades) * 100 : 0;
@@ -2488,9 +2540,8 @@ function updateSymbolPanels(symbolStats) {
     pnlPanel.innerHTML = pnlBlocks.map((b) => b.html).join('');
     applyLabels(pnlPanel, pnlBlocks);
 
-    // Win Rate panel — sorted by win rate, labels show percentages
-    const byWr = symbolStats.slice().sort((a, b) => b.win_rate_pct - a.win_rate_pct);
-    const wrBlocks = byWr.map((s) => {
+    // Win Rate panel — use the same shared symbol order, labels show percentages
+    const wrBlocks = symbolOrder.map((s) => {
         const neutralCount = Math.max(0, s.trades - s.wins - s.losses);
         const wPct = s.trades > 0 ? (s.wins / s.trades) * 100 : 0;
         const lPct = s.trades > 0 ? (s.losses / s.trades) * 100 : 0;
@@ -3477,6 +3528,7 @@ function startHistoryPolling() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    loadGroupingPreferences();
     applyTheme(getPreferredTheme());
     applyLayout(getPreferredLayout());
     applyBackgroundTheme(getPreferredBackground());
@@ -3488,6 +3540,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupPwaInstall();
     registerServiceWorker();
     setupEventListeners();
+    applyGroupingButtonState();
     loadAccountsIfNeeded(true).catch((error) => {
         console.error('Error loading accounts:', error);
     });
