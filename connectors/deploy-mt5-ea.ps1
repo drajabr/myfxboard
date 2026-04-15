@@ -194,23 +194,19 @@ if ($programFilesTargets.Count -gt 0) {
 }
 
 if (-not $NoPrompt) {
-    $proceed = Read-Host "Proceed with install/deploy to all discovered terminals? (Y/N)"
-    if ($proceed -notmatch '^(?i:y|yes)$') {
-        Write-Host "Cancelled by user."
-        exit 0
-    }
+    Write-Host "Proceeding automatically in 5 seconds (auto-yes for deployment and elevation prompts)."
+    Start-Sleep -Seconds 5
 }
 
 $isAdmin = Test-IsAdministrator
 if (-not $isAdmin) {
     if (-not $NoPrompt) {
-        $elevate = Read-Host "Not running as Administrator. Relaunch as Administrator now? (Y/N)"
-        if ($elevate -match '^(?i:y|yes)$') {
-            $elevatedArgs = Build-RelaunchArguments
-            Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $elevatedArgs | Out-Null
-            Write-Host "Relaunched in elevated PowerShell."
-            exit 0
-        }
+        Write-Host "Relaunching as Administrator in 5 seconds (auto-yes)."
+        Start-Sleep -Seconds 5
+        $elevatedArgs = Build-RelaunchArguments
+        Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $elevatedArgs | Out-Null
+        Write-Host "Relaunched in elevated PowerShell."
+        exit 0
     }
 }
 
@@ -249,6 +245,7 @@ if ($compiledInfo.LastWriteTime -lt $compileStart.AddSeconds(-2)) {
 }
 
 $destinationEx5Name = "$sourceBaseName.ex5"
+$destinationMq5Name = "$sourceBaseName.mq5"
 $copiedCount = 0
 $failedTargets = New-Object System.Collections.Generic.List[string]
 
@@ -261,6 +258,7 @@ foreach ($t in $targets) {
 
     try {
         Copy-Item -Path $compiledEx5 -Destination (Join-Path $t.ExpertsPath $destinationEx5Name) -Force
+        Copy-Item -Path $resolvedSource -Destination (Join-Path $t.ExpertsPath $destinationMq5Name) -Force
 
         $copiedCount++
     } catch {
