@@ -825,10 +825,22 @@ body[data-layout='dense'] .summary-spotlight .metric-card {
     grid-template-columns: repeat(var(--fit-cols, 5), minmax(0, 1fr));
 }
 
+#periodStatsGrid.metric-grid--adaptive-fit.metric-grid--balanced-rows {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+#periodStatsGrid.metric-grid--adaptive-fit.metric-grid--balanced-rows .metric-card {
+    grid-column: span 2;
+}
+
+#periodStatsGrid.metric-grid--adaptive-fit.metric-grid--balanced-rows .metric-card:nth-child(n + 4) {
+    grid-column: span 3;
+}
+
 #periodStatsGrid .metric-card {
     flex: 1 1 0;
-    min-width: 72px;
-    width: min-content;
+    min-width: 0;
+    width: 100%;
     max-width: 100%;
     white-space: nowrap;
     overflow: hidden;

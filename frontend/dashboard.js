@@ -452,6 +452,10 @@ function adaptMetricGridByContent(containerId, colsToTry) {
     const applyCols = (cols) => {
         container.classList.add('metric-grid--adaptive-fit');
         container.style.setProperty('--fit-cols', String(cols));
+        if (containerId === 'periodStatsGrid') {
+            const useBalancedRows = cols === 3 && cards.length === 5;
+            container.classList.toggle('metric-grid--balanced-rows', useBalancedRows);
+        }
     };
 
     chooseBestColumnCount(container, cards, colsToTry, applyCols);
