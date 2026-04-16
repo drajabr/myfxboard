@@ -1661,6 +1661,17 @@ function updatePositionsTable(positions) {
     }));
 
     if (state.combineOpenPositions && rows.length > 1) {
+        const signedSize = (position) => {
+            const rawSize = Math.abs(toNum(position?.size, 0));
+            const side = String(position?.direction || '').toUpperCase();
+            if (side === 'SELL') {
+                return -rawSize;
+            }
+            if (side === 'BUY') {
+                return rawSize;
+            }
+            return toNum(position?.size, 0);
+        };
         const groups = {};
         for (const pos of rows) {
             const normSym = pos._sortSymbol || normalizeSymbol(pos.symbol);
@@ -1674,23 +1685,38 @@ function updatePositionsTable(positions) {
                 return { ...g.children[0], _combined: false };
             }
             const children = g.children.slice().sort((a, b) => String(a.account_id || '-').localeCompare(String(b.account_id || '-')) || (toNum(b.unrealized_pnl) - toNum(a.unrealized_pnl)));
-            const totalSize = g.children.reduce((s, p) => s + toNum(p.size), 0);
+            const eps = 1e-9;
+            const buySize = g.children.reduce((s, p) => {
+                return s + (String(p.direction || '').toUpperCase() === 'BUY' ? Math.abs(toNum(p.size, 0)) : 0);
+            }, 0);
+            const sellSize = g.children.reduce((s, p) => {
+                return s + (String(p.direction || '').toUpperCase() === 'SELL' ? Math.abs(toNum(p.size, 0)) : 0);
+            }, 0);
+            const netSizeSigned = buySize - sellSize;
+            const isHedged = Math.abs(netSizeSigned) <= eps;
+            const netDirection = isHedged ? 'HDG' : (netSizeSigned > 0 ? 'BUY' : 'SELL');
+            const netSizeAbs = Math.abs(netSizeSigned);
             const totalPnl = g.children.reduce((s, p) => s + toNum(p.unrealized_pnl || 0), 0);
-            const avgEntry = totalSize > 0
-                ? g.children.reduce((s, p) => s + toNum(p.entry_price) * toNum(p.size), 0) / totalSize
-                : 0;
-            const avgCurrent = totalSize > 0
-                ? g.children.reduce((s, p) => s + toNum(p.current_price || p.entry_price) * toNum(p.size), 0) / totalSize
-                : 0;
-            const slChildren = g.children.filter(p => p.avg_sl != null && p.avg_sl !== 0);
-            const tpChildren = g.children.filter(p => p.avg_tp != null && p.avg_tp !== 0);
-            const slSize = slChildren.reduce((s, p) => s + toNum(p.size), 0);
-            const tpSize = tpChildren.reduce((s, p) => s + toNum(p.size), 0);
+            const signedEntryNotional = g.children.reduce((s, p) => s + (toNum(p.entry_price) * signedSize(p)), 0);
+            const signedCurrentNotional = g.children.reduce((s, p) => s + (toNum(p.current_price || p.entry_price) * signedSize(p)), 0);
+            const avgEntry = !isHedged
+                ? signedEntryNotional / netSizeSigned
+                : null;
+            const avgCurrent = !isHedged
+                ? signedCurrentNotional / netSizeSigned
+                : null;
+            const directionalChildren = isHedged
+                ? []
+                : g.children.filter((p) => String(p.direction || '').toUpperCase() === netDirection);
+            const slChildren = directionalChildren.filter((p) => p.avg_sl != null && p.avg_sl !== 0);
+            const tpChildren = directionalChildren.filter((p) => p.avg_tp != null && p.avg_tp !== 0);
+            const slSize = slChildren.reduce((s, p) => s + Math.abs(toNum(p.size, 0)), 0);
+            const tpSize = tpChildren.reduce((s, p) => s + Math.abs(toNum(p.size, 0)), 0);
             const avgSl = slChildren.length > 0 && slSize > 0
-                ? slChildren.reduce((s, p) => s + toNum(p.avg_sl) * toNum(p.size), 0) / slSize
+                ? slChildren.reduce((s, p) => s + (toNum(p.avg_sl) * Math.abs(toNum(p.size, 0))), 0) / slSize
                 : null;
             const avgTp = tpChildren.length > 0 && tpSize > 0
-                ? tpChildren.reduce((s, p) => s + toNum(p.avg_tp) * toNum(p.size), 0) / tpSize
+                ? tpChildren.reduce((s, p) => s + (toNum(p.avg_tp) * Math.abs(toNum(p.size, 0))), 0) / tpSize
                 : null;
             const totalMargin = g.children.reduce((s, p) => s + toNum(p.margin || 0), 0);
             const earliestOpen = Math.min(...g.children.map(p => toNum(p.open_time_ms)).filter(t => t > 0));
@@ -1702,8 +1728,8 @@ function updatePositionsTable(positions) {
                 account_id: accounts.length === 1 ? accounts[0] : '',
                 symbol: g.symbol,
                 _sortSymbol: g.normSymbol,
-                direction: g.children[0]?.direction || '-',
-                size: totalSize,
+                direction: netDirection,
+                size: netSizeAbs,
                 entry_price: avgEntry,
                 current_price: avgCurrent,
                 unrealized_pnl: totalPnl,
@@ -1719,9 +1745,13 @@ function updatePositionsTable(positions) {
                 open_time_ms: earliestOpen === Infinity ? 0 : earliestOpen,
             };
             const slMoneyParts = g.children.map(c => c.sl_amount).filter(v => v !== null && v !== undefined);
-            combinedRow.sl_amount = slMoneyParts.length > 0 ? slMoneyParts.reduce((a, b) => a + b, 0) : null;
+            combinedRow.sl_amount = isHedged
+                ? null
+                : (slMoneyParts.length > 0 ? slMoneyParts.reduce((a, b) => a + b, 0) : null);
             const tpMoneyParts = g.children.map(c => c.tp_amount).filter(v => v !== null && v !== undefined);
-            combinedRow.tp_amount = tpMoneyParts.length > 0 ? tpMoneyParts.reduce((a, b) => a + b, 0) : null;
+            combinedRow.tp_amount = isHedged
+                ? null
+                : (tpMoneyParts.length > 0 ? tpMoneyParts.reduce((a, b) => a + b, 0) : null);
             return combinedRow;
         });
     }
@@ -1773,7 +1803,7 @@ function updatePositionsTable(positions) {
             ${symbolCell}
             <td><span class="dir-badge ${side === 'BUY' ? 'dir-buy' : side === 'SELL' ? 'dir-sell' : ''}">${side}</span></td>
             <td>${formatSize(pos.size)}</td>
-            <td class="col-pos-prio-4">${formatPrice(pos.entry_price, entryDecimals)}</td>
+            <td class="col-pos-prio-4">${pos.entry_price !== null ? formatPrice(pos.entry_price, entryDecimals) : '-'}</td>
             <td class="col-pos-prio-5">${pos.avg_sl !== null && pos.avg_sl !== 0 ? formatPrice(pos.avg_sl, slDecimals) : '-'}</td>
             <td class="col-pos-prio-5 ${pnlClass(slMoney || 0)}">${slMoney === null ? '-' : formatMoney(slMoney)}</td>
             <td class="col-pos-prio-6">${pos.avg_tp !== null && pos.avg_tp !== 0 ? formatPrice(pos.avg_tp, tpDecimals) : '-'}</td>
