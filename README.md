@@ -73,7 +73,7 @@ Use this EA source:
 
 - connectors/smaGUY Trade Manger-myfxboard.mq5
 
-## Deploy EA to all MT5 terminals (Windows)
+## Deploy EA to all MT5 terminals  (Windows)
 
 From the project root, run:
 
