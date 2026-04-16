@@ -1808,13 +1808,15 @@ function updateKpis(summary, periods, tradeMetrics, filteredSummary) {
 
     if (balanceMetaEl) {
         if (!balanceMetaEl.querySelector('[data-anim-key]')) {
-            balanceMetaEl.innerHTML = 'Accounts <span data-anim-key="kpi-meta-accounts"></span> · Open <span data-anim-key="kpi-meta-open"></span>';
+            balanceMetaEl.innerHTML = 'Allocated <span data-anim-key="kpi-meta-allocated"></span> · <span data-anim-key="kpi-meta-alloc-pct"></span>';
         }
-        const accSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-accounts"]');
-        const openSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-open"]');
-        const fmtInt = v => String(Math.round(Number(v || 0)));
-        animateNumericByKey(accSpan, 'kpi-meta-accounts', toNum(summary.accounts_count), fmtInt, NON_LIVE_ANIM_MS);
-        animateNumericByKey(openSpan, 'kpi-meta-open', toNum(summary.open_positions), fmtInt, NON_LIVE_ANIM_MS);
+        const allocSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-allocated"]');
+        const pctSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-alloc-pct"]');
+        const marginUsed = toNum(summary.margin_used, 0);
+        const bal = toNum(summary.balance, 0);
+        const allocPct = bal !== 0 ? (marginUsed / bal) * 100 : 0;
+        animateNumericByKey(allocSpan, 'kpi-meta-allocated', marginUsed, formatMoney, NON_LIVE_ANIM_MS);
+        animateNumericByKey(pctSpan, 'kpi-meta-alloc-pct', allocPct, v => v.toFixed(1) + '%', NON_LIVE_ANIM_MS);
         balanceMetaEl.className = 'label metric-card__meta';
     }
 
@@ -3237,7 +3239,30 @@ function updateCharts(data) {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                animation: { duration: NON_LIVE_ANIM_MS, easing: 'easeOutCubic' },
+                animation: (function () {
+                    const totalMs = NON_LIVE_ANIM_MS;
+                    const n = Math.max(mainCurveValues.length, 1);
+                    const perPoint = totalMs / n;
+                    return {
+                        x: {
+                            type: 'number',
+                            easing: 'linear',
+                            duration: perPoint,
+                            from: NaN,
+                            delay: (ctx) => ctx.type === 'data' ? ctx.index * perPoint : 0,
+                        },
+                        y: {
+                            type: 'number',
+                            easing: 'easeOutCubic',
+                            duration: perPoint,
+                            from: (ctx) => {
+                                if (ctx.type !== 'data' || ctx.index === 0) return ctx.chart.scales.y.getPixelForValue(0);
+                                return ctx.chart.getDatasetMeta(ctx.datasetIndex).data[ctx.index - 1]?.getProps(['y'], true).y;
+                            },
+                            delay: (ctx) => ctx.type === 'data' ? ctx.index * perPoint : 0,
+                        },
+                    };
+                })(),
                 interaction: { mode: 'nearest', intersect: false, axis: 'x' },
                 layout: {
                     padding: { left: 10, right: 18, top: 8, bottom: 18 },
@@ -3296,6 +3321,23 @@ function updateCharts(data) {
             charts.pnlCurve.options.scales.x.ticks.font = chartFont;
             charts.pnlCurve.options.scales.y.ticks.color = text;
             charts.pnlCurve.options.scales.y.ticks.font = chartFont;
+            const updN = Math.max(mainCurveValues.length, 1);
+            const updPP = NON_LIVE_ANIM_MS / updN;
+            charts.pnlCurve.options.animation = {
+                x: {
+                    type: 'number', easing: 'linear', duration: updPP,
+                    from: NaN,
+                    delay: (ctx) => ctx.type === 'data' ? ctx.index * updPP : 0,
+                },
+                y: {
+                    type: 'number', easing: 'easeOutCubic', duration: updPP,
+                    from: (ctx) => {
+                        if (ctx.type !== 'data' || ctx.index === 0) return ctx.chart.scales.y.getPixelForValue(0);
+                        return ctx.chart.getDatasetMeta(ctx.datasetIndex).data[ctx.index - 1]?.getProps(['y'], true).y;
+                    },
+                    delay: (ctx) => ctx.type === 'data' ? ctx.index * updPP : 0,
+                },
+            };
             charts.pnlCurve.update();
         }
     }
@@ -4053,13 +4095,15 @@ function applyLivePnl(data) {
     const balanceMetaEl = document.getElementById('balanceMeta');
     if (balanceMetaEl && state.lastData?.summary) {
         if (!balanceMetaEl.querySelector('[data-anim-key]')) {
-            balanceMetaEl.innerHTML = 'Accounts <span data-anim-key="kpi-meta-accounts"></span> · Open <span data-anim-key="kpi-meta-open"></span>';
+            balanceMetaEl.innerHTML = 'Allocated <span data-anim-key="kpi-meta-allocated"></span> · <span data-anim-key="kpi-meta-alloc-pct"></span>';
         }
-        const accSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-accounts"]');
-        const openSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-open"]');
-        const fmtInt = v => String(Math.round(Number(v || 0)));
-        animateNumericByKey(accSpan, 'kpi-meta-accounts', toNum(state.lastData.summary.accounts_count), fmtInt);
-        animateNumericByKey(openSpan, 'kpi-meta-open', toNum(state.lastData.summary.open_positions), fmtInt);
+        const allocSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-allocated"]');
+        const pctSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-alloc-pct"]');
+        const marginUsed = toNum(state.lastData.summary.margin_used, 0);
+        const bal = toNum(state.lastData.summary.balance, 0);
+        const allocPct = bal !== 0 ? (marginUsed / bal) * 100 : 0;
+        animateNumericByKey(allocSpan, 'kpi-meta-allocated', marginUsed, formatMoney);
+        animateNumericByKey(pctSpan, 'kpi-meta-alloc-pct', allocPct, v => v.toFixed(1) + '%');
         balanceMetaEl.className = 'label metric-card__meta';
     }
 
