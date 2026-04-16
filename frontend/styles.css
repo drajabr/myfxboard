@@ -213,7 +213,6 @@ body[data-layout='dense'] {
     gap: 0.65rem;
     flex-wrap: nowrap;
     flex: 0 0 auto;
-    min-width: 0;
 }
 
 .header-left h1 {
@@ -269,7 +268,7 @@ body[data-layout='dense'] {
     flex-wrap: nowrap;
     justify-content: flex-end;
     margin-left: auto;
-    flex: 0 1 auto;
+    flex: 1 1 0;
     min-width: 0;
 }
 
@@ -277,7 +276,7 @@ body[data-layout='dense'] {
     display: flex;
     align-items: center;
     gap: 0.45rem;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-start;
     flex: 0 0 auto;
 }
@@ -291,8 +290,6 @@ body[data-layout='dense'] {
     position: relative;
     min-width: 0;
     flex: 0 1 auto;
-    flex-shrink: 1;
-    max-width: min(52vw, 420px);
 }
 
 .header--controls-collapsed .account-selector,
@@ -305,7 +302,6 @@ body[data-layout='dense'] {
 }
 
 .account-selector-btn {
-    width: max-content;
     max-width: 100%;
     min-width: 36px;
     height: 36px;
@@ -316,9 +312,10 @@ body[data-layout='dense'] {
     color: var(--text);
     display: inline-flex;
     align-items: center;
-    justify-content: space-between;
     gap: 0.5rem;
     cursor: pointer;
+    overflow: hidden;
+    box-sizing: border-box;
 }
 
 .account-selector-btn__label {
@@ -1946,23 +1943,8 @@ body[data-layout='dense'] .pos-combine-child {
         gap: 0.35rem;
     }
 
-    .header-left {
-        flex: 1 1 auto;
-        min-width: 0;
-    }
-
     .header-right {
-        flex: 0 1 auto;
-        min-width: 0;
         gap: 0.35rem;
-    }
-
-    .header-status {
-        min-width: 0;
-    }
-
-    .status-pill--system {
-        max-width: 100%;
     }
 
     .account-selector-btn {
@@ -2020,13 +2002,13 @@ body[data-layout='dense'] .pos-combine-child {
 }
 
 .header--compact .account-picker {
-    max-width: min(46vw, 340px);
+    max-width: none;
     flex-basis: auto;
 }
 
 .header--compact.header--controls-collapsed .account-picker {
-    max-width: min(44vw, 360px);
-    flex-basis: 220px;
+    max-width: none;
+    flex-basis: auto;
 }
 
 .header--ultra-compact .brand-title {
@@ -2034,13 +2016,13 @@ body[data-layout='dense'] .pos-combine-child {
 }
 
 .header--ultra-compact .account-picker {
-    max-width: min(40vw, 300px);
+    max-width: none;
     flex-basis: auto;
 }
 
 .header--ultra-compact.header--controls-collapsed .account-picker {
-    max-width: min(52vw, 320px);
-    flex-basis: 180px;
+    max-width: none;
+    flex-basis: auto;
 }
 
 .header--allow-wrap {

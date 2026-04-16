@@ -1768,12 +1768,6 @@ function syncAccountSelector(accounts) {
         selectorLabel.textContent = activeOption ? activeOption.textContent : `All Accounts (${accounts.length})`;
     }
 
-    // Size the selector button to the longest label to prevent width changes on switch.
-    const selectorBtn = document.getElementById('accountSelectorBtn');
-    if (selectorBtn) {
-        selectorBtn.style.width = '';
-    }
-
     scheduleContentAdaptiveLayout();
 }
 
