@@ -1170,9 +1170,6 @@ function setupEventListeners() {
     }
     document.getElementById('uiControlsToggleBtn').addEventListener('click', toggleQuickControls);
 
-    const controlsWrap = document.querySelector('.ui-controls-wrap');
-    const quickControls = document.getElementById('uiQuickControls');
-
     const refreshNowBtn = document.getElementById('refreshNowBtn');
     if (refreshNowBtn) {
         refreshNowBtn.addEventListener('click', () => {
