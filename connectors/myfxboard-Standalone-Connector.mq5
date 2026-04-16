@@ -323,12 +323,19 @@ private:
                   entries[entry_count].first_entry_time_ms = deal_time_ms;
                   entries[entry_count].active = true;
                   entry_count++;
+               } else {
+                  if(s_debug_log)
+                     PrintFormat("[DashboardConnector] WARNING: entry table full (%d), cannot track position %lld", 2000, position_id);
                }
             }
 
             if(deal_entry == DEAL_ENTRY_OUT || deal_entry == DEAL_ENTRY_OUT_BY) {
                long entry_time = deal_time_ms;
                double entry_price = deal_price;
+
+               if(pos_idx < 0 && s_debug_log)
+                  PrintFormat("[DashboardConnector] WARNING: no entry found for exit deal %llu (pos %lld %s) — using exit as entry fallback",
+                              deal_ticket, position_id, deal_symbol);
 
                if(pos_idx >= 0) {
                   entry_time = entries[pos_idx].first_entry_time_ms;

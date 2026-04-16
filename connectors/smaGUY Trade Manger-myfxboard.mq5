@@ -220,11 +220,17 @@ string DC_BuildClosedTradesJson(long &latest_closed_time_ms, string &latest_clos
             entries[entry_count].first_entry_time_ms = deal_time_ms;
             entries[entry_count].active              = true;
             entry_count++;
+         } else {
+            if(g_dc.debug_log)
+               PrintFormat("[DC] WARNING: entry table full (%d), cannot track position %lld", 2000, position_id);
          }
       }
       if(deal_entry == DEAL_ENTRY_OUT || deal_entry == DEAL_ENTRY_OUT_BY) {
          long   entry_time  = deal_time_ms;
          double entry_price = deal_price;
+         if(pos_idx < 0 && g_dc.debug_log)
+            PrintFormat("[DC] WARNING: no entry found for exit deal %llu (pos %lld %s) — using exit as entry fallback",
+                        deal_ticket, position_id, deal_symbol);
          if(pos_idx >= 0) {
             entry_time  = entries[pos_idx].first_entry_time_ms;
             entry_price = entries[pos_idx].avg_entry_price;
@@ -325,6 +331,10 @@ bool DC_PostHealthCheck(string account_number, long timestamp_ms, string history
 }
 
 void DC_Init(string url, string psk, int interval_sec, bool debug, datetime history_start_date) {
+   if(psk == "") {
+      Print("[DC] ERROR: Dashboard PSK is empty — sync will be disabled");
+      Alert("myfxboard: Shared Secret (PSK) is empty. Dashboard sync disabled.");
+   }
    g_dc.url                       = SanitizeUrl(url);
    g_dc.psk                       = psk;
    g_dc.sync_interval_ms          = interval_sec * 1000;
