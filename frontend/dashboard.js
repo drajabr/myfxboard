@@ -199,6 +199,8 @@ const scrollAnimObserver = new IntersectionObserver((entries) => {
 function isElementVisible(el) {
     if (visibleElements.has(el)) return true;
     const rect = el.getBoundingClientRect();
+    // Element not yet laid out (freshly inserted) – treat as visible
+    if (rect.width === 0 && rect.height === 0) return true;
     return rect.bottom > 0 && rect.top < window.innerHeight;
 }
 
@@ -2839,6 +2841,7 @@ function buildBarChartOptions(text, labelCount = 0) {
     return {
         responsive: true,
         maintainAspectRatio: false,
+        animation: { duration: NON_LIVE_ANIM_MS, easing: 'easeOutCubic' },
         interaction: { mode: 'nearest', intersect: false, axis: 'x' },
         layout: {
             padding: { left: 10, right: 18, top: 8, bottom: 18 },
@@ -3252,6 +3255,7 @@ function updateCharts(data) {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: { duration: NON_LIVE_ANIM_MS, easing: 'easeOutCubic' },
                 interaction: { mode: 'nearest', intersect: false, axis: 'x' },
                 layout: {
                     padding: { left: 10, right: 18, top: 8, bottom: 18 },
@@ -3310,7 +3314,7 @@ function updateCharts(data) {
             charts.pnlCurve.options.scales.x.ticks.font = chartFont;
             charts.pnlCurve.options.scales.y.ticks.color = text;
             charts.pnlCurve.options.scales.y.ticks.font = chartFont;
-            charts.pnlCurve.update('none');
+            charts.pnlCurve.update();
         }
     }
 
@@ -3380,7 +3384,7 @@ function updateCharts(data) {
                     },
                 },
             };
-            charts.dailyPnl.update('none');
+            charts.dailyPnl.update();
         }
     }
 
@@ -3435,7 +3439,7 @@ function updateCharts(data) {
             charts.dailyWr.options.scales.y.ticks.color = text;
             charts.dailyWr.options.scales.y.ticks.font = chartFont;
             charts.dailyWr.options.scales.x.ticks.maxTicksLimit = maxTicksForCount(dailyWrLabels.length);
-            charts.dailyWr.update('none');
+            charts.dailyWr.update();
         }
     }
 
@@ -3464,7 +3468,7 @@ function updateCharts(data) {
             charts.pnlByDayOfWeek.options.scales.x.ticks.font = chartFont;
             charts.pnlByDayOfWeek.options.scales.y.ticks.color = text;
             charts.pnlByDayOfWeek.options.scales.y.ticks.font = chartFont;
-            charts.pnlByDayOfWeek.update('none');
+            charts.pnlByDayOfWeek.update();
         }
     }
 
@@ -3503,7 +3507,7 @@ function updateCharts(data) {
             charts.wrByDayOfWeek.options.scales.x.ticks.font = chartFont;
             charts.wrByDayOfWeek.options.scales.y.ticks.color = text;
             charts.wrByDayOfWeek.options.scales.y.ticks.font = chartFont;
-            charts.wrByDayOfWeek.update('none');
+            charts.wrByDayOfWeek.update();
         }
     }
 
@@ -3532,7 +3536,7 @@ function updateCharts(data) {
             charts.pnlByHourOfDay.options.scales.x.ticks.font = chartFont;
             charts.pnlByHourOfDay.options.scales.y.ticks.color = text;
             charts.pnlByHourOfDay.options.scales.y.ticks.font = chartFont;
-            charts.pnlByHourOfDay.update('none');
+            charts.pnlByHourOfDay.update();
         }
     }
 
@@ -3571,7 +3575,7 @@ function updateCharts(data) {
             charts.wrByHourOfDay.options.scales.x.ticks.font = chartFont;
             charts.wrByHourOfDay.options.scales.y.ticks.color = text;
             charts.wrByHourOfDay.options.scales.y.ticks.font = chartFont;
-            charts.wrByHourOfDay.update('none');
+            charts.wrByHourOfDay.update();
         }
     }
 
@@ -3633,7 +3637,7 @@ function updateCharts(data) {
             charts.durationWinRate.options.scales.x.ticks.font = chartFont;
             charts.durationWinRate.options.scales.y.ticks.color = text;
             charts.durationWinRate.options.scales.y.ticks.font = chartFont;
-            charts.durationWinRate.update('none');
+            charts.durationWinRate.update();
         }
     }
 
@@ -3677,7 +3681,7 @@ function updateCharts(data) {
             charts.durationWr.options.scales.x.ticks.font = chartFont;
             charts.durationWr.options.scales.y.ticks.color = text;
             charts.durationWr.options.scales.y.ticks.font = chartFont;
-            charts.durationWr.update('none');
+            charts.durationWr.update();
         }
     }
 
@@ -3727,6 +3731,7 @@ function updateCharts(data) {
     const histogramOptions = {
         responsive: true,
         maintainAspectRatio: false,
+        animation: { duration: NON_LIVE_ANIM_MS, easing: 'easeOutCubic' },
         interaction: { mode: 'nearest', intersect: false, axis: 'x' },
         layout: {
             padding: { left: 10, right: 18, top: 8, bottom: 18 },
@@ -3787,7 +3792,7 @@ function updateCharts(data) {
             charts.pnlHistogram.options.scales.x.ticks.font = chartFont;
             charts.pnlHistogram.options.scales.y.ticks.color = text;
             charts.pnlHistogram.options.scales.y.ticks.font = chartFont;
-            charts.pnlHistogram.update('none');
+            charts.pnlHistogram.update();
         }
     }
 }
