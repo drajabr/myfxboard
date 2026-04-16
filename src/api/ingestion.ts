@@ -7,6 +7,7 @@ import { Trade } from '../types/index.js';
 import { updateAccountCache, updateAccountData } from '../services/positionCache.js';
 import { bufferSnapshot } from '../services/writeBuffer.js';
 import { emitHistoryUpdate } from '../services/historyEvents.js';
+import { allocateMissingPositionMargins } from '../services/positionMargins.js';
 
 const router = Router();
 const MIN_INGEST_INTERVAL_MS = 0;
@@ -146,6 +147,8 @@ router.post(
       const breakevenToleranceFloor = resolveBreakevenToleranceFloor();
       const breakevenToleranceMax = resolveBreakevenToleranceMax(breakevenToleranceFloor);
       const breakevenTolerance = await tradeQueries.getBreakevenTolerance(accountId, breakevenToleranceFloor, breakevenToleranceMax);
+      const safeMarginUsed = asFiniteNumber(accountData?.margin_used, 0);
+      const positionsWithMargin = allocateMissingPositionMargins(positions, safeMarginUsed);
       const dayStartMs = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
       const dayEndMs = new Date(new Date().setHours(23, 59, 59, 999)).getTime();
 
@@ -154,7 +157,7 @@ router.post(
       // Positions never touch the DB here — they live in memory until shutdown.
       updateAccountCache(
         accountId,
-        positions.map((p: any) => ({
+        positionsWithMargin.map((p: any) => ({
           account_id: accountId,
           symbol: p.symbol,
           size: p.volume,
@@ -174,7 +177,6 @@ router.post(
       // Store account-level data (equity, balance, margin) for live SSE
       const safeEquity = asFiniteNumber(accountData?.equity, 0);
       const safeBalance = asFiniteNumber(accountData?.balance, 0);
-      const safeMarginUsed = asFiniteNumber(accountData?.margin_used, 0);
       updateAccountData(accountId, {
         equity: safeEquity,
         balance: safeBalance,

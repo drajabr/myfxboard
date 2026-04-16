@@ -3,6 +3,7 @@ import { accountQueries, positionQueries, tradeQueries, snapshotQueries } from '
 import { DashboardSummary } from '../types/index.js';
 import { pnlEmitter, getAggregated, getAggregatedPositions, getPositions } from '../services/positionCache.js';
 import { historyEmitter } from '../services/historyEvents.js';
+import { allocateMissingPositionMargins } from '../services/positionMargins.js';
 
 const router = Router();
 const DEFAULT_BREAKEVEN_TOLERANCE_FLOOR = 1.0;
@@ -1176,7 +1177,11 @@ router.get('/:accountId/dashboard', async (req: Request, res: Response) => {
 
     const cachePositionsRaw = getPositions(accountId);
     const positionsRaw = cachePositionsRaw.length > 0 ? cachePositionsRaw : (dbPositionsFallback || []);
-    const positions = positionsRaw.map(normalizePosition);
+    const liveSnap = getAggregated([accountId]);
+    const positions = allocateMissingPositionMargins(
+      positionsRaw.map(normalizePosition),
+      liveSnap.marginUsed ?? 0
+    );
     const recentTrades = recentTradesRaw.map(normalizeTrade);
     const latestSnapshot = latestSnapshotRaw ? normalizeSnapshot(latestSnapshotRaw) : null;
     const curveSnapshots = (curveSnapshotsRaw || []).map(normalizeSnapshot)
@@ -1187,7 +1192,6 @@ router.get('/:accountId/dashboard', async (req: Request, res: Response) => {
       .reduce((sum, t) => sum + (t.profit || 0), 0);
 
     const floatingPnL = positions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
-    const liveSnap = getAggregated([accountId]);
     const equity = liveSnap.equity !== undefined && liveSnap.equity > 0
       ? liveSnap.equity
       : (latestSnapshot?.equity || latestSnapshot?.balance || 0);
@@ -1264,7 +1268,11 @@ router.get('/:accountId/positions', async (req: Request, res: Response) => {
     const { accountId } = req.params;
     const cachedPositions = getPositions(accountId);
     if (cachedPositions.length > 0) {
-      return res.json(cachedPositions.map(normalizePosition));
+      const liveSnap = getAggregated([accountId]);
+      return res.json(allocateMissingPositionMargins(
+        cachedPositions.map(normalizePosition),
+        liveSnap.marginUsed ?? 0
+      ));
     }
 
     const positions = await positionQueries.findByAccount(accountId);
