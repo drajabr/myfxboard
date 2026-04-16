@@ -97,22 +97,20 @@ export const accountQueries = {
     account_id: string,
     last_ingest_received_at: number,
     last_history_hash?: string,
-    accountMetrics?: { equity?: number | null; balance?: number | null },
+    accountMetrics?: { balance?: number | null },
     client?: pg.PoolClient
   ) {
     const q = getQueryFn(client);
-    const equity = accountMetrics?.equity ?? null;
     const balance = accountMetrics?.balance ?? null;
     const result = await q(
       `UPDATE accounts
          SET last_sync_at = $2,
              last_ingest_received_at = $2,
              last_history_hash = COALESCE($3, last_history_hash),
-             equity = COALESCE($4, equity),
-             balance = COALESCE($5, balance)
+             balance = COALESCE($4, balance)
        WHERE account_id = $1
        RETURNING *`,
-      [account_id, last_ingest_received_at, last_history_hash ?? null, equity, balance]
+      [account_id, last_ingest_received_at, last_history_hash ?? null, balance]
     );
     return result.rows[0] || null;
   },

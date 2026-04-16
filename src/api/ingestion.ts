@@ -239,7 +239,6 @@ router.post(
           nowMs,
           shouldIncludeHistory && clientHistoryHash.length > 0 ? clientHistoryHash : undefined,
           {
-            equity: safeEquity,
             balance: safeBalance,
           },
           client
