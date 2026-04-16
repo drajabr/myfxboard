@@ -174,7 +174,9 @@ const chartSignatures = {};
 const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
 let deferredInstallPrompt = null;
 const numericTweenRaf = new WeakMap();
+const numericTweenState = new Map();
 let adaptiveLayoutRaf = 0;
+const NON_LIVE_ANIM_MS = 1000;
 
 
 function formatMoney(value) {
@@ -261,6 +263,39 @@ function animateNumericText(el, nextValue, formatter, durationMs = 333) {
 
     const raf = requestAnimationFrame(tick);
     numericTweenRaf.set(el, raf);
+}
+
+function animateNumericByKey(el, key, nextValue, formatter, durationMs = NON_LIVE_ANIM_MS) {
+    if (!el || !key) {
+        return;
+    }
+    const numericValue = toNum(nextValue, 0);
+    const fromValue = numericTweenState.has(key)
+        ? toNum(numericTweenState.get(key), numericValue)
+        : toNum(el.dataset.animValue, numericValue);
+    el.dataset.animValue = String(fromValue);
+    animateNumericText(el, numericValue, formatter, durationMs);
+    numericTweenState.set(key, numericValue);
+}
+
+function animateDeclaredNumericFields(root, durationMs = NON_LIVE_ANIM_MS) {
+    if (!root) {
+        return;
+    }
+    root.querySelectorAll('[data-anim-key][data-anim-value]').forEach((el) => {
+        const key = el.getAttribute('data-anim-key') || '';
+        const format = el.getAttribute('data-anim-format') || 'money';
+        const raw = toNum(el.getAttribute('data-anim-value'), 0);
+        let formatter = formatMoney;
+        if (format === 'pct') {
+            formatter = formatPct;
+        } else if (format === 'fixed2') {
+            formatter = (value) => Number(value || 0).toFixed(2);
+        } else if (format === 'int') {
+            formatter = (value) => String(Math.round(Number(value || 0)));
+        }
+        animateNumericByKey(el, key, raw, formatter, durationMs);
+    });
 }
 
 function estimatePositionTargetPnl(position, targetPrice) {
@@ -535,6 +570,41 @@ function buildAccountDisplay(accountId, primaryName, secondaryName) {
         idText: idText || '-',
         labelText: unique[0] || '',
     };
+}
+
+function findAccountById(accountId) {
+    const idText = String(accountId || '').trim();
+    if (!idText || !Array.isArray(state.accounts)) {
+        return null;
+    }
+    return state.accounts.find((acc) => String(acc?.account_id || '').trim() === idText) || null;
+}
+
+function preferredAccountLabel(accountId, accountName) {
+    const idText = String(accountId || '').trim();
+    const directName = String(accountName || '').trim();
+    if (directName) {
+        return directName;
+    }
+    const account = findAccountById(idText);
+    const fallbackName = String(account?.nickname || account?.account_name || '').trim();
+    return fallbackName || idText || '-';
+}
+
+function positionAccountLabel(position) {
+    const groupedCount = toNum(position?._accountCount, 0);
+    if (groupedCount > 1) {
+        return `${groupedCount} accts`;
+    }
+    return preferredAccountLabel(position?.account_id, position?.account_name || position?.nickname);
+}
+
+function tradeAccountLabel(trade) {
+    const groupedCount = toNum(trade?._accountCount, 0);
+    if (groupedCount > 1) {
+        return `${groupedCount} accts`;
+    }
+    return preferredAccountLabel(trade?.account_id, trade?.account_name || trade?.nickname);
 }
 
 function pnlClass(value) {
@@ -1511,22 +1581,49 @@ function syncAccountSelector(accounts) {
         selectorLabel.textContent = activeOption ? activeOption.textContent : `All Accounts (${accounts.length})`;
     }
 
-    // Set picker max-width to match the widest account option so the button never
-    // grows wider than its content but fills all available space up to that cap.
+    // Cap selector width to the longest rendered label while still allowing flex-fill
+    // up to that cap when horizontal room exists.
     const picker = document.getElementById('accountPicker');
-    if (picker && menuItems.length > 0) {
-        const ruler = document.createElement('div');
-        // Mirror the button's inner padding + chevron clearance (~30px)
-        ruler.style.cssText = 'position:fixed;visibility:hidden;white-space:nowrap;font:inherit;padding:0 2.1rem;pointer-events:none;top:-9999px;left:-9999px;';
+    const selectorWrap = document.querySelector('.account-selector');
+    const selectorBtn = document.getElementById('accountSelectorBtn');
+    const selectorChevron = selectorBtn ? selectorBtn.querySelector('.account-selector-btn__chevron') : null;
+    if (picker && selectorBtn && menuItems.length > 0) {
+        const ruler = document.createElement('span');
+        ruler.className = 'account-selector-btn__label';
+        ruler.style.position = 'fixed';
+        ruler.style.left = '-9999px';
+        ruler.style.top = '-9999px';
+        ruler.style.visibility = 'hidden';
+        ruler.style.maxWidth = 'none';
+        ruler.style.overflow = 'visible';
+        ruler.style.textOverflow = 'clip';
         document.body.appendChild(ruler);
-        let maxW = 0;
+        let maxTextWidth = 0;
         for (const item of menuItems) {
             ruler.textContent = item.label;
-            if (ruler.offsetWidth > maxW) maxW = ruler.offsetWidth;
+            maxTextWidth = Math.max(maxTextWidth, ruler.getBoundingClientRect().width);
         }
         document.body.removeChild(ruler);
+
+        const btnStyles = getComputedStyle(selectorBtn);
+        const paddingX = toNum(parseFloat(btnStyles.paddingLeft), 0) + toNum(parseFloat(btnStyles.paddingRight), 0);
+        const borderX = toNum(parseFloat(btnStyles.borderLeftWidth), 0) + toNum(parseFloat(btnStyles.borderRightWidth), 0);
+        const gap = toNum(parseFloat(btnStyles.gap), 0);
+        const chevronWidth = selectorChevron ? selectorChevron.getBoundingClientRect().width : 10;
+        const maxW = Math.ceil(maxTextWidth + paddingX + borderX + gap + chevronWidth + 2);
+
         if (maxW > 0) {
             picker.style.maxWidth = `${maxW}px`;
+            if (selectorWrap) {
+                selectorWrap.style.maxWidth = `${maxW}px`;
+            }
+        }
+    } else {
+        if (picker) {
+            picker.style.maxWidth = '';
+        }
+        if (selectorWrap) {
+            selectorWrap.style.maxWidth = '';
         }
     }
 
@@ -1585,7 +1682,7 @@ function updateKpis(summary, periods, tradeMetrics, filteredSummary) {
     const equityPct = (rangePnl / equityBase) * 100;
 
     if (balanceEl) {
-        balanceEl.textContent = formatMoney(summary.balance);
+        animateNumericByKey(balanceEl, 'kpi-balance', toNum(summary.balance, 0), formatMoney, NON_LIVE_ANIM_MS);
         applyPnlClass(balanceEl, 0);
     }
 
@@ -1594,8 +1691,8 @@ function updateKpis(summary, periods, tradeMetrics, filteredSummary) {
         balanceMetaEl.className = 'label metric-card__meta';
     }
 
-    animateNumericText(equityEl, toNum(summary.equity, 0), formatMoney);
-    animateNumericText(floatingEl, toNum(summary.floating_pnl, 0), formatMoney);
+    animateNumericByKey(equityEl, 'kpi-equity', toNum(summary.equity, 0), formatMoney, NON_LIVE_ANIM_MS);
+    animateNumericByKey(floatingEl, 'kpi-floating', toNum(summary.floating_pnl, 0), formatMoney, NON_LIVE_ANIM_MS);
 
     if (floatingMetaEl) {
         floatingMetaEl.textContent = formatDeltaPct(floatingPct);
@@ -1630,12 +1727,14 @@ function renderPeriodStats(periods) {
         return `
             <div class="metric-card">
                 <div class="label">${title}</div>
-                <div class="value ${pnlClass(p.pnl)}">${formatMoney(p.pnl)}</div>
+                <div class="value ${pnlClass(p.pnl)}" data-anim-key="period-${key}-pnl" data-anim-value="${toNum(p.pnl, 0)}" data-anim-format="money">${formatMoney(p.pnl)}</div>
                 <div class="label period-meta period-meta--full">Trades ${p.trades_count} · Win ${formatPct(p.win_rate_pct)}</div>
                 <div class="label period-meta period-meta--short">T ${p.trades_count} · W ${formatPct(p.win_rate_pct)}</div>
             </div>
         `;
     }).join('');
+
+    animateDeclaredNumericFields(grid, NON_LIVE_ANIM_MS);
 }
 
 function renderTradeMetrics(metrics, periods) {
@@ -1655,27 +1754,43 @@ function renderTradeMetrics(metrics, periods) {
     }
 
     const cards = [
-        ['Win Rate', formatPct(metrics.win_rate_pct), 0, 'neutral'],
-        ['Profit Factor', Number(toNum(metrics.profit_factor)).toFixed(2), 0, 'neutral'],
-        ['Expectancy', formatMoney(metrics.expectancy), toNum(metrics.expectancy), 'pnl'],
-        ['Average RR', Number(toNum(metrics.avg_rr)).toFixed(2), 0, 'neutral'],
-        ['Average Win', formatMoney(metrics.avg_win), metrics.avg_win, 'pnl'],
-        ['Max Win', formatMoney(metrics.max_win), metrics.max_win, 'pnl'],
-        ['Average Loss', formatMoney(metrics.avg_loss), metrics.avg_loss, 'pnl'],
-        ['Max Loss', formatMoney(metrics.max_loss), metrics.max_loss, 'pnl'],
-        ['Max Drawdown', formatMoney(metrics.max_drawdown), -Math.abs(toNum(metrics.max_drawdown)), 'pnl'],
-        ['Avg Hold Time', durationLabel(metrics.avg_hold_seconds), 0, 'neutral'],
+        { label: 'Win Rate', value: toNum(metrics.win_rate_pct), format: 'pct', pnl: 0, mode: 'neutral', animKey: 'trade-metric-win-rate' },
+        { label: 'Profit Factor', value: toNum(metrics.profit_factor), format: 'fixed2', pnl: 0, mode: 'neutral', animKey: 'trade-metric-profit-factor' },
+        { label: 'Expectancy', value: toNum(metrics.expectancy), format: 'money', pnl: toNum(metrics.expectancy), mode: 'pnl', animKey: 'trade-metric-expectancy' },
+        { label: 'Average RR', value: toNum(metrics.avg_rr), format: 'fixed2', pnl: 0, mode: 'neutral', animKey: 'trade-metric-avg-rr' },
+        { label: 'Average Win', value: toNum(metrics.avg_win), format: 'money', pnl: toNum(metrics.avg_win), mode: 'pnl', animKey: 'trade-metric-avg-win' },
+        { label: 'Max Win', value: toNum(metrics.max_win), format: 'money', pnl: toNum(metrics.max_win), mode: 'pnl', animKey: 'trade-metric-max-win' },
+        { label: 'Average Loss', value: toNum(metrics.avg_loss), format: 'money', pnl: toNum(metrics.avg_loss), mode: 'pnl', animKey: 'trade-metric-avg-loss' },
+        { label: 'Max Loss', value: toNum(metrics.max_loss), format: 'money', pnl: toNum(metrics.max_loss), mode: 'pnl', animKey: 'trade-metric-max-loss' },
+        { label: 'Max Drawdown', value: toNum(metrics.max_drawdown), format: 'money', pnl: -Math.abs(toNum(metrics.max_drawdown)), mode: 'pnl', animKey: 'trade-metric-max-drawdown' },
+        { label: 'Avg Hold Time', value: durationLabel(metrics.avg_hold_seconds), format: 'text', pnl: 0, mode: 'neutral', animKey: '' },
     ];
 
     grid.classList.remove('metric-grid--dense-table');
 
-    grid.innerHTML = cards.map(([label, value, pnl, mode], idx) => `
+    grid.innerHTML = cards.map((card, idx) => {
+        const isAnim = card.format !== 'text' && card.animKey;
+        let renderedValue = String(card.value);
+        if (card.format === 'money') {
+            renderedValue = formatMoney(card.value);
+        } else if (card.format === 'pct') {
+            renderedValue = formatPct(card.value);
+        } else if (card.format === 'fixed2') {
+            renderedValue = Number(toNum(card.value)).toFixed(2);
+        }
+        const animAttrs = isAnim
+            ? ` data-anim-key="${card.animKey}" data-anim-value="${toNum(card.value, 0)}" data-anim-format="${card.format}"`
+            : '';
+        return `
         <div class="metric-card ${idx < 2 ? 'metric-card--lead' : ''}">
-            <div class="label">${label}</div>
-            <div class="value ${mode === 'pnl' ? pnlClass(pnl) : ''}">${value}</div>
-            ${label === 'Win Rate' ? wrTrendHtml : ''}
+            <div class="label">${card.label}</div>
+            <div class="value ${card.mode === 'pnl' ? pnlClass(card.pnl) : ''}"${animAttrs}>${renderedValue}</div>
+            ${card.label === 'Win Rate' ? wrTrendHtml : ''}
         </div>
-    `).join('');
+    `;
+    }).join('');
+
+    animateDeclaredNumericFields(grid, NON_LIVE_ANIM_MS);
 }
 
 function renderDenseOverview(data) {
@@ -1860,7 +1975,10 @@ function updatePositionsTable(positions) {
             if (g.children.length === 1) {
                 return { ...g.children[0], _combined: false };
             }
-            const children = g.children.slice().sort((a, b) => String(a.account_id || '-').localeCompare(String(b.account_id || '-')) || (toNum(b.unrealized_pnl) - toNum(a.unrealized_pnl)));
+            const children = g.children.slice().sort((a, b) => {
+                const acctCmp = positionAccountLabel(a).localeCompare(positionAccountLabel(b));
+                return acctCmp || (toNum(b.unrealized_pnl) - toNum(a.unrealized_pnl));
+            });
             const eps = 1e-9;
             const buySize = g.children.reduce((s, p) => {
                 return s + (String(p.direction || '').toUpperCase() === 'BUY' ? Math.abs(toNum(p.size, 0)) : 0);
@@ -1942,7 +2060,11 @@ function updatePositionsTable(positions) {
         const bVal = key === 'symbol' ? (b._sortSymbol || normalizeSymbol(b.symbol)) : b[key];
         let cmp = 0;
         if (key === 'symbol' || key === 'direction' || key === 'account_id') {
-            cmp = String(aVal || '').localeCompare(String(bVal || ''));
+            if (key === 'account_id') {
+                cmp = positionAccountLabel(a).localeCompare(positionAccountLabel(b));
+            } else {
+                cmp = String(aVal || '').localeCompare(String(bVal || ''));
+            }
         } else {
             cmp = toNum(aVal) - toNum(bVal);
         }
@@ -1957,7 +2079,7 @@ function updatePositionsTable(positions) {
         const slMoney = pos.sl_amount ?? estimatePositionTargetPnl(pos, pos.avg_sl);
         const tpMoney = pos.tp_amount ?? estimatePositionTargetPnl(pos, pos.avg_tp);
         const childClass = isChild ? ` class="pos-combine-child" data-group-symbol="${normalizeSymbol(pos.symbol)}"` : '';
-        const accountInner = `<span class="account-tag">${pos.account_id || (pos._accountCount ? `${pos._accountCount} accts` : '-')}</span>`;
+        const accountInner = `<span class="account-tag">${positionAccountLabel(pos)}</span>`;
         const symbolCell = pos._combined
             ? `<td class="pos-combine-toggle" data-group-symbol="${normalizeSymbol(pos.symbol)}" title="Click to expand">\u25B6 ${pos.symbol} (${pos._children.length})</td>`
             : `<td>${isChild ? pos.symbol : pos.symbol}</td>`;
@@ -2203,7 +2325,11 @@ function updateTradesTable(trades) {
         let cmp = 0;
 
         if (key === 'account_id' || key === 'symbol' || key === 'result' || key === 'direction') {
-            cmp = String(a[key] || '').localeCompare(String(b[key] || ''));
+            if (key === 'account_id') {
+                cmp = tradeAccountLabel(a).localeCompare(tradeAccountLabel(b));
+            } else {
+                cmp = String(a[key] || '').localeCompare(String(b[key] || ''));
+            }
         } else {
             cmp = toNum(a[key]) - toNum(b[key]);
         }
@@ -2219,7 +2345,7 @@ function updateTradesTable(trades) {
     const renderRow = (trade, isChild) => {
         const openTime = formatDateTimeMs(trade.entry_time_ms);
         const closeTime = formatDateTimeMs(trade.exit_time_ms);
-        const accountLabel = trade.account_id ? String(trade.account_id) : '-';
+        const accountLabel = tradeAccountLabel(trade);
         const duration = durationLabel(trade.duration_sec);
         const resultShort = formatTradeResultShort(trade.result);
         const childClass = isChild ? ` class="combine-child" data-group-symbol="${normalizeSymbol(trade.symbol)}"` : '';
@@ -2250,7 +2376,10 @@ function updateTradesTable(trades) {
     for (const trade of rows) {
         html += renderRow(trade, false);
         if (trade._combined && trade._children) {
-            const children = trade._children.slice().sort((a, b) => String(a.account_id || '-').localeCompare(String(b.account_id || '-')) || (toNum(b.exit_time_ms) - toNum(a.exit_time_ms)));
+            const children = trade._children.slice().sort((a, b) => {
+                const acctCmp = tradeAccountLabel(a).localeCompare(tradeAccountLabel(b));
+                return acctCmp || (toNum(b.exit_time_ms) - toNum(a.exit_time_ms));
+            });
             for (const child of children) {
                 html += renderRow({ ...child, direction: deriveDirection(child) }, true);
             }
@@ -2323,7 +2452,7 @@ function updateExposureTable(positions) {
     for (const [sym, posArr] of symbolGroups) {
         const symSize = posArr.reduce((s, p) => s + Math.abs(toNum(p.size)), 0);
         const symMargin = posArr.reduce((s, p) => s + toNum(p.margin, 0), 0);
-        const accounts = [...new Set(posArr.map((p) => String(p.account_id || '-')))];
+        const accounts = [...new Set(posArr.map((p) => preferredAccountLabel(p.account_id, p.account_name || p.nickname)))];
 
         // Symbol total row always present
         rows.push({
@@ -2342,14 +2471,20 @@ function updateExposureTable(positions) {
         if (!state.combineExposure) {
             const acctMap = new Map();
             posArr.forEach((p) => {
-                const acct = String(p.account_id || '-');
-                if (!acctMap.has(acct)) acctMap.set(acct, { size: 0, margin: 0 });
-                const entry = acctMap.get(acct);
+                const acctKey = String(p.account_id || '-');
+                if (!acctMap.has(acctKey)) {
+                    acctMap.set(acctKey, {
+                        size: 0,
+                        margin: 0,
+                        account: preferredAccountLabel(p.account_id, p.account_name || p.nickname),
+                    });
+                }
+                const entry = acctMap.get(acctKey);
                 entry.size += Math.abs(toNum(p.size));
                 entry.margin += toNum(p.margin, 0);
             });
             if (acctMap.size > 1) {
-                for (const [acct, data] of acctMap) {
+                for (const [, data] of acctMap) {
                     rows.push({
                         isSymbol: false,
                         _parentSymbol: sym,
@@ -2359,7 +2494,7 @@ function updateExposureTable(positions) {
                             pct: effectiveTotalMargin > 0 && data.margin > 0
                                 ? (data.margin / effectiveTotalMargin) * 100
                             : (data.size / safeTotal) * 100,
-                        account: acct,
+                        account: data.account,
                     });
                 }
             }
