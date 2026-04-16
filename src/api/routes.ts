@@ -93,12 +93,13 @@ const SYMBOL_ALIASES: Record<string, string> = {
   'POLKADOT': 'DOTUSD', 'DOT': 'DOTUSD',
 };
 const SYMBOL_PREFIX_RE = /^(?:#|!|\.|m\.|c\.|e\.|s\.|FX[_:]|CFD[_:]|IDX[_:])/i;
-const SYMBOL_SUFFIX_RE = /(?:\.cash|Cash|_SB|_sb|\.ecn|\.raw|\.stp|\.pro|\.prime|\.ndd|\.std|\.stnd|micro|_micro|_mini|\.fx|\.fs|-OTC|mini|cent|eco|pro|raw|\.[a-z]{1,2}|[+!#.\-_]m$|[+!#.\-_]$|_[mMiz]$)/;
+const SYMBOL_SUFFIX_RE = /(?:\.cash|Cash|_SB|_sb|\.ecn|\.raw|\.stp|\.pro|\.prime|\.ndd|\.std|\.stnd|micro|_micro|_mini|\.fx|\.fs|-OTC|mini|cent|eco|pro|raw|\.[a-z]{1,2}|[+!#.\-_]m$|[+!#.\-_]$|_[mMiz]$)/g;
 function normalizeSymbol(sym: string): string {
   if (!sym) return '';
-  let s = sym.trim();
+  // Guard against excessively long input to prevent ReDoS
+  let s = sym.length > 50 ? sym.slice(0, 50) : sym;
+  s = s.trim();
   s = s.replace(SYMBOL_PREFIX_RE, '');
-  s = s.replace(SYMBOL_SUFFIX_RE, '');
   s = s.replace(SYMBOL_SUFFIX_RE, '');
   s = s.replace(/[/._\-\s]/g, '').toUpperCase();
   return SYMBOL_ALIASES[s] || s;
@@ -530,7 +531,9 @@ router.get('/analytics', async (req: Request, res: Response) => {
       if (t > maxAccountBeTolerance) maxAccountBeTolerance = t;
     }));
 
-    for (const accountId of accountIds) {
+    // Fire all per-account queries in parallel across accounts instead of
+    // processing accounts sequentially, reducing total DB round-trip time.
+    const accountResults = await Promise.all(accountIds.map(async (accountId) => {
       const breakevenTolerance = toleranceMap.get(accountId)!;
       const [
         accPositionsRaw,
@@ -565,6 +568,21 @@ router.get('/analytics', async (req: Request, res: Response) => {
         tradeQueries.summarizeMetrics(accountId, breakevenTolerance),
         tradeQueries.summarizeAllPeriodStats(accountId, todayStartMs, last7dStartMs, last30dStartMs, ytdStartMs, filterEndMs, breakevenTolerance),
       ]);
+      return {
+        breakevenTolerance, accPositionsRaw, latestSnapshotRaw, recentTradesRaw, curveTradesRaw,
+        filteredSummary, filteredDirectionSummary, filteredDirectionOutcomeSummary,
+        filteredDailyRows, allTimeDailyRows, dayOfWeekRows, hourOfDayRows,
+        monthRows, yearRows, metricsRow, allPeriodStats,
+      };
+    }));
+
+    for (const result of accountResults) {
+      const {
+        breakevenTolerance, accPositionsRaw, latestSnapshotRaw, recentTradesRaw, curveTradesRaw,
+        filteredSummary, filteredDirectionSummary, filteredDirectionOutcomeSummary,
+        filteredDailyRows, allTimeDailyRows, dayOfWeekRows, hourOfDayRows,
+        monthRows, yearRows, metricsRow, allPeriodStats,
+      } = result;
 
       const { today: todayStats, last7d: last7dStats, last30d: last30dStats, ytd: ytdStats, all_time: allTimeStats } = allPeriodStats;
 
@@ -868,12 +886,14 @@ router.get('/analytics', async (req: Request, res: Response) => {
 
     const aggregatedBreakevenTolerance = maxAccountBeTolerance;
 
-    // Re-classify all recent trades using the centralized BE tolerance
+    // Compute tolerance-adjusted classification in a separate field so the
+    // original DB result is preserved and historical classifications don't
+    // change retroactively when the breakeven tolerance shifts.
     for (const t of recentTrades) {
       const profit = toNum(t.profit);
-      if (profit > aggregatedBreakevenTolerance) t.result = 'win';
-      else if (profit < -aggregatedBreakevenTolerance) t.result = 'loss';
-      else t.result = 'breakeven';
+      if (profit > aggregatedBreakevenTolerance) (t as any).computed_result = 'win';
+      else if (profit < -aggregatedBreakevenTolerance) (t as any).computed_result = 'loss';
+      else (t as any).computed_result = 'breakeven';
     }
 
     const winRateByTradeDuration = buildWinRateByTradeDuration(allFilteredTrades, aggregatedBreakevenTolerance);

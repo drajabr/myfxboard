@@ -125,6 +125,7 @@ const state = {
     autoRefreshInterval: null,
     livePnlSource: null,
     historySource: null,
+    sseGeneration: 0,
     liveStreamHealthy: false,
     historyStreamHealthy: false,
     monthShift: 0,
@@ -3867,16 +3868,19 @@ function startLivePnlPolling() {
     }
     state.livePnlBuffer = [];
     state.liveStreamHealthy = false;
+    const gen = ++state.sseGeneration;
     syncAdaptiveRefreshMode();
     const selectedAccount = document.getElementById('accountSelector')?.value || localStorage.getItem('selectedAccount') || '';
     const scope = selectedAccount || 'all';
     const url = `${API_URL}/account/live-pnl/stream?accountId=${encodeURIComponent(scope)}`;
     const es = new EventSource(url);
     es.onopen = () => {
+        if (gen !== state.sseGeneration) return;
         state.liveStreamHealthy = true;
         syncAdaptiveRefreshMode();
     };
     es.onmessage = (event) => {
+        if (gen !== state.sseGeneration) { es.close(); return; }
         try {
             const payload = JSON.parse(event.data);
             const now = Date.now();
@@ -3890,6 +3894,7 @@ function startLivePnlPolling() {
         } catch (_) {}
     };
     es.onerror = () => {
+        if (gen !== state.sseGeneration) { es.close(); return; }
         state.liveStreamHealthy = false;
         syncAdaptiveRefreshMode();
     };
@@ -3910,19 +3915,23 @@ function startHistoryPolling() {
         state.historySource = null;
     }
     state.historyStreamHealthy = false;
+    const gen = state.sseGeneration;
     syncAdaptiveRefreshMode();
     const selectedAccount = document.getElementById('accountSelector')?.value || localStorage.getItem('selectedAccount') || '';
     const scope = selectedAccount || 'all';
     const url = `${API_URL}/account/history/stream?accountId=${encodeURIComponent(scope)}`;
     const es = new EventSource(url);
     es.onopen = () => {
+        if (gen !== state.sseGeneration) return;
         state.historyStreamHealthy = true;
         syncAdaptiveRefreshMode();
     };
     es.onmessage = () => {
+        if (gen !== state.sseGeneration) { es.close(); return; }
         loadDashboard();
     };
     es.onerror = () => {
+        if (gen !== state.sseGeneration) { es.close(); return; }
         state.historyStreamHealthy = false;
         syncAdaptiveRefreshMode();
     };

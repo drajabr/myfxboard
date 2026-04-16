@@ -20,22 +20,29 @@ export type SnapshotInput = Omit<DailySnapshot, 'id'>;
 
 const FLUSH_INTERVAL_MS = Math.max(
   1000,
-  Number(process.env.WRITE_BUFFER_FLUSH_MS) || 5000
+  Number(process.env.WRITE_BUFFER_FLUSH_MS) || 2000
 );
 
 const pendingSnapshots = new Map<string, SnapshotInput>();
 
 let flushing = false;
 let timer: ReturnType<typeof setInterval> | null = null;
+let lastFlushMs = 0;
 
 export function bufferSnapshot(snapshot: SnapshotInput): void {
   pendingSnapshots.set(snapshot.account_id, snapshot);
+  // Trigger an eager flush if enough time has elapsed since the last one,
+  // reducing the data-loss window on unexpected crashes.
+  if (Date.now() - lastFlushMs >= FLUSH_INTERVAL_MS) {
+    flush().catch((err) => console.error('[WriteBuffer] eager flush error:', err));
+  }
 }
 
 export async function flush(): Promise<void> {
   if (flushing) return;
   if (pendingSnapshots.size === 0) return;
   flushing = true;
+  lastFlushMs = Date.now();
 
   const snapEntries = [...pendingSnapshots.entries()];
   pendingSnapshots.clear();

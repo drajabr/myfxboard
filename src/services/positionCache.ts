@@ -13,6 +13,7 @@
  *  - Cache is warmed from DB once on server start, then kept fresh by ingestion
  */
 import { EventEmitter } from 'events';
+import type { CachedPosition } from '../types/index.js';
 
 export interface PnlSnapshot {
   floatingPnl: number;
@@ -32,7 +33,7 @@ const cache = new Map<string, PnlSnapshot>();
 const accountDataCache = new Map<string, AccountSnapshot>();
 
 // Account-id → full position objects (for analytics endpoint)
-const positionsByAccount = new Map<string, any[]>();
+const positionsByAccount = new Map<string, CachedPosition[]>();
 
 /**
  * Emits 'update' with the accountId string whenever positions change.
@@ -46,8 +47,8 @@ pnlEmitter.setMaxListeners(500);
  * Stores full position objects AND updates the PnL summary.
  * Both are synchronous Map.set() calls — no I/O.
  */
-export function updateAccountCache(accountId: string, positions: any[]): void {
-  const floatingPnl = positions.reduce((sum: number, p: any) => sum + (Number(p.unrealized_pnl) || 0), 0);
+export function updateAccountCache(accountId: string, positions: CachedPosition[]): void {
+  const floatingPnl = positions.reduce((sum, p) => sum + (Number(p.unrealized_pnl) || 0), 0);
   cache.set(accountId, { floatingPnl, openPositions: positions.length });
   positionsByAccount.set(accountId, positions);
   pnlEmitter.emit('update', accountId);
@@ -65,7 +66,7 @@ export function updateAccountData(accountId: string, data: AccountSnapshot): voi
  * Falls back to [] if the account has never synced or server just started
  * (seed from DB fills this before the first request).
  */
-export function getPositions(accountId: string): any[] {
+export function getPositions(accountId: string): CachedPosition[] {
   return positionsByAccount.get(accountId) || [];
 }
 
@@ -74,8 +75,8 @@ export function getPositions(accountId: string): any[] {
  * Used by the SSE endpoint so the frontend can patch the open positions table
  * immediately on each ingestion event without a full analytics fetch.
  */
-export function getAggregatedPositions(accountIds: string[]): any[] {
-  const positions: any[] = [];
+export function getAggregatedPositions(accountIds: string[]): CachedPosition[] {
+  const positions: CachedPosition[] = [];
   for (const id of accountIds) {
     const accountPositions = positionsByAccount.get(id);
     if (accountPositions && accountPositions.length > 0) {
@@ -90,8 +91,8 @@ export function getAggregatedPositions(accountIds: string[]): any[] {
  * the analytics endpoint has data before the first connector sync arrives.
  * Does NOT fire the SSE emitter (no clients are connected yet).
  */
-export function seedAccountPositions(accountId: string, positions: any[]): void {
-  const floatingPnl = positions.reduce((sum: number, p: any) => sum + (Number(p.unrealized_pnl) || 0), 0);
+export function seedAccountPositions(accountId: string, positions: CachedPosition[]): void {
+  const floatingPnl = positions.reduce((sum, p) => sum + (Number(p.unrealized_pnl) || 0), 0);
   cache.set(accountId, { floatingPnl, openPositions: positions.length });
   positionsByAccount.set(accountId, positions);
 }

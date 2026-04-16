@@ -49,6 +49,22 @@ export interface Trade {
   close_method: string | null;
 }
 
+export interface CachedPosition {
+  account_id: string;
+  symbol: string;
+  size: number;
+  direction: 'BUY' | 'SELL';
+  entry_price: number;
+  current_price: number | null;
+  avg_sl: number | null;
+  avg_tp: number | null;
+  tick_size: number | null;
+  tick_value: number | null;
+  margin: number | null;
+  unrealized_pnl: number | null;
+  open_time_ms: number;
+}
+
 export interface AccountSettings {
   id: number;
   account_id: string;

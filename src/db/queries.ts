@@ -9,6 +9,7 @@ type QueryFn = (text: string, params?: any[]) => Promise<any>;
 // PERCENTILE_CONT over all trades is expensive. The result changes only when
 // new trades are inserted, so cache it per account and invalidate on insert.
 const beToleranceCache = new Map<string, { value: number; expiresAt: number }>();
+const beInFlightQueries = new Map<string, Promise<number>>();
 const BE_CACHE_TTL_MS = 10 * 60 * 1000; // 10-minute safety TTL
 
 export function invalidateBreakevenCache(account_id: string): void {
@@ -194,18 +195,33 @@ export const tradeQueries = {
       return cached.value;
     }
 
-    const result = await query(
-      `SELECT
-          COALESCE(PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY ABS(profit)) FILTER (WHERE profit < 0), 0)::float8 AS be_abs_loss_percentile
-         FROM trades
-        WHERE account_id = $1`,
-      [account_id]
-    );
-    const percentileTolerance = Number(result.rows[0]?.be_abs_loss_percentile || 0);
-    const boundedPercentile = Math.min(Number.isFinite(percentileTolerance) ? percentileTolerance : 0, safeMax);
-    const value = Math.max(safeFloor, boundedPercentile);
-    beToleranceCache.set(account_id, { value, expiresAt: Date.now() + BE_CACHE_TTL_MS });
-    return value;
+    // Deduplicate concurrent queries for the same account
+    const inFlight = beInFlightQueries.get(account_id);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const promise = (async () => {
+      const result = await query(
+        `SELECT
+            COALESCE(PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY ABS(profit)) FILTER (WHERE profit < 0), 0)::float8 AS be_abs_loss_percentile
+           FROM trades
+          WHERE account_id = $1`,
+        [account_id]
+      );
+      const percentileTolerance = Number(result.rows[0]?.be_abs_loss_percentile || 0);
+      const boundedPercentile = Math.min(Number.isFinite(percentileTolerance) ? percentileTolerance : 0, safeMax);
+      const value = Math.max(safeFloor, boundedPercentile);
+      beToleranceCache.set(account_id, { value, expiresAt: Date.now() + BE_CACHE_TTL_MS });
+      return value;
+    })();
+
+    beInFlightQueries.set(account_id, promise);
+    try {
+      return await promise;
+    } finally {
+      beInFlightQueries.delete(account_id);
+    }
   },
 
   async deleteByAccount(account_id: string) {
@@ -621,7 +637,7 @@ export const tradeQueries = {
   ): Promise<Array<{ day_of_week: number; pnl: number }>> {
     const result = await query(
       `SELECT
-          EXTRACT(DOW FROM TO_TIMESTAMP(COALESCE(exit_time_ms, entry_time_ms) / 1000.0))::int AS day_of_week,
+          EXTRACT(DOW FROM TO_TIMESTAMP(COALESCE(exit_time_ms, entry_time_ms) / 1000.0) AT TIME ZONE 'UTC')::int AS day_of_week,
           COALESCE(SUM(profit), 0)::float8 AS pnl
          FROM trades
         WHERE account_id = $1
@@ -640,7 +656,7 @@ export const tradeQueries = {
   ): Promise<Array<{ hour_of_day: number; pnl: number }>> {
     const result = await query(
       `SELECT
-          EXTRACT(HOUR FROM TO_TIMESTAMP(COALESCE(exit_time_ms, entry_time_ms) / 1000.0))::int AS hour_of_day,
+          EXTRACT(HOUR FROM TO_TIMESTAMP(COALESCE(exit_time_ms, entry_time_ms) / 1000.0) AT TIME ZONE 'UTC')::int AS hour_of_day,
           COALESCE(SUM(profit), 0)::float8 AS pnl
          FROM trades
         WHERE account_id = $1

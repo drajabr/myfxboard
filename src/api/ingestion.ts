@@ -4,13 +4,14 @@ import { validateIngestionAuth } from '../middleware/auth.js';
 import { accountQueries, tradeQueries, invalidateBreakevenCache } from '../db/queries.js';
 import { transaction } from '../db/connection.js';
 import { Trade } from '../types/index.js';
+import type { CachedPosition } from '../types/index.js';
 import { updateAccountCache, updateAccountData } from '../services/positionCache.js';
 import { bufferSnapshot } from '../services/writeBuffer.js';
 import { emitHistoryUpdate } from '../services/historyEvents.js';
 import { allocateMissingPositionMargins } from '../services/positionMargins.js';
 
 const router = Router();
-const MIN_INGEST_INTERVAL_MS = 0;
+const MIN_INGEST_INTERVAL_MS = Math.max(0, Number(process.env.MIN_INGEST_INTERVAL_MS) || 500);
 const HISTORY_CHUNK_SIZE = 200;
 const DEFAULT_BREAKEVEN_TOLERANCE_FLOOR = 1.0;
 const DEFAULT_BREAKEVEN_TOLERANCE_MAX = 5.0;
@@ -157,7 +158,7 @@ router.post(
       // Positions never touch the DB here — they live in memory until shutdown.
       updateAccountCache(
         accountId,
-        positionsWithMargin.map((p: any) => ({
+        positionsWithMargin.map((p: any): CachedPosition => ({
           account_id: accountId,
           symbol: p.symbol,
           size: p.volume,
@@ -195,6 +196,8 @@ router.post(
             snapshot_time_ms: nowMs,
             equity: safeEquity,
             balance: safeBalance,
+            // Floating PnL as % of current balance (not total return since inception).
+            // True return tracking would require a deposit/withdrawal ledger.
             return_pct: safeBalance > 0 ? ((safeEquity - safeBalance) / safeBalance) * 100 : 0,
             trades_count: daySummary.trades_count,
             wins: daySummary.wins,
@@ -281,13 +284,15 @@ router.post(
         history_sync_required: clientHistoryHash.length > 0 && effectiveServerHistoryHash !== clientHistoryHash,
       });
     } catch (error) {
-      if ((error as any)?.code === 'ACCOUNT_SECRET_MISMATCH') {
-        return res.status(403).json({ status: 'error', error: 'Account secret mismatch' });
-      }
       console.error(
         `[INGEST] endpoint_error account=${resolveAccountId(req)} sync_id=${req.body?.sync_id || '-'} ip=${resolveSourceIp(req)}`,
         error
       );
+      // Return a generic 403 for all account-related failures to prevent
+      // enumeration of valid account IDs via differing status codes.
+      if ((error as any)?.code === 'ACCOUNT_SECRET_MISMATCH') {
+        return res.status(403).json({ status: 'error', error: 'Authentication failed' });
+      }
       res.status(500).json({ status: 'error', error: 'Ingestion failed' });
     }
   }
@@ -340,13 +345,13 @@ router.post(
         trades_inserted: closed_trades.length,
       });
     } catch (error) {
-      if ((error as any)?.code === 'ACCOUNT_SECRET_MISMATCH') {
-        return res.status(403).json({ status: 'error', error: 'Account secret mismatch' });
-      }
       console.error(
         `[INGEST] backfill_error account=${resolveAccountId(req)} sync_id=${req.body?.sync_id || '-'} ip=${resolveSourceIp(req)}`,
         error
       );
+      if ((error as any)?.code === 'ACCOUNT_SECRET_MISMATCH') {
+        return res.status(403).json({ status: 'error', error: 'Authentication failed' });
+      }
       res.status(500).json({ status: 'error', error: 'Backfill failed' });
     }
   }
