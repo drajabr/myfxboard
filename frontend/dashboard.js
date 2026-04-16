@@ -4088,7 +4088,8 @@ function applyLivePnl(data) {
     const floatingMetaEl = document.getElementById('floatingPnlMeta');
     if (!floatingEl) return;
     const floatingPnl = toNum(data.floating_pnl, 0);
-    const balance = toNum(data.balance, toNum(state.lastData?.summary?.balance, 0));
+    // Keep balance anchored to analytics summary (DB-backed) to avoid connector-timing jumps.
+    const balance = toNum(state.lastData?.summary?.balance, toNum(data.balance, 0));
     const rawEquity = toNum(data.equity, NaN);
     const liveEquity = Number.isFinite(rawEquity)
         ? rawEquity
