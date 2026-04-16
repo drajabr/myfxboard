@@ -174,6 +174,7 @@ const chartSignatures = {};
 const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
 let deferredInstallPrompt = null;
 const numericTweenRaf = new WeakMap();
+let quickControlsHoverCloseTimer = null;
 
 
 function formatMoney(value) {
@@ -685,6 +686,21 @@ function hideQuickPicker() {
     state.activeQuickPicker = null;
 }
 
+function clearQuickControlsHoverTimer() {
+    if (quickControlsHoverCloseTimer) {
+        clearTimeout(quickControlsHoverCloseTimer);
+        quickControlsHoverCloseTimer = null;
+    }
+}
+
+function setQuickControlsPinned(open) {
+    const wrap = document.querySelector('.ui-controls-wrap');
+    if (!wrap) {
+        return;
+    }
+    wrap.classList.toggle('is-hovering', open);
+}
+
 function closeAccountMenu() {
     const menu = document.getElementById('accountSelectorMenu');
     const btn = document.getElementById('accountSelectorBtn');
@@ -996,6 +1012,31 @@ function setupEventListeners() {
     }
     document.getElementById('uiControlsToggleBtn').addEventListener('click', toggleQuickControls);
 
+    const controlsWrap = document.querySelector('.ui-controls-wrap');
+    const quickControls = document.getElementById('uiQuickControls');
+    if (controlsWrap && quickControls) {
+        controlsWrap.addEventListener('mouseenter', () => {
+            if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+                clearQuickControlsHoverTimer();
+                setQuickControlsPinned(true);
+                if (quickControls.classList.contains('is-collapsed')) {
+                    localStorage.setItem(QUICK_CONTROLS_COLLAPSED_KEY, '0');
+                    setQuickControlsCollapsed(false);
+                }
+            }
+        });
+
+        controlsWrap.addEventListener('mouseleave', () => {
+            if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+                return;
+            }
+            clearQuickControlsHoverTimer();
+            quickControlsHoverCloseTimer = setTimeout(() => {
+                setQuickControlsPinned(false);
+            }, 180);
+        });
+    }
+
     const refreshNowBtn = document.getElementById('refreshNowBtn');
     if (refreshNowBtn) {
         refreshNowBtn.addEventListener('click', () => {
@@ -1014,6 +1055,7 @@ function setupEventListeners() {
             return;
         }
         hideQuickPicker();
+        setQuickControlsPinned(false);
         if (!controls.classList.contains('is-collapsed')) {
             localStorage.setItem(QUICK_CONTROLS_COLLAPSED_KEY, '1');
             setQuickControlsCollapsed(true);
@@ -1032,6 +1074,7 @@ function setupEventListeners() {
             localStorage.setItem(QUICK_CONTROLS_COLLAPSED_KEY, '1');
             setQuickControlsCollapsed(true);
         }
+        setQuickControlsPinned(false);
         closeAccountMenu();
     });
 
@@ -1304,7 +1347,6 @@ function syncAccountSelector(accounts) {
                 const value = btn.getAttribute('data-account-value') || '';
                 selector.value = value;
                 selector.dispatchEvent(new Event('change', { bubbles: true }));
-                closeAccountMenu();
             });
         });
     }
@@ -2063,6 +2105,8 @@ function updateExposureTable(positions) {
     // Use account-level margin_used from live data for total margin
     const totalMarginUsed = toNum(state.lastData?.summary?.margin_used, 0);
     const totalSize = source.reduce((s, p) => s + Math.abs(toNum(p.size)), 0);
+    const totalPositionMargin = source.reduce((s, p) => s + toNum(p.margin, 0), 0);
+    const effectiveTotalMargin = totalMarginUsed > 0 ? totalMarginUsed : totalPositionMargin;
     const safeTotal = Math.max(totalSize, 1e-9);
     let rows = [];
 
@@ -2077,8 +2121,8 @@ function updateExposureTable(positions) {
             symbol: sym,
             size: symSize,
             margin: symMargin,
-            pct: totalMarginUsed > 0 && symMargin > 0
-                ? (symMargin / totalMarginUsed) * 100
+            pct: effectiveTotalMargin > 0 && symMargin > 0
+                ? (symMargin / effectiveTotalMargin) * 100
                 : (symSize / safeTotal) * 100,
             account: accounts.length === 1 ? accounts[0] : `${accounts.length} accts`,
             hasChildren: !state.combineExposure && accounts.length > 1,
@@ -2102,8 +2146,8 @@ function updateExposureTable(positions) {
                         symbol: '',
                         size: data.size,
                         margin: data.margin,
-                        pct: totalMarginUsed > 0 && data.margin > 0
-                            ? (data.margin / totalMarginUsed) * 100
+                            pct: effectiveTotalMargin > 0 && data.margin > 0
+                                ? (data.margin / effectiveTotalMargin) * 100
                             : (data.size / safeTotal) * 100,
                         account: acct,
                     });
