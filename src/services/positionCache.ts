@@ -126,3 +126,10 @@ export function getAggregated(accountIds: string[]): PnlSnapshot & Partial<Accou
     ...(hasAccountData ? { equity, balance, marginUsed } : {}),
   };
 }
+
+/**
+ * Returns all account IDs that currently have cached positions.
+ */
+export function getAllCachedAccountIds(): string[] {
+  return [...positionsByAccount.keys()];
+}

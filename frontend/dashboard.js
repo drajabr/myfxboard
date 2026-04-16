@@ -1505,7 +1505,7 @@ function getRecentTrades(data) {
     return [];
 }
 
-const POSITIONS_TABLE_PRIORITY_LEVELS = [7, 5, 6, 4, 3, 2];
+const POSITIONS_TABLE_PRIORITY_LEVELS = [8, 7, 5, 6, 4, 3, 2];
 const TRADES_TABLE_PRIORITY_LEVELS = [7, 6, 5, 4, 3, 2];
 const tableAutoFitRaf = {
     positions: 0,

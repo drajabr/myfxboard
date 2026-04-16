@@ -11,7 +11,7 @@ import { validateDashboardEditToken } from './middleware/auth.js';
 import { ensureDatabaseSchema } from './db/bootstrap.js';
 import { isDatabaseReady } from './db/connection.js';
 import { startWriteBuffer, flushAndStop } from './services/writeBuffer.js';
-import { seedAccountPositions } from './services/positionCache.js';
+import { seedAccountPositions, getAllCachedAccountIds, getPositions } from './services/positionCache.js';
 import { positionQueries } from './db/queries.js';
 
 config();
@@ -130,9 +130,25 @@ async function start() {
   });
 
   const shutdown = async (signal: string) => {
-    console.log(`[${signal}] shutting down — flushing write buffer...`);
+    console.log(`[${signal}] shutting down — flushing write buffer and positions...`);
     server.close();
     await flushAndStop().catch(console.error);
+
+    // Persist in-memory positions to DB so margin/tick data survives restarts
+    try {
+      const accountIds = getAllCachedAccountIds();
+      for (const accountId of accountIds) {
+        const positions = getPositions(accountId);
+        await positionQueries.deleteByAccount(accountId);
+        for (const pos of positions) {
+          await positionQueries.upsertPosition(pos);
+        }
+      }
+      console.log(`[${signal}] flushed positions for ${accountIds.length} account(s)`);
+    } catch (err) {
+      console.warn('[shutdown] position flush failed:', (err as Error).message);
+    }
+
     process.exit(0);
   };
   process.once('SIGTERM', () => shutdown('SIGTERM'));
