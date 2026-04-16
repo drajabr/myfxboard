@@ -1708,13 +1708,16 @@ function syncAccountSelector(accounts) {
     const selector = document.getElementById('accountSelector');
     const selectorMenu = document.getElementById('accountSelectorMenu');
     const selectorLabel = document.getElementById('accountSelectorLabel');
+    const selectorBtn = document.getElementById('accountSelectorBtn');
+    const selectorChevron = selectorBtn ? selectorBtn.querySelector('.account-selector-btn__chevron') : null;
     const selected = localStorage.getItem('selectedAccount') || '';
-    const compactLabels = shouldCompactAccountLabels();
     selector.innerHTML = `<option value="">All Accounts (${accounts.length})</option>`;
     const menuItems = [{
         value: '',
         label: `All Accounts (${accounts.length})`,
         title: `All Accounts (${accounts.length})`,
+        fullLabel: `All Accounts (${accounts.length})`,
+        compactLabel: `All Accounts (${accounts.length})`,
     }];
 
     const now = Date.now();
@@ -1730,13 +1733,14 @@ function syncAccountSelector(accounts) {
         const statusMark = isOnline ? '🟢' : '🟥';
         const fullLabelText = `${statusMark} ${accountDisplay.idText}${accountDisplay.labelText ? ` - ${accountDisplay.labelText}` : ''}`;
         const compactLabelText = accountNameOnlyText;
-        const labelText = compactLabels ? compactLabelText : fullLabelText;
-        option.textContent = labelText;
+        option.textContent = fullLabelText;
         selector.appendChild(option);
         menuItems.push({
             value: acc.account_id,
-            label: labelText,
+            label: fullLabelText,
             title: fullLabelText,
+            fullLabel: fullLabelText,
+            compactLabel: compactLabelText,
         });
     });
 
@@ -1763,9 +1767,40 @@ function syncAccountSelector(accounts) {
         });
     }
 
-    if (selectorLabel) {
-        const activeOption = selector.options[selector.selectedIndex];
-        selectorLabel.textContent = activeOption ? activeOption.textContent : `All Accounts (${accounts.length})`;
+    const activeItem = menuItems.find((item) => item.value === selector.value) || menuItems[0];
+    if (selectorLabel && activeItem) {
+        selectorLabel.textContent = activeItem.fullLabel;
+    }
+
+    if (selectorBtn && menuItems.length > 0) {
+        const ruler = document.createElement('span');
+        ruler.className = 'account-selector-btn__label';
+        ruler.style.cssText = 'position:fixed;left:-9999px;top:-9999px;visibility:hidden;max-width:none;overflow:visible;text-overflow:clip;white-space:nowrap;';
+        document.body.appendChild(ruler);
+        let maxTextWidth = 0;
+        for (const item of menuItems) {
+            ruler.textContent = item.fullLabel || item.label || '';
+            maxTextWidth = Math.max(maxTextWidth, ruler.getBoundingClientRect().width);
+        }
+        document.body.removeChild(ruler);
+
+        const btnStyles = getComputedStyle(selectorBtn);
+        const paddingX = toNum(parseFloat(btnStyles.paddingLeft), 0) + toNum(parseFloat(btnStyles.paddingRight), 0);
+        const borderX = toNum(parseFloat(btnStyles.borderLeftWidth), 0) + toNum(parseFloat(btnStyles.borderRightWidth), 0);
+        const gap = toNum(parseFloat(btnStyles.gap), 0);
+        const chevronWidth = selectorChevron ? selectorChevron.getBoundingClientRect().width : 10;
+        const btnWidth = Math.ceil(maxTextWidth + paddingX + borderX + gap + chevronWidth);
+        selectorBtn.style.width = btnWidth > 0 ? `${btnWidth}px` : '';
+
+        if (selectorLabel && activeItem) {
+            requestAnimationFrame(() => {
+                selectorLabel.textContent = activeItem.fullLabel;
+                const isOverflowing = selectorLabel.scrollWidth > (selectorLabel.clientWidth + 1);
+                if (isOverflowing && activeItem.compactLabel) {
+                    selectorLabel.textContent = activeItem.compactLabel;
+                }
+            });
+        }
     }
 
     scheduleContentAdaptiveLayout();
