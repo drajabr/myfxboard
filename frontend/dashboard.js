@@ -400,13 +400,13 @@ function cardTextFits(card) {
     return !hasInlineOverflow(card);
 }
 
-function chooseBestColumnCount(container, cards, maxCols, minCols, applyCols) {
+function chooseBestColumnCount(container, cards, colsToTry, applyCols) {
     if (!container || !cards.length) {
-        return minCols;
+        return colsToTry[colsToTry.length - 1];
     }
 
-    let chosen = minCols;
-    for (let cols = maxCols; cols >= minCols; cols -= 1) {
+    let chosen = colsToTry[colsToTry.length - 1];
+    for (const cols of colsToTry) {
         applyCols(cols);
         void container.offsetWidth;
         const overflowed = cards.some((card) => !cardTextFits(card));
@@ -436,10 +436,10 @@ function adaptSummarySpotlightByContent() {
         container.classList.add(`summary-spotlight--fit-${cols}`);
     };
 
-    chooseBestColumnCount(container, cards, 3, 1, applyCols);
+    chooseBestColumnCount(container, cards, [3, 2, 1], applyCols);
 }
 
-function adaptMetricGridByContent(containerId, maxCols, minCols) {
+function adaptMetricGridByContent(containerId, colsToTry) {
     const container = document.getElementById(containerId);
     if (!container) {
         return;
@@ -454,7 +454,7 @@ function adaptMetricGridByContent(containerId, maxCols, minCols) {
         container.style.setProperty('--fit-cols', String(cols));
     };
 
-    chooseBestColumnCount(container, cards, maxCols, minCols, applyCols);
+    chooseBestColumnCount(container, cards, colsToTry, applyCols);
 }
 
 function adaptYearGridByContent() {
@@ -473,7 +473,7 @@ function adaptYearGridByContent() {
     };
 
     // Keep at least 2 columns even in tight portrait.
-    chooseBestColumnCount(container, cards, 3, 2, applyCols);
+    chooseBestColumnCount(container, cards, [3, 2], applyCols);
 }
 
 function adaptHeaderByContent() {
@@ -497,8 +497,8 @@ function adaptHeaderByContent() {
 function applyContentAdaptiveLayout() {
     adaptHeaderByContent();
     adaptSummarySpotlightByContent();
-    adaptMetricGridByContent('periodStatsGrid', 5, 1);
-    adaptMetricGridByContent('tradeMetricsGrid', 2, 1);
+    adaptMetricGridByContent('periodStatsGrid', [5, 3]);
+    adaptMetricGridByContent('tradeMetricsGrid', [2, 1]);
     adaptYearGridByContent();
     syncHeaderHeightVar();
 }
@@ -902,6 +902,12 @@ function showQuickPicker(type, triggerEl, action = {}) {
 
     if (isOpenSamePicker && !forceRefresh) {
         hideQuickPicker();
+        setQuickControlsPinned(false);
+        const controls = document.getElementById('uiQuickControls');
+        if (controls && !controls.classList.contains('is-collapsed')) {
+            localStorage.setItem(QUICK_CONTROLS_COLLAPSED_KEY, '1');
+            setQuickControlsCollapsed(true);
+        }
         return;
     }
 
@@ -1002,10 +1008,21 @@ function showQuickPicker(type, triggerEl, action = {}) {
             }
             const isSameSelection = selectedKey === activeKey;
             applyControlSelection(selectedType, selectedKey);
+            if (isSameSelection) {
+                // User confirmed current selection — dismiss everything.
+                hideQuickPicker();
+                setQuickControlsPinned(false);
+                const controls = document.getElementById('uiQuickControls');
+                if (controls && !controls.classList.contains('is-collapsed')) {
+                    localStorage.setItem(QUICK_CONTROLS_COLLAPSED_KEY, '1');
+                    setQuickControlsCollapsed(true);
+                }
+                return;
+            }
             showQuickPicker(selectedType, triggerEl, {
                 source: 'option',
                 key: selectedKey,
-                forceRefresh: !isSameSelection,
+                forceRefresh: true,
             });
         });
     });
@@ -1488,6 +1505,25 @@ function syncAccountSelector(accounts) {
     if (selectorLabel) {
         const activeOption = selector.options[selector.selectedIndex];
         selectorLabel.textContent = activeOption ? activeOption.textContent : `All Accounts (${accounts.length})`;
+    }
+
+    // Set picker max-width to match the widest account option so the button never
+    // grows wider than its content but fills all available space up to that cap.
+    const picker = document.getElementById('accountPicker');
+    if (picker && menuItems.length > 0) {
+        const ruler = document.createElement('div');
+        // Mirror the button's inner padding + chevron clearance (~30px)
+        ruler.style.cssText = 'position:fixed;visibility:hidden;white-space:nowrap;font:inherit;padding:0 2.1rem;pointer-events:none;top:-9999px;left:-9999px;';
+        document.body.appendChild(ruler);
+        let maxW = 0;
+        for (const item of menuItems) {
+            ruler.textContent = item.label;
+            if (ruler.offsetWidth > maxW) maxW = ruler.offsetWidth;
+        }
+        document.body.removeChild(ruler);
+        if (maxW > 0) {
+            picker.style.maxWidth = `${maxW}px`;
+        }
     }
 
     scheduleContentAdaptiveLayout();

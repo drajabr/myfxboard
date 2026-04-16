@@ -282,22 +282,18 @@ body[data-layout='dense'] {
 
 .account-selector {
     min-width: 0;
-    max-width: 220px;
-    flex: 1 1 120px;
+    flex: 1 1 0;
 }
 
 .account-picker {
     position: relative;
     min-width: 0;
-    max-width: 220px;
-    flex: 1 1 120px;
+    flex: 1 1 0;
 }
 
 .header--controls-collapsed .account-selector,
 .header--controls-collapsed .account-picker {
-    flex: 1 1 240px;
-    max-width: min(42vw, 420px);
-    min-width: 132px;
+    flex: 1 1 0;
 }
 
 .account-selector--native {
@@ -1926,25 +1922,6 @@ body[data-layout='dense'] .pos-combine-child {
         max-width: 100%;
     }
 
-    .account-selector {
-        flex: 1 1 38vw;
-        max-width: min(48vw, 240px);
-        min-width: 112px;
-    }
-
-    .account-picker {
-        flex: 1 1 38vw;
-        max-width: min(48vw, 240px);
-        min-width: 112px;
-    }
-
-    .header--controls-collapsed .account-selector,
-    .header--controls-collapsed .account-picker {
-        flex: 1 1 54vw;
-        max-width: min(68vw, 320px);
-        min-width: 132px;
-    }
-
     .account-selector-btn {
         padding-inline: 0.42rem;
     }
@@ -1959,26 +1936,11 @@ body[data-layout='dense'] .pos-combine-child {
 }
 
 @media (orientation: portrait) and (max-width: 900px) {
-    .account-selector,
-    .account-picker {
-        flex: 1 1 34vw;
-        max-width: min(50vw, 260px);
-        min-width: 120px;
-    }
-
     .account-selector-menu {
         left: auto;
         right: 0;
         max-width: min(92vw, 420px);
     }
-
-    .header--controls-collapsed .account-selector,
-    .header--controls-collapsed .account-picker {
-        flex: 1 1 46vw;
-        max-width: min(66vw, 380px);
-        min-width: 130px;
-    }
-}
 
 @media (max-width: 760px) {
     .charts-row {
