@@ -1743,26 +1743,8 @@ function syncAccountSelector(accounts) {
 
     // Size the selector button to the longest label to prevent width changes on switch.
     const selectorBtn = document.getElementById('accountSelectorBtn');
-    const selectorChevron = selectorBtn ? selectorBtn.querySelector('.account-selector-btn__chevron') : null;
-    if (selectorBtn && menuItems.length > 0) {
-        const ruler = document.createElement('span');
-        ruler.className = 'account-selector-btn__label';
-        ruler.style.cssText = 'position:fixed;left:-9999px;top:-9999px;visibility:hidden;max-width:none;overflow:visible;text-overflow:clip;';
-        document.body.appendChild(ruler);
-        let maxTextWidth = 0;
-        for (const item of menuItems) {
-            ruler.textContent = item.label;
-            maxTextWidth = Math.max(maxTextWidth, ruler.getBoundingClientRect().width);
-        }
-        document.body.removeChild(ruler);
-
-        const btnStyles = getComputedStyle(selectorBtn);
-        const paddingX = toNum(parseFloat(btnStyles.paddingLeft), 0) + toNum(parseFloat(btnStyles.paddingRight), 0);
-        const borderX = toNum(parseFloat(btnStyles.borderLeftWidth), 0) + toNum(parseFloat(btnStyles.borderRightWidth), 0);
-        const gap = toNum(parseFloat(btnStyles.gap), 0);
-        const chevronWidth = selectorChevron ? selectorChevron.getBoundingClientRect().width : 10;
-        const btnWidth = Math.ceil(maxTextWidth) + paddingX + borderX + gap + chevronWidth;
-        selectorBtn.style.width = btnWidth > 0 ? `${btnWidth}px` : '';
+    if (selectorBtn) {
+        selectorBtn.style.width = '';
     }
 
     scheduleContentAdaptiveLayout();
