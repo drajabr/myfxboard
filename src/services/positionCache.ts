@@ -87,6 +87,14 @@ export function getAggregatedPositions(accountIds: string[]): CachedPosition[] {
 }
 
 /**
+ * Seeds account-level data (equity, balance, margin) from DB on startup so
+ * the SSE stream has values before the first connector sync arrives.
+ */
+export function seedAccountData(accountId: string, data: AccountSnapshot): void {
+  accountDataCache.set(accountId, data);
+}
+
+/**
  * Called once on server startup: seeds the cache from the last DB state so
  * the analytics endpoint has data before the first connector sync arrives.
  * Does NOT fire the SSE emitter (no clients are connected yet).

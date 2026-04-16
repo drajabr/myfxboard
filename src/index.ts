@@ -11,8 +11,8 @@ import { validateDashboardEditToken } from './middleware/auth.js';
 import { ensureDatabaseSchema } from './db/bootstrap.js';
 import { isDatabaseReady } from './db/connection.js';
 import { startWriteBuffer, flushAndStop } from './services/writeBuffer.js';
-import { seedAccountPositions, getAllCachedAccountIds, getPositions } from './services/positionCache.js';
-import { positionQueries } from './db/queries.js';
+import { seedAccountPositions, seedAccountData, getAllCachedAccountIds, getPositions } from './services/positionCache.js';
+import { positionQueries, accountQueries } from './db/queries.js';
 
 config();
 
@@ -121,6 +121,18 @@ async function start() {
   } catch (err) {
     // Non-fatal: cache will fill on first sync
     console.warn('[positionCache] seed failed (will recover on first sync):', (err as Error).message);
+  }
+
+  // Seed equity from last known balance so the SSE stream doesn't start at 0
+  // for accounts that haven't synced yet since this restart.
+  try {
+    const balances = await accountQueries.findAllBalances();
+    for (const { account_id, balance } of balances) {
+      seedAccountData(account_id, { equity: balance, balance, marginUsed: 0 });
+    }
+    console.log(`[positionCache] seeded equity/balance for ${balances.length} account(s) from DB`);
+  } catch (err) {
+    console.warn('[positionCache] balance seed failed (will recover on first sync):', (err as Error).message);
   }
 
   startWriteBuffer();

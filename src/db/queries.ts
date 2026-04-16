@@ -29,6 +29,14 @@ export const accountQueries = {
     return result.rows[0] || null;
   },
 
+  async findAllBalances(): Promise<{ account_id: string; balance: number }[]> {
+    const result = await query(
+      'SELECT account_id, balance FROM accounts WHERE balance IS NOT NULL',
+      []
+    );
+    return result.rows.map((r: any) => ({ account_id: r.account_id, balance: Number(r.balance) }));
+  },
+
   async create(account_id: string, account_name: string, secret_key: string, broker: string = 'MT5') {
     const secret_hash = crypto.createHash('sha256').update(secret_key).digest('hex');
     const now = Date.now();
