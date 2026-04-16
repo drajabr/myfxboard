@@ -159,6 +159,7 @@ body[data-theme='dark'] {
 body {
     font-family: var(--app-font);
     background: radial-gradient(circle at top right, rgba(var(--bg-tint-rgb), 0.12), transparent 40%), var(--bg);
+    background-attachment: fixed;
     color: var(--text);
     --layout-gap: 0.72rem;
     --layout-block-pad: 0.76rem;
@@ -290,6 +291,7 @@ body[data-layout='dense'] {
     min-width: 0;
     flex: 0 1 auto;
     flex-shrink: 1;
+    overflow: hidden;
 }
 
 .header--controls-collapsed .account-selector,
@@ -316,6 +318,7 @@ body[data-layout='dense'] {
     justify-content: space-between;
     gap: 0.5rem;
     cursor: pointer;
+    overflow: hidden;
 }
 
 .account-selector-btn__label {

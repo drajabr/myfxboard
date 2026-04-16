@@ -179,6 +179,29 @@ const numericTweenState = new Map();
 let adaptiveLayoutRaf = 0;
 const NON_LIVE_ANIM_MS = 1000;
 
+/* ── Scroll-into-view deferred animation ── */
+const deferredAnimations = new Map();
+const visibleElements = new WeakSet();
+const scrollAnimObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+        if (entry.isIntersecting) {
+            visibleElements.add(entry.target);
+            scrollAnimObserver.unobserve(entry.target);
+            const pending = deferredAnimations.get(entry.target);
+            if (pending) {
+                deferredAnimations.delete(entry.target);
+                pending();
+            }
+        }
+    }
+}, { rootMargin: '0px', threshold: 0.05 });
+
+function isElementVisible(el) {
+    if (visibleElements.has(el)) return true;
+    const rect = el.getBoundingClientRect();
+    return rect.bottom > 0 && rect.top < window.innerHeight;
+}
+
 
 function formatMoney(value) {
     return `$ ${Number(value || 0).toFixed(2)}`;
@@ -271,6 +294,24 @@ function animateNumericByKey(el, key, nextValue, formatter, durationMs = NON_LIV
         return;
     }
     const numericValue = toNum(nextValue, 0);
+
+    /* If the element is off-screen, set its text to the "from" value
+       immediately and defer the tween until it scrolls into view. */
+    if (!isElementVisible(el)) {
+        const fromValue = numericTweenState.has(key)
+            ? toNum(numericTweenState.get(key), numericValue)
+            : 0;
+        el.textContent = formatter(fromValue);
+        el.dataset.animValue = String(fromValue);
+        numericTweenState.set(key, numericValue);
+        deferredAnimations.set(el, () => {
+            el.dataset.animValue = String(fromValue);
+            animateNumericText(el, numericValue, formatter, durationMs);
+        });
+        scrollAnimObserver.observe(el);
+        return;
+    }
+
     const fromValue = numericTweenState.has(key)
         ? toNum(numericTweenState.get(key), numericValue)
         : toNum(el.dataset.animValue, 0);
@@ -283,10 +324,10 @@ function animateDeclaredNumericFields(root, durationMs = NON_LIVE_ANIM_MS) {
     if (!root) {
         return;
     }
-    root.querySelectorAll('[data-anim-key][data-anim-value]').forEach((el) => {
+    root.querySelectorAll('[data-anim-key][data-anim-target]').forEach((el) => {
         const key = el.getAttribute('data-anim-key') || '';
         const format = el.getAttribute('data-anim-format') || 'money';
-        const raw = toNum(el.getAttribute('data-anim-value'), 0);
+        const raw = toNum(el.getAttribute('data-anim-target'), 0);
         let formatter = formatMoney;
         if (format === 'pct') {
             formatter = formatPct;
@@ -1718,7 +1759,7 @@ function syncAccountSelector(accounts) {
         const borderX = toNum(parseFloat(btnStyles.borderLeftWidth), 0) + toNum(parseFloat(btnStyles.borderRightWidth), 0);
         const gap = toNum(parseFloat(btnStyles.gap), 0);
         const chevronWidth = selectorChevron ? selectorChevron.getBoundingClientRect().width : 10;
-        const btnWidth = Math.ceil(maxTextWidth + paddingX + borderX + gap + chevronWidth + 2);
+        const btnWidth = Math.ceil(maxTextWidth) + paddingX + borderX + gap + chevronWidth;
         selectorBtn.style.width = btnWidth > 0 ? `${btnWidth}px` : '';
     }
 
@@ -1828,9 +1869,9 @@ function renderPeriodStats(periods) {
         return `
             <div class="metric-card">
                 <div class="label">${title}</div>
-                <div class="value ${pnlClass(p.pnl)}" data-anim-key="period-${key}-pnl" data-anim-value="${toNum(p.pnl, 0)}" data-anim-format="money">${formatMoney(p.pnl)}</div>
-                <div class="label period-meta period-meta--full">Trades <span data-anim-key="period-${key}-trades" data-anim-value="${toNum(p.trades_count, 0)}" data-anim-format="int">${toNum(p.trades_count, 0)}</span> · Win <span data-anim-key="period-${key}-wr" data-anim-value="${toNum(p.win_rate_pct, 0)}" data-anim-format="pct">${formatPct(p.win_rate_pct)}</span></div>
-                <div class="label period-meta period-meta--short">T <span data-anim-key="period-${key}-trades-s" data-anim-value="${toNum(p.trades_count, 0)}" data-anim-format="int">${toNum(p.trades_count, 0)}</span> · W <span data-anim-key="period-${key}-wr-s" data-anim-value="${toNum(p.win_rate_pct, 0)}" data-anim-format="pct">${formatPct(p.win_rate_pct)}</span></div>
+                <div class="value ${pnlClass(p.pnl)}" data-anim-key="period-${key}-pnl" data-anim-target="${toNum(p.pnl, 0)}" data-anim-format="money">${formatMoney(p.pnl)}</div>
+                <div class="label period-meta period-meta--full">Trades <span data-anim-key="period-${key}-trades" data-anim-target="${toNum(p.trades_count, 0)}" data-anim-format="int">${toNum(p.trades_count, 0)}</span> · Win <span data-anim-key="period-${key}-wr" data-anim-target="${toNum(p.win_rate_pct, 0)}" data-anim-format="pct">${formatPct(p.win_rate_pct)}</span></div>
+                <div class="label period-meta period-meta--short">T <span data-anim-key="period-${key}-trades-s" data-anim-target="${toNum(p.trades_count, 0)}" data-anim-format="int">${toNum(p.trades_count, 0)}</span> · W <span data-anim-key="period-${key}-wr-s" data-anim-target="${toNum(p.win_rate_pct, 0)}" data-anim-format="pct">${formatPct(p.win_rate_pct)}</span></div>
             </div>
         `;
     }).join('');
@@ -1880,7 +1921,7 @@ function renderTradeMetrics(metrics, periods) {
             renderedValue = Number(toNum(card.value)).toFixed(2);
         }
         const animAttrs = isAnim
-            ? ` data-anim-key="${card.animKey}" data-anim-value="${toNum(card.value, 0)}" data-anim-format="${card.format}"`
+            ? ` data-anim-key="${card.animKey}" data-anim-target="${toNum(card.value, 0)}" data-anim-format="${card.format}"`
             : '';
         return `
         <div class="metric-card ${idx < 2 ? 'metric-card--lead' : ''}">
