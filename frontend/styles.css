@@ -302,6 +302,7 @@ body[data-layout='dense'] {
 }
 
 .account-selector-btn {
+    width: fit-content;
     max-width: 100%;
     min-width: 36px;
     height: 36px;
@@ -335,8 +336,8 @@ body[data-layout='dense'] {
 .account-selector-menu {
     position: absolute;
     top: calc(100% + 0.3rem);
-    left: 0;
-    right: auto;
+    right: 0;
+    left: auto;
     border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
     border-radius: 10px;
     background: color-mix(in srgb, var(--surface) 94%, var(--accent) 6%);
@@ -1952,8 +1953,8 @@ body[data-layout='dense'] .pos-combine-child {
     }
 
     .account-selector-menu {
-        left: auto;
         right: 0;
+        left: auto;
         width: max-content;
         min-width: max-content;
         max-width: min(88vw, 360px);

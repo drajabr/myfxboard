@@ -177,7 +177,7 @@ let deferredInstallPrompt = null;
 const numericTweenRaf = new WeakMap();
 const numericTweenState = new Map();
 let adaptiveLayoutRaf = 0;
-const NON_LIVE_ANIM_MS = 1000;
+const NON_LIVE_ANIM_MS = 2000;
 
 /* ── Scroll-into-view deferred animation ── */
 const deferredAnimations = new Map();
@@ -2846,7 +2846,19 @@ function buildBarChartOptions(text, labelCount = 0) {
     return {
         responsive: true,
         maintainAspectRatio: false,
-        animation: { duration: NON_LIVE_ANIM_MS, easing: 'easeOutCubic' },
+        animation: {
+            duration: NON_LIVE_ANIM_MS,
+            easing: 'easeOutCubic',
+            y: {
+                from: (ctx) => {
+                    if (ctx.type !== 'data') return undefined;
+                    return ctx.chart.scales.y.getPixelForValue(0);
+                },
+            },
+        },
+        transitions: {
+            active: { animation: { duration: 200 } },
+        },
         interaction: { mode: 'nearest', intersect: false, axis: 'x' },
         layout: {
             padding: { left: 10, right: 18, top: 8, bottom: 18 },
@@ -3261,9 +3273,9 @@ function updateCharts(data) {
                 responsive: true,
                 maintainAspectRatio: false,
                 animation: (function () {
-                    const totalMs = NON_LIVE_ANIM_MS;
                     const n = Math.max(mainCurveValues.length, 1);
-                    const perPoint = totalMs / n;
+                    const perPoint = Math.max(NON_LIVE_ANIM_MS / n, 12);
+                    const totalMs = perPoint * n;
                     return {
                         x: {
                             type: 'number',
@@ -3275,7 +3287,7 @@ function updateCharts(data) {
                         y: {
                             type: 'number',
                             easing: 'easeOutCubic',
-                            duration: perPoint,
+                            duration: Math.min(perPoint * 4, totalMs),
                             from: (ctx) => {
                                 if (ctx.type !== 'data' || ctx.index === 0) return ctx.chart.scales.y.getPixelForValue(0);
                                 return ctx.chart.getDatasetMeta(ctx.datasetIndex).data[ctx.index - 1]?.getProps(['y'], true).y;
@@ -3343,7 +3355,8 @@ function updateCharts(data) {
             charts.pnlCurve.options.scales.y.ticks.color = text;
             charts.pnlCurve.options.scales.y.ticks.font = chartFont;
             const updN = Math.max(mainCurveValues.length, 1);
-            const updPP = NON_LIVE_ANIM_MS / updN;
+            const updPP = Math.max(NON_LIVE_ANIM_MS / updN, 12);
+            const updTotal = updPP * updN;
             charts.pnlCurve.options.animation = {
                 x: {
                     type: 'number', easing: 'linear', duration: updPP,
@@ -3351,7 +3364,7 @@ function updateCharts(data) {
                     delay: (ctx) => ctx.type === 'data' ? ctx.index * updPP : 0,
                 },
                 y: {
-                    type: 'number', easing: 'easeOutCubic', duration: updPP,
+                    type: 'number', easing: 'easeOutCubic', duration: Math.min(updPP * 4, updTotal),
                     from: (ctx) => {
                         if (ctx.type !== 'data' || ctx.index === 0) return ctx.chart.scales.y.getPixelForValue(0);
                         return ctx.chart.getDatasetMeta(ctx.datasetIndex).data[ctx.index - 1]?.getProps(['y'], true).y;
@@ -3776,7 +3789,19 @@ function updateCharts(data) {
     const histogramOptions = {
         responsive: true,
         maintainAspectRatio: false,
-        animation: { duration: NON_LIVE_ANIM_MS, easing: 'easeOutCubic' },
+        animation: {
+            duration: NON_LIVE_ANIM_MS,
+            easing: 'easeOutCubic',
+            y: {
+                from: (ctx) => {
+                    if (ctx.type !== 'data') return undefined;
+                    return ctx.chart.scales.y.getPixelForValue(0);
+                },
+            },
+        },
+        transitions: {
+            active: { animation: { duration: 200 } },
+        },
         interaction: { mode: 'nearest', intersect: false, axis: 'x' },
         layout: {
             padding: { left: 10, right: 18, top: 8, bottom: 18 },
