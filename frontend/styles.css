@@ -279,6 +279,7 @@ body[data-layout='dense'] {
     gap: 0.45rem;
     flex-wrap: wrap;
     justify-content: flex-start;
+    flex: 0 0 auto;
 }
 
 .account-selector {
@@ -291,6 +292,7 @@ body[data-layout='dense'] {
     min-width: 0;
     flex: 0 1 auto;
     flex-shrink: 1;
+    max-width: min(52vw, 420px);
 }
 
 .header--controls-collapsed .account-selector,
@@ -337,7 +339,7 @@ body[data-layout='dense'] {
     position: absolute;
     top: calc(100% + 0.3rem);
     left: 0;
-    right: 0;
+    right: auto;
     border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
     border-radius: 10px;
     background: color-mix(in srgb, var(--surface) 94%, var(--accent) 6%);
@@ -345,8 +347,13 @@ body[data-layout='dense'] {
     padding: 0.28rem;
     display: flex;
     flex-direction: column;
+    align-items: stretch;
     gap: 0.22rem;
+    width: max-content;
+    min-width: 100%;
+    max-width: min(92vw, 560px);
     max-height: min(280px, calc(100vh - 84px));
+    overflow-x: hidden;
     overflow-y: auto;
     z-index: 40;
 }
@@ -356,7 +363,8 @@ body[data-layout='dense'] {
 }
 
 .account-option {
-    width: 100%;
+    width: auto;
+    min-width: 100%;
     border: 1px solid transparent;
     border-radius: 8px;
     background: transparent;
@@ -364,10 +372,9 @@ body[data-layout='dense'] {
     padding: 0.4rem 0.55rem;
     text-align: left;
     cursor: pointer;
-    overflow-x: auto;
-    overflow-y: hidden;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
-    scrollbar-width: thin;
 }
 
 .account-option:hover {
@@ -407,6 +414,7 @@ body[data-layout='dense'] {
     font-size: 0.74rem;
     line-height: 1;
     white-space: nowrap;
+    flex: 0 0 auto;
 }
 
 .status-pill.status-error {
@@ -1965,7 +1973,7 @@ body[data-layout='dense'] .pos-combine-child {
         left: auto;
         right: 0;
         width: max-content;
-        min-width: 100%;
+        min-width: max-content;
         max-width: min(88vw, 360px);
     }
 }
@@ -1976,6 +1984,7 @@ body[data-layout='dense'] .pos-combine-child {
         right: 0;
         max-width: min(92vw, 420px);
     }
+}
 
 @media (max-width: 760px) {
     .charts-row {
@@ -2011,8 +2020,8 @@ body[data-layout='dense'] .pos-combine-child {
 }
 
 .header--compact .account-picker {
-    max-width: 150px;
-    flex-basis: 94px;
+    max-width: min(46vw, 340px);
+    flex-basis: auto;
 }
 
 .header--compact.header--controls-collapsed .account-picker {
@@ -2025,8 +2034,8 @@ body[data-layout='dense'] .pos-combine-child {
 }
 
 .header--ultra-compact .account-picker {
-    max-width: 96px;
-    flex-basis: 66px;
+    max-width: min(40vw, 300px);
+    flex-basis: auto;
 }
 
 .header--ultra-compact.header--controls-collapsed .account-picker {

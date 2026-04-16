@@ -728,6 +728,21 @@ function buildAccountDisplay(accountId, primaryName, secondaryName) {
     };
 }
 
+function accountNameOnly(accountId, primaryName, secondaryName) {
+    const display = buildAccountDisplay(accountId, primaryName, secondaryName);
+    return display.labelText || display.idText;
+}
+
+function shouldCompactAccountLabels() {
+    const header = document.querySelector('.header');
+    if (!header) {
+        return window.innerWidth <= 920;
+    }
+    return window.innerWidth <= 920
+        || header.classList.contains('header--compact')
+        || header.classList.contains('header--ultra-compact');
+}
+
 function findAccountById(accountId) {
     const idText = String(accountId || '').trim();
     if (!idText || !Array.isArray(state.accounts)) {
@@ -1637,6 +1652,9 @@ function setupEventListeners() {
     themeMedia.addEventListener('change', applyThemeFromSystemIfNeeded);
 
     window.addEventListener('resize', () => {
+        if (Array.isArray(state.accounts) && state.accounts.length) {
+            syncAccountSelector(state.accounts);
+        }
         scheduleContentAdaptiveLayout();
         scheduleAutoFitOpenPositions();
         scheduleAutoFitHistoricTrades();
@@ -1691,10 +1709,12 @@ function syncAccountSelector(accounts) {
     const selectorMenu = document.getElementById('accountSelectorMenu');
     const selectorLabel = document.getElementById('accountSelectorLabel');
     const selected = localStorage.getItem('selectedAccount') || '';
+    const compactLabels = shouldCompactAccountLabels();
     selector.innerHTML = `<option value="">All Accounts (${accounts.length})</option>`;
     const menuItems = [{
         value: '',
         label: `All Accounts (${accounts.length})`,
+        title: `All Accounts (${accounts.length})`,
     }];
 
     const now = Date.now();
@@ -1704,13 +1724,20 @@ function syncAccountSelector(accounts) {
         const option = document.createElement('option');
         option.value = acc.account_id;
         const accountDisplay = buildAccountDisplay(acc.account_id, acc.nickname || acc.account_name, acc.broker);
+        const accountNameOnlyText = accountNameOnly(acc.account_id, acc.nickname || acc.account_name, acc.broker);
         const lastSync = toNum(acc.last_sync_at || acc.last_ingest_received_at, 0);
         const isOnline = lastSync > 0 && (now - lastSync) < healthThresholdMs;
         const statusMark = isOnline ? '🟢' : '🟥';
-        const labelText = `${statusMark} ${accountDisplay.idText}${accountDisplay.labelText ? ` - ${accountDisplay.labelText}` : ''}`;
+        const fullLabelText = `${statusMark} ${accountDisplay.idText}${accountDisplay.labelText ? ` - ${accountDisplay.labelText}` : ''}`;
+        const compactLabelText = accountNameOnlyText;
+        const labelText = compactLabels ? compactLabelText : fullLabelText;
         option.textContent = labelText;
         selector.appendChild(option);
-        menuItems.push({ value: acc.account_id, label: labelText });
+        menuItems.push({
+            value: acc.account_id,
+            label: labelText,
+            title: fullLabelText,
+        });
     });
 
     selector.value = selected;
@@ -1720,7 +1747,7 @@ function syncAccountSelector(accounts) {
 
     if (selectorMenu) {
         selectorMenu.innerHTML = menuItems.map((item) => `
-            <button class="account-option ${item.value === selector.value ? 'is-active' : ''}" type="button" data-account-value="${item.value}" title="${item.label}">${item.label}</button>
+            <button class="account-option ${item.value === selector.value ? 'is-active' : ''}" type="button" data-account-value="${item.value}" title="${item.title}">${item.label}</button>
         `).join('');
 
         selectorMenu.querySelectorAll('.account-option').forEach((btn) => {
@@ -1808,7 +1835,7 @@ function updateKpis(summary, periods, tradeMetrics, filteredSummary) {
 
     if (balanceMetaEl) {
         if (!balanceMetaEl.querySelector('[data-anim-key]')) {
-            balanceMetaEl.innerHTML = 'Allocated <span data-anim-key="kpi-meta-allocated"></span> · <span data-anim-key="kpi-meta-alloc-pct"></span>';
+            balanceMetaEl.innerHTML = '🔒 <span data-anim-key="kpi-meta-allocated"></span> · <span data-anim-key="kpi-meta-alloc-pct"></span>';
         }
         const allocSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-allocated"]');
         const pctSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-alloc-pct"]');
@@ -4095,7 +4122,7 @@ function applyLivePnl(data) {
     const balanceMetaEl = document.getElementById('balanceMeta');
     if (balanceMetaEl && state.lastData?.summary) {
         if (!balanceMetaEl.querySelector('[data-anim-key]')) {
-            balanceMetaEl.innerHTML = 'Allocated <span data-anim-key="kpi-meta-allocated"></span> · <span data-anim-key="kpi-meta-alloc-pct"></span>';
+            balanceMetaEl.innerHTML = '🔒 <span data-anim-key="kpi-meta-allocated"></span> · <span data-anim-key="kpi-meta-alloc-pct"></span>';
         }
         const allocSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-allocated"]');
         const pctSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-alloc-pct"]');

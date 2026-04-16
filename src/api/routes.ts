@@ -426,12 +426,14 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const nowMs = Date.now();
 
     let accountIds: string[] = [];
+    let accountRows: any[] = [];
     if (accountIdParam === 'all') {
-      const allAccounts = await accountQueries.list();
-      accountIds = allAccounts.map((a) => a.account_id);
+      accountRows = await accountQueries.list();
+      accountIds = accountRows.map((a) => a.account_id);
     } else {
       const account = await accountQueries.findById(accountIdParam);
-      accountIds = account ? [account.account_id] : [];
+      accountRows = account ? [account] : [];
+      accountIds = accountRows.map((a) => a.account_id);
     }
 
     if (accountIds.length === 0) {
@@ -440,6 +442,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
       }
       return res.status(404).json({ error: 'No matching accounts found' });
     }
+
+    const accountBalanceById = new Map(accountRows.map((acc) => [String(acc.account_id), toNum(acc.balance, 0)]));
 
     let positions: any[] = [];
     let recentTradesPool: any[] = [];
@@ -569,6 +573,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
         tradeQueries.summarizeAllPeriodStats(accountId, todayStartMs, last7dStartMs, last30dStartMs, ytdStartMs, filterEndMs, breakevenTolerance),
       ]);
       return {
+        accountId,
         breakevenTolerance, accPositionsRaw, latestSnapshotRaw, recentTradesRaw, curveTradesRaw,
         filteredSummary, filteredDirectionSummary, filteredDirectionOutcomeSummary,
         filteredDailyRows, allTimeDailyRows, dayOfWeekRows, hourOfDayRows,
@@ -578,6 +583,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
 
     for (const result of accountResults) {
       const {
+        accountId,
         breakevenTolerance, accPositionsRaw, latestSnapshotRaw, recentTradesRaw, curveTradesRaw,
         filteredSummary, filteredDirectionSummary, filteredDirectionOutcomeSummary,
         filteredDailyRows, allTimeDailyRows, dayOfWeekRows, hourOfDayRows,
@@ -595,7 +601,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
       recentTradesPool = recentTradesPool.concat(accRecentTrades);
       allFilteredTrades.push(...curveTrades);
       equity += latestSnapshot?.equity || latestSnapshot?.balance || 0;
-      balance += latestSnapshot?.balance || 0;
+      balance += toNum(accountBalanceById.get(String(accountId)), 0);
       filteredTradesTotal += toNum(filteredSummary.trades_count);
       filteredSummaryTotals.pnl += toNum(filteredSummary.pnl);
       filteredSummaryTotals.trades_count += toNum(filteredSummary.trades_count);
@@ -736,9 +742,6 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const liveSnap = getAggregated(accountIds);
     if (liveSnap.equity !== undefined && liveSnap.equity > 0) {
       equity = liveSnap.equity;
-    }
-    if (liveSnap.balance !== undefined && liveSnap.balance > 0) {
-      balance = liveSnap.balance;
     }
     marginUsed = liveSnap.marginUsed ?? 0;
 
