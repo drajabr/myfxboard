@@ -223,13 +223,13 @@ function easeOutCubic(t) {
     return 1 - Math.pow(1 - t, 3);
 }
 
-function animateNumericText(el, nextValue, formatter, durationMs = 333) {
+function animateNumericText(el, nextValue, formatter, durationMs = NON_LIVE_ANIM_MS) {
     if (!el) {
         return;
     }
 
     const toValue = toNum(nextValue, 0);
-    const fromValue = toNum(el.dataset.animValue, toValue);
+    const fromValue = toNum(el.dataset.animValue, 0);
     const diff = toValue - fromValue;
 
     const prevRaf = numericTweenRaf.get(el);
@@ -273,7 +273,7 @@ function animateNumericByKey(el, key, nextValue, formatter, durationMs = NON_LIV
     const numericValue = toNum(nextValue, 0);
     const fromValue = numericTweenState.has(key)
         ? toNum(numericTweenState.get(key), numericValue)
-        : toNum(el.dataset.animValue, numericValue);
+        : toNum(el.dataset.animValue, 0);
     el.dataset.animValue = String(fromValue);
     animateNumericText(el, numericValue, formatter, durationMs);
     numericTweenState.set(key, numericValue);
@@ -297,6 +297,118 @@ function animateDeclaredNumericFields(root, durationMs = NON_LIVE_ANIM_MS) {
         }
         animateNumericByKey(el, key, raw, formatter, durationMs);
     });
+}
+
+/**
+ * Diff-patch a <tbody>: reuse existing rows by key, animate numeric cells,
+ * add enter animations for new rows, exit animations for removed rows.
+ *
+ * @param {HTMLTableSectionElement} tbody
+ * @param {Array<{key: string, html: string, animCells?: Array<{col: number, key: string, value: number, format: string, className?: string}>}>} nextRows
+ * @param {number} [durationMs]
+ */
+function diffTableRows(tbody, nextRows, durationMs = NON_LIVE_ANIM_MS) {
+    // Remove any non-keyed rows (e.g. "No data" placeholders)
+    for (const tr of [...tbody.querySelectorAll('tr:not([data-row-key])')]) {
+        tr.remove();
+    }
+
+    const oldByKey = new Map();
+    for (const tr of [...tbody.querySelectorAll('tr[data-row-key]')]) {
+        const k = tr.getAttribute('data-row-key');
+        if (k) oldByKey.set(k, tr);
+    }
+
+    const nextKeys = new Set(nextRows.map(r => r.key));
+    const fmtInt = v => String(Math.round(Number(v || 0)));
+    const fmtFixed2 = v => Number(v || 0).toFixed(2);
+    const chooseFormatter = (cell) => {
+        if (cell._fmt) return cell._fmt;
+        const fmt = cell.format;
+        if (fmt === 'money') return formatMoney;
+        if (fmt === 'pct') return formatPct;
+        if (fmt === 'int') return fmtInt;
+        if (fmt === 'fixed2') return fmtFixed2;
+        if (fmt === 'size') return formatSize;
+        if (fmt === 'price') return v => formatPrice(v, 5);
+        return formatMoney;
+    };
+
+    // Remove rows no longer present (with exit animation)
+    for (const [key, tr] of oldByKey) {
+        if (!nextKeys.has(key)) {
+            tr.classList.add('row-exit');
+            tr.addEventListener('animationend', () => tr.remove(), { once: true });
+            // Fallback removal if animation doesn't fire
+            setTimeout(() => { if (tr.parentNode) tr.remove(); }, 400);
+        }
+    }
+
+    // Build or update rows in order
+    let insertRef = tbody.querySelector('tr.row-exit') || null;
+    // We'll insert in order, tracking previous sibling
+    let prevTr = null;
+    for (const rowData of nextRows) {
+        const existing = oldByKey.get(rowData.key);
+        if (existing) {
+            // Update: animate numeric cells in place
+            if (rowData.animCells) {
+                for (const cell of rowData.animCells) {
+                    const td = existing.children[cell.col];
+                    if (!td) continue;
+                    if (cell.className !== undefined) td.className = cell.className;
+                    animateNumericByKey(td, cell.key, cell.value, chooseFormatter(cell), durationMs);
+                }
+            }
+            // Update non-animated cells (className changes, static content)
+            if (rowData.updateCells) {
+                for (const upd of rowData.updateCells) {
+                    const td = existing.children[upd.col];
+                    if (!td) continue;
+                    if (upd.className !== undefined) td.className = upd.className;
+                    if (upd.html !== undefined) td.innerHTML = upd.html;
+                }
+            }
+            existing.classList.remove('row-exit');
+            // Move to correct position
+            if (prevTr) {
+                if (existing.previousElementSibling !== prevTr) {
+                    prevTr.after(existing);
+                }
+            } else {
+                if (existing !== tbody.firstElementChild) {
+                    tbody.prepend(existing);
+                }
+            }
+            prevTr = existing;
+        } else {
+            // New row: parse HTML, insert with enter animation
+            const temp = document.createElement('template');
+            temp.innerHTML = rowData.html.trim();
+            const tr = temp.content.firstElementChild;
+            if (tr) {
+                tr.setAttribute('data-row-key', rowData.key);
+                tr.classList.add('row-enter');
+                tr.addEventListener('animationend', () => tr.classList.remove('row-enter'), { once: true });
+                if (prevTr) {
+                    prevTr.after(tr);
+                } else {
+                    tbody.prepend(tr);
+                }
+                // Animate numeric cells from 0 on new rows
+                if (rowData.animCells) {
+                    for (const cell of rowData.animCells) {
+                        const td = tr.children[cell.col];
+                        if (td) {
+                            if (cell.className !== undefined) td.className = cell.className;
+                            animateNumericByKey(td, cell.key, cell.value, chooseFormatter(cell), durationMs);
+                        }
+                    }
+                }
+                prevTr = tr;
+            }
+        }
+    }
 }
 
 function estimatePositionTargetPnl(position, targetPrice) {
@@ -1571,6 +1683,10 @@ function syncAccountSelector(accounts) {
         selectorMenu.querySelectorAll('.account-option').forEach((btn) => {
             btn.addEventListener('click', () => {
                 const value = btn.getAttribute('data-account-value') || '';
+                if (value === selector.value) {
+                    toggleAccountMenu();
+                    return;
+                }
                 selector.value = value;
                 selector.dispatchEvent(new Event('change', { bubbles: true }));
             });
@@ -2056,18 +2172,18 @@ function updatePositionsTable(positions) {
         return state.positionsSort.direction === 'asc' ? cmp : -cmp;
     });
 
-    const renderPosRow = (pos, isChild) => {
+    const buildPosRowData = (pos, isChild) => {
         const openMs = toNum(pos.open_time_ms);
         const ageSec = openMs > 0 ? Math.max(0, (nowMs - openMs) / 1000) : 0;
         const ageText = openMs > 0 ? durationLabel(ageSec) : '-';
         const side = String(pos.direction || '-').toUpperCase();
         const slMoney = pos.sl_amount ?? estimatePositionTargetPnl(pos, pos.avg_sl);
         const tpMoney = pos.tp_amount ?? estimatePositionTargetPnl(pos, pos.avg_tp);
-        const childClass = isChild ? ` class="pos-combine-child" data-group-symbol="${normalizeSymbol(pos.symbol)}"` : '';
+        const childAttr = isChild ? ` class="pos-combine-child" data-group-symbol="${normalizeSymbol(pos.symbol)}"` : '';
         const accountInner = `<span class="account-tag">${positionAccountLabel(pos)}</span>`;
         const symbolCell = pos._combined
             ? `<td class="pos-combine-toggle" data-group-symbol="${normalizeSymbol(pos.symbol)}" title="Click to expand">\u25B6 ${pos.symbol} (${pos._children.length})</td>`
-            : `<td>${isChild ? pos.symbol : pos.symbol}</td>`;
+            : `<td>${pos.symbol}</td>`;
         const entryDecimals = pos._entryDecimals || inferPriceDecimals([pos], 'entry_price');
         const currentDecimals = pos._currentDecimals || inferPriceDecimals([pos], 'current_price');
         const slDecimals = pos._slDecimals || inferPriceDecimals([pos], 'avg_sl');
@@ -2076,54 +2192,80 @@ function updatePositionsTable(positions) {
             ? `combined|${normalizeSymbol(pos.symbol)}`
             : `${normalizeSymbol(pos.symbol)}|${String(pos.account_id || '-')}|${String(pos.direction || '-')}`
               + `|${String(toNum(pos.open_time_ms, 0))}|${String(toNum(pos.size, 0))}`;
-        const currentValue = pos.current_price !== null ? toNum(pos.current_price, NaN) : NaN;
         const pnlValue = toNum(pos.unrealized_pnl || 0);
-        const previous = prevPositionValues.get(rowKey);
-        const currentPnlClass = pnlClass(pnlValue);
+        const marginValue = toNum(pos.margin, 0);
+        const entryValue = pos.entry_price !== null ? toNum(pos.entry_price, NaN) : NaN;
+        const currentValue = pos.current_price !== null ? toNum(pos.current_price, NaN) : NaN;
+        const slValue = (pos.avg_sl !== null && pos.avg_sl !== 0) ? toNum(pos.avg_sl, NaN) : NaN;
+        const tpValue = (pos.avg_tp !== null && pos.avg_tp !== 0) ? toNum(pos.avg_tp, NaN) : NaN;
+        const slMoneyValue = slMoney !== null ? toNum(slMoney, NaN) : NaN;
+        const tpMoneyValue = tpMoney !== null ? toNum(tpMoney, NaN) : NaN;
+
         nextPositionValues.set(rowKey, {
             current_price: Number.isFinite(currentValue) ? currentValue : NaN,
             unrealized_pnl: pnlValue,
         });
-        const marginValue = toNum(pos.margin, 0);
-        return `
-        <tr${childClass}>
+
+        const fmtEntry = v => formatPrice(v, entryDecimals);
+        const fmtCurrent = v => formatPrice(v, currentDecimals);
+        const fmtSl = v => formatPrice(v, slDecimals);
+        const fmtTp = v => formatPrice(v, tpDecimals);
+
+        // Columns: 0=symbol, 1=dir, 2=size, 3=entry, 4=sl, 5=sl$, 6=tp, 7=tp$, 8=age, 9=current, 10=margin, 11=pnl, 12=account
+        const animCells = [];
+        const updateCells = [];
+        if (Number.isFinite(entryValue)) animCells.push({ col: 3, key: `pos-entry-${rowKey}`, value: entryValue, format: 'price', _fmt: fmtEntry });
+        if (Number.isFinite(slValue)) animCells.push({ col: 4, key: `pos-sl-${rowKey}`, value: slValue, format: 'price', _fmt: fmtSl });
+        if (Number.isFinite(slMoneyValue)) animCells.push({ col: 5, key: `pos-sl$-${rowKey}`, value: slMoneyValue, format: 'money', className: `col-pos-prio-5 ${pnlClass(slMoneyValue)}` });
+        if (Number.isFinite(tpValue)) animCells.push({ col: 6, key: `pos-tp-${rowKey}`, value: tpValue, format: 'price', _fmt: fmtTp });
+        if (Number.isFinite(tpMoneyValue)) animCells.push({ col: 7, key: `pos-tp$-${rowKey}`, value: tpMoneyValue, format: 'money', className: `col-pos-prio-6 ${pnlClass(tpMoneyValue)}` });
+        if (Number.isFinite(currentValue)) animCells.push({ col: 9, key: `pos-cur-${rowKey}`, value: currentValue, format: 'price', _fmt: fmtCurrent, className: `col-pos-prio-7 ${pnlClass(pnlValue)}` });
+        if (marginValue > 0) animCells.push({ col: 10, key: `pos-margin-${rowKey}`, value: marginValue, format: 'money' });
+        animCells.push({ col: 11, key: `pos-pnl-${rowKey}`, value: pnlValue, format: 'money', className: pnlClass(pnlValue) });
+
+        const html = `
+        <tr${childAttr} data-row-key="${rowKey}">
             ${symbolCell}
             <td><span class="dir-badge ${side === 'BUY' ? 'dir-buy' : side === 'SELL' ? 'dir-sell' : ''}">${side}</span></td>
             <td>${formatSize(pos.size)}</td>
-            <td class="col-pos-prio-4">${pos.entry_price !== null ? formatPrice(pos.entry_price, entryDecimals) : '-'}</td>
-            <td class="col-pos-prio-5">${pos.avg_sl !== null && pos.avg_sl !== 0 ? formatPrice(pos.avg_sl, slDecimals) : '-'}</td>
-            <td class="col-pos-prio-5 ${pnlClass(slMoney || 0)}">${slMoney === null ? '-' : formatMoney(slMoney)}</td>
-            <td class="col-pos-prio-6">${pos.avg_tp !== null && pos.avg_tp !== 0 ? formatPrice(pos.avg_tp, tpDecimals) : '-'}</td>
-            <td class="col-pos-prio-6 ${pnlClass(tpMoney || 0)}">${tpMoney === null ? '-' : formatMoney(tpMoney)}</td>
+            <td class="col-pos-prio-4">${Number.isFinite(entryValue) ? fmtEntry(entryValue) : '-'}</td>
+            <td class="col-pos-prio-5">${Number.isFinite(slValue) ? fmtSl(slValue) : '-'}</td>
+            <td class="col-pos-prio-5 ${pnlClass(slMoneyValue || 0)}">${Number.isFinite(slMoneyValue) ? formatMoney(slMoneyValue) : '-'}</td>
+            <td class="col-pos-prio-6">${Number.isFinite(tpValue) ? fmtTp(tpValue) : '-'}</td>
+            <td class="col-pos-prio-6 ${pnlClass(tpMoneyValue || 0)}">${Number.isFinite(tpMoneyValue) ? formatMoney(tpMoneyValue) : '-'}</td>
             <td class="col-pos-prio-7">${ageText}</td>
-            <td class="col-pos-prio-7 ${currentPnlClass}">${pos.current_price !== null ? formatPrice(pos.current_price, currentDecimals) : '-'}</td>
+            <td class="col-pos-prio-7 ${pnlClass(pnlValue)}">${Number.isFinite(currentValue) ? fmtCurrent(currentValue) : '-'}</td>
             <td class="col-pos-prio-8">${marginValue > 0 ? formatMoney(marginValue) : '-'}</td>
             <td class="${pnlClass(pnlValue)}">${formatMoney(pnlValue)}</td>
             <td class="col-pos-prio-7">${accountInner}</td>
-        </tr>
-    `;
+        </tr>`;
+
+        return { key: rowKey, html, animCells, updateCells };
     };
 
+    // Build row data list
+    const rowDataList = [];
     if (!state.combineOpenPositions) {
-        tbody.innerHTML = rows.map((pos) => {
-            return renderPosRow(pos, false);
-        }).join('');
-        scheduleAutoFitOpenPositions();
-        return;
-    }
-
-    let html = '';
-    for (const pos of rows) {
-        html += renderPosRow(pos, false);
-        if (pos._combined && pos._children) {
-            for (const child of pos._children) {
-                html += renderPosRow(child, true);
+        for (const pos of rows) {
+            rowDataList.push(buildPosRowData(pos, false));
+        }
+    } else {
+        for (const pos of rows) {
+            rowDataList.push(buildPosRowData(pos, false));
+            if (pos._combined && pos._children) {
+                for (const child of pos._children) {
+                    rowDataList.push(buildPosRowData(child, true));
+                }
             }
         }
     }
-    tbody.innerHTML = html;
 
+    diffTableRows(tbody, rowDataList);
+
+    // Wire combine toggle handlers
     tbody.querySelectorAll('.pos-combine-toggle').forEach((td) => {
+        if (td._toggleWired) return;
+        td._toggleWired = true;
         td.addEventListener('click', (event) => {
             event.preventDefault();
             const parentRow = td.closest('tr');
@@ -2149,7 +2291,6 @@ function updatePositionsTable(positions) {
         row.style.display = state.expandedPositionGroups.has(symbol) ? '' : 'none';
     });
 
-    // Update toggle arrows for pre-expanded groups
     tbody.querySelectorAll('.pos-combine-toggle').forEach((td) => {
         const symbol = td.getAttribute('data-group-symbol');
         if (state.expandedPositionGroups.has(symbol)) {
@@ -2327,52 +2468,73 @@ function updateTradesTable(trades) {
         return `<span class="dir-badge ${cls}">${dir}</span>`;
     };
 
-    const renderRow = (trade, isChild) => {
+    const buildTradeRowData = (trade, isChild) => {
         const openTime = formatDateTimeMs(trade.entry_time_ms);
         const closeTime = formatDateTimeMs(trade.exit_time_ms);
         const accountLabel = tradeAccountLabel(trade);
         const duration = durationLabel(trade.duration_sec);
         const resultShort = formatTradeResultShort(trade.result);
-        const childClass = isChild ? ` class="combine-child" data-group-symbol="${normalizeSymbol(trade.symbol)}"` : '';
+        const childAttr = isChild ? ` class="combine-child" data-group-symbol="${normalizeSymbol(trade.symbol)}"` : '';
         const accountInner = `<span class="account-tag">${accountLabel}</span>`;
         const symbolCell = trade._combined
             ? `<td class="combine-toggle" data-group-symbol="${normalizeSymbol(trade.symbol)}" title="Click to expand">▶ ${trade.symbol} (${trade._children.length})</td>`
             : `<td>${trade.symbol}</td>`;
         const entryDecimals = trade._entryDecimals || inferPriceDecimals([trade], 'entry_price');
         const exitDecimals = trade._exitDecimals || inferPriceDecimals([trade], 'exit_price');
-        return `
-        <tr${childClass}>
+        const profitValue = toNum(trade.profit || 0);
+        const rowKey = trade._combined
+            ? `trade-combined|${normalizeSymbol(trade.symbol)}|${trade.direction}`
+            : `trade|${normalizeSymbol(trade.symbol)}|${String(trade.account_id || '-')}|${toNum(trade.entry_time_ms)}|${toNum(trade.exit_time_ms)}`;
+        const fmtEntryP = v => formatPrice(v, entryDecimals);
+        const fmtExitP = v => formatPrice(v, exitDecimals);
+        const entryPriceVal = toNum(trade.entry_price, NaN);
+        const exitPriceVal = trade.exit_price !== null ? toNum(trade.exit_price, NaN) : NaN;
+        // Cols: 0=symbol, 1=dir, 2=size, 3=entry, 4=open, 5=close, 6=duration, 7=exit, 8=result, 9=profit, 10=account
+        const animCells = [
+            { col: 9, key: `${rowKey}-pnl`, value: profitValue, format: 'money', className: pnlClass(profitValue) },
+        ];
+        if (Number.isFinite(entryPriceVal)) animCells.push({ col: 3, key: `${rowKey}-entry`, value: entryPriceVal, format: 'price', _fmt: fmtEntryP });
+        if (Number.isFinite(exitPriceVal)) animCells.push({ col: 7, key: `${rowKey}-exit`, value: exitPriceVal, format: 'price', _fmt: fmtExitP });
+        return {
+            key: rowKey,
+            html: `
+        <tr${childAttr} data-row-key="${rowKey}">
             ${symbolCell}
             <td>${dirBadge(trade.direction || deriveDirection(trade))}</td>
             <td>${Number(trade.size || 0).toFixed(2)}</td>
-            <td class="col-trades-prio-4">${formatPrice(trade.entry_price, entryDecimals)}</td>
+            <td class="col-trades-prio-4">${Number.isFinite(entryPriceVal) ? fmtEntryP(entryPriceVal) : '-'}</td>
             <td class="col-trades-prio-5">${openTime}</td>
             <td class="col-trades-prio-5">${closeTime}</td>
             <td class="col-trades-prio-6">${duration}</td>
-            <td class="col-trades-prio-7">${trade.exit_price !== null ? formatPrice(trade.exit_price, exitDecimals) : '-'}</td>
+            <td class="col-trades-prio-7">${Number.isFinite(exitPriceVal) ? fmtExitP(exitPriceVal) : '-'}</td>
             <td class="col-trades-prio-7">${resultShort}</td>
-            <td class="${pnlClass(trade.profit || 0)}">${formatMoney(trade.profit || 0)}</td>
+            <td class="${pnlClass(profitValue)}">${formatMoney(profitValue)}</td>
             <td class="col-trades-prio-7">${accountInner}</td>
-        </tr>
-    `;
+        </tr>`,
+            animCells,
+        };
     };
 
-    let html = '';
+    const tradeRowData = [];
     for (const trade of rows) {
-        html += renderRow(trade, false);
+        tradeRowData.push(buildTradeRowData(trade, false));
         if (trade._combined && trade._children) {
             const children = trade._children.slice().sort((a, b) => {
                 const acctCmp = tradeAccountLabel(a).localeCompare(tradeAccountLabel(b));
                 return acctCmp || (toNum(b.exit_time_ms) - toNum(a.exit_time_ms));
             });
             for (const child of children) {
-                html += renderRow({ ...child, direction: deriveDirection(child) }, true);
+                tradeRowData.push(buildTradeRowData({ ...child, direction: deriveDirection(child) }, true));
             }
         }
     }
-    tbody.innerHTML = html;
 
+    diffTableRows(tbody, tradeRowData);
+
+    // Wire combine toggle handlers
     tbody.querySelectorAll('.combine-toggle').forEach((td) => {
+        if (td._toggleWired) return;
+        td._toggleWired = true;
         td.addEventListener('click', (event) => {
             event.preventDefault();
             const parentRow = td.closest('tr');
@@ -2505,15 +2667,34 @@ function updateExposureTable(positions) {
         final.push(...childRows);
     }
 
-    tbody.innerHTML = (final.length > 0 ? final : rows).map((row) => `
-        <tr class="${row.isSymbol ? 'exposure-symbol-row' : 'exposure-child-row'}">
+    const orderedRows = final.length > 0 ? final : rows;
+    const exposureRowData = orderedRows.map((row) => {
+        const rowKey = row.isSymbol ? `exp-sym|${row.symbol}` : `exp-acct|${row._parentSymbol}|${row.account}`;
+        const sizeVal = toNum(row.size);
+        const marginVal = toNum(row.margin, 0);
+        const pctVal = toNum(row.pct);
+        const animCells = [
+            { col: 1, key: `${rowKey}-size`, value: sizeVal, format: 'size' },
+            { col: 3, key: `${rowKey}-pct`, value: pctVal, format: 'pct' },
+        ];
+        if (marginVal > 0) {
+            animCells.push({ col: 2, key: `${rowKey}-margin`, value: marginVal, format: 'money' });
+        }
+        return {
+            key: rowKey,
+            html: `
+        <tr class="${row.isSymbol ? 'exposure-symbol-row' : 'exposure-child-row'}" data-row-key="${rowKey}">
             <td>${row.isSymbol ? row.symbol : ''}</td>
-            <td>${toNum(row.size).toFixed(2)}</td>
-            <td>${row.margin > 0 ? formatMoney(row.margin) : '-'}</td>
-            <td>${formatPct(row.pct)}</td>
+            <td>${sizeVal.toFixed(2)}</td>
+            <td>${marginVal > 0 ? formatMoney(marginVal) : '-'}</td>
+            <td>${formatPct(pctVal)}</td>
             <td><span class="account-tag">${row.account || '-'}</span></td>
-        </tr>
-    `).join('');
+        </tr>`,
+            animCells,
+        };
+    });
+
+    diffTableRows(tbody, exposureRowData);
 }
 
 function updateTradeControls(data) {
