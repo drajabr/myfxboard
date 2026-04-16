@@ -1582,22 +1582,13 @@ function syncAccountSelector(accounts) {
         selectorLabel.textContent = activeOption ? activeOption.textContent : `All Accounts (${accounts.length})`;
     }
 
-    // Cap selector width to the longest rendered label while still allowing flex-fill
-    // up to that cap when horizontal room exists.
-    const picker = document.getElementById('accountPicker');
-    const selectorWrap = document.querySelector('.account-selector');
+    // Size the selector button to the longest label to prevent width changes on switch.
     const selectorBtn = document.getElementById('accountSelectorBtn');
     const selectorChevron = selectorBtn ? selectorBtn.querySelector('.account-selector-btn__chevron') : null;
-    if (picker && selectorBtn && menuItems.length > 0) {
+    if (selectorBtn && menuItems.length > 0) {
         const ruler = document.createElement('span');
         ruler.className = 'account-selector-btn__label';
-        ruler.style.position = 'fixed';
-        ruler.style.left = '-9999px';
-        ruler.style.top = '-9999px';
-        ruler.style.visibility = 'hidden';
-        ruler.style.maxWidth = 'none';
-        ruler.style.overflow = 'visible';
-        ruler.style.textOverflow = 'clip';
+        ruler.style.cssText = 'position:fixed;left:-9999px;top:-9999px;visibility:hidden;max-width:none;overflow:visible;text-overflow:clip;';
         document.body.appendChild(ruler);
         let maxTextWidth = 0;
         for (const item of menuItems) {
@@ -1611,21 +1602,8 @@ function syncAccountSelector(accounts) {
         const borderX = toNum(parseFloat(btnStyles.borderLeftWidth), 0) + toNum(parseFloat(btnStyles.borderRightWidth), 0);
         const gap = toNum(parseFloat(btnStyles.gap), 0);
         const chevronWidth = selectorChevron ? selectorChevron.getBoundingClientRect().width : 10;
-        const maxW = Math.ceil(maxTextWidth + paddingX + borderX + gap + chevronWidth + 2);
-
-        if (maxW > 0) {
-            picker.style.maxWidth = `${maxW}px`;
-            if (selectorWrap) {
-                selectorWrap.style.maxWidth = `${maxW}px`;
-            }
-        }
-    } else {
-        if (picker) {
-            picker.style.maxWidth = '';
-        }
-        if (selectorWrap) {
-            selectorWrap.style.maxWidth = '';
-        }
+        const btnWidth = Math.ceil(maxTextWidth + paddingX + borderX + gap + chevronWidth + 2);
+        selectorBtn.style.width = btnWidth > 0 ? `${btnWidth}px` : '';
     }
 
     scheduleContentAdaptiveLayout();
@@ -1688,7 +1666,14 @@ function updateKpis(summary, periods, tradeMetrics, filteredSummary) {
     }
 
     if (balanceMetaEl) {
-        balanceMetaEl.textContent = `Accounts ${toNum(summary.accounts_count)} · Open ${toNum(summary.open_positions)}`;
+        if (!balanceMetaEl.querySelector('[data-anim-key]')) {
+            balanceMetaEl.innerHTML = 'Accounts <span data-anim-key="kpi-meta-accounts"></span> · Open <span data-anim-key="kpi-meta-open"></span>';
+        }
+        const accSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-accounts"]');
+        const openSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-open"]');
+        const fmtInt = v => String(Math.round(Number(v || 0)));
+        animateNumericByKey(accSpan, 'kpi-meta-accounts', toNum(summary.accounts_count), fmtInt, NON_LIVE_ANIM_MS);
+        animateNumericByKey(openSpan, 'kpi-meta-open', toNum(summary.open_positions), fmtInt, NON_LIVE_ANIM_MS);
         balanceMetaEl.className = 'label metric-card__meta';
     }
 
@@ -1696,14 +1681,13 @@ function updateKpis(summary, periods, tradeMetrics, filteredSummary) {
     animateNumericByKey(floatingEl, 'kpi-floating', toNum(summary.floating_pnl, 0), formatMoney, NON_LIVE_ANIM_MS);
 
     if (floatingMetaEl) {
-        floatingMetaEl.textContent = formatDeltaPct(floatingPct);
+        animateNumericByKey(floatingMetaEl, 'kpi-meta-floating-pct', floatingPct, formatDeltaPct, NON_LIVE_ANIM_MS);
         floatingMetaEl.className = `label metric-card__meta ${pnlClass(summary.floating_pnl)}`;
     }
 
     if (equityMetaEl) {
-        equityMetaEl.textContent = state.activeTradeFilter
-            ? `${formatDeltaPct(equityPct)} selected range`
-            : `${formatDeltaPct(equityPct)} all history`;
+        const eqSuffix = state.activeTradeFilter ? ' selected range' : ' all history';
+        animateNumericByKey(equityMetaEl, 'kpi-meta-equity-pct', equityPct, v => formatDeltaPct(v) + eqSuffix, NON_LIVE_ANIM_MS);
         equityMetaEl.className = `label metric-card__meta ${pnlClass(rangePnl)}`;
     }
 
@@ -1729,8 +1713,8 @@ function renderPeriodStats(periods) {
             <div class="metric-card">
                 <div class="label">${title}</div>
                 <div class="value ${pnlClass(p.pnl)}" data-anim-key="period-${key}-pnl" data-anim-value="${toNum(p.pnl, 0)}" data-anim-format="money">${formatMoney(p.pnl)}</div>
-                <div class="label period-meta period-meta--full">Trades ${p.trades_count} · Win ${formatPct(p.win_rate_pct)}</div>
-                <div class="label period-meta period-meta--short">T ${p.trades_count} · W ${formatPct(p.win_rate_pct)}</div>
+                <div class="label period-meta period-meta--full">Trades <span data-anim-key="period-${key}-trades" data-anim-value="${toNum(p.trades_count, 0)}" data-anim-format="int">${toNum(p.trades_count, 0)}</span> · Win <span data-anim-key="period-${key}-wr" data-anim-value="${toNum(p.win_rate_pct, 0)}" data-anim-format="pct">${formatPct(p.win_rate_pct)}</span></div>
+                <div class="label period-meta period-meta--short">T <span data-anim-key="period-${key}-trades-s" data-anim-value="${toNum(p.trades_count, 0)}" data-anim-format="int">${toNum(p.trades_count, 0)}</span> · W <span data-anim-key="period-${key}-wr-s" data-anim-value="${toNum(p.win_rate_pct, 0)}" data-anim-format="pct">${formatPct(p.win_rate_pct)}</span></div>
             </div>
         `;
     }).join('');
@@ -2796,10 +2780,31 @@ function updateDistributionProgress(wins, losses, neutralCount, directionalOutco
     lossesSegment.style.display = losses > 0 ? '' : 'none';
     neutralSegment.style.display = neutralCount > 0 ? '' : 'none';
 
-    allText.textContent = `${total} total`;
-    winsText.textContent = `W ${wins} (${winsPct.toFixed(1)}%)`;
-    lossesText.textContent = `L ${losses} (${lossesPct.toFixed(1)}%)`;
-    neutralText.textContent = `BE ${neutralCount} (${neutralPct.toFixed(1)}%)`;
+    const fmtInt = v => String(Math.round(Number(v || 0)));
+    const fmtPct1 = v => Number(v || 0).toFixed(1);
+    const animTotal = (el, k, val) => {
+        if (!el) return;
+        const tk = `dist-${k}-total`;
+        if (!el.querySelector(`[data-anim-key="${tk}"]`)) {
+            el.innerHTML = `<span data-anim-key="${tk}"></span> total`;
+        }
+        animateNumericByKey(el.querySelector(`[data-anim-key="${tk}"]`), tk, val, fmtInt, NON_LIVE_ANIM_MS);
+    };
+    const animOutcome = (el, k, prefix, count, pct) => {
+        if (!el) return;
+        const ck = `dist-${k}-n`;
+        const pk = `dist-${k}-p`;
+        if (!el.querySelector(`[data-anim-key="${ck}"]`)) {
+            el.innerHTML = `${prefix}<span data-anim-key="${ck}"></span> (<span data-anim-key="${pk}"></span>%)`;
+        }
+        animateNumericByKey(el.querySelector(`[data-anim-key="${ck}"]`), ck, count, fmtInt, NON_LIVE_ANIM_MS);
+        animateNumericByKey(el.querySelector(`[data-anim-key="${pk}"]`), pk, pct, fmtPct1, NON_LIVE_ANIM_MS);
+    };
+
+    animTotal(allText, 'all', total);
+    animOutcome(winsText, 'all-w', 'W ', wins, winsPct);
+    animOutcome(lossesText, 'all-l', 'L ', losses, lossesPct);
+    animOutcome(neutralText, 'all-be', 'BE ', neutralCount, neutralPct);
     winsText.parentElement.style.display = wins > 0 ? '' : 'none';
     lossesText.parentElement.style.display = losses > 0 ? '' : 'none';
     neutralText.parentElement.style.display = neutralCount > 0 ? '' : 'none';
@@ -2836,18 +2841,18 @@ function updateDistributionProgress(wins, losses, neutralCount, directionalOutco
     shortLossesSegment.style.display = shortLosses > 0 ? '' : 'none';
     shortNeutralSegment.style.display = shortNeutral > 0 ? '' : 'none';
 
-    longsText.textContent = `${longTotal} total`;
-    longWinsText.textContent = `W ${longWins} (${longWinsPct.toFixed(1)}%)`;
-    longLossesText.textContent = `L ${longLosses} (${longLossesPct.toFixed(1)}%)`;
-    longNeutralText.textContent = `BE ${longNeutral} (${longNeutralPct.toFixed(1)}%)`;
+    animTotal(longsText, 'long', longTotal);
+    animOutcome(longWinsText, 'long-w', 'W ', longWins, longWinsPct);
+    animOutcome(longLossesText, 'long-l', 'L ', longLosses, longLossesPct);
+    animOutcome(longNeutralText, 'long-be', 'BE ', longNeutral, longNeutralPct);
     longWinsText.parentElement.style.display = longWins > 0 ? '' : 'none';
     longLossesText.parentElement.style.display = longLosses > 0 ? '' : 'none';
     longNeutralText.parentElement.style.display = longNeutral > 0 ? '' : 'none';
 
-    shortsText.textContent = `${shortTotal} total`;
-    shortWinsText.textContent = `W ${shortWins} (${shortWinsPct.toFixed(1)}%)`;
-    shortLossesText.textContent = `L ${shortLosses} (${shortLossesPct.toFixed(1)}%)`;
-    shortNeutralText.textContent = `BE ${shortNeutral} (${shortNeutralPct.toFixed(1)}%)`;
+    animTotal(shortsText, 'short', shortTotal);
+    animOutcome(shortWinsText, 'short-w', 'W ', shortWins, shortWinsPct);
+    animOutcome(shortLossesText, 'short-l', 'L ', shortLosses, shortLossesPct);
+    animOutcome(shortNeutralText, 'short-be', 'BE ', shortNeutral, shortNeutralPct);
     shortWinsText.parentElement.style.display = shortWins > 0 ? '' : 'none';
     shortLossesText.parentElement.style.display = shortLosses > 0 ? '' : 'none';
     shortNeutralText.parentElement.style.display = shortNeutral > 0 ? '' : 'none';
@@ -3832,13 +3837,20 @@ function applyLivePnl(data) {
         applyPnlClass(equityEl, liveEquity - balance);
     }
     if (floatingMetaEl) {
-        floatingMetaEl.textContent = formatDeltaPct(floatingPct);
+        animateNumericByKey(floatingMetaEl, 'kpi-meta-floating-pct', floatingPct, formatDeltaPct);
         floatingMetaEl.className = `label metric-card__meta ${pnlClass(floatingPnl)}`;
     }
 
     const balanceMetaEl = document.getElementById('balanceMeta');
     if (balanceMetaEl && state.lastData?.summary) {
-        balanceMetaEl.textContent = `Accounts ${toNum(state.lastData.summary.accounts_count)} · Open ${toNum(state.lastData.summary.open_positions)}`;
+        if (!balanceMetaEl.querySelector('[data-anim-key]')) {
+            balanceMetaEl.innerHTML = 'Accounts <span data-anim-key="kpi-meta-accounts"></span> · Open <span data-anim-key="kpi-meta-open"></span>';
+        }
+        const accSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-accounts"]');
+        const openSpan = balanceMetaEl.querySelector('[data-anim-key="kpi-meta-open"]');
+        const fmtInt = v => String(Math.round(Number(v || 0)));
+        animateNumericByKey(accSpan, 'kpi-meta-accounts', toNum(state.lastData.summary.accounts_count), fmtInt);
+        animateNumericByKey(openSpan, 'kpi-meta-open', toNum(state.lastData.summary.open_positions), fmtInt);
         balanceMetaEl.className = 'label metric-card__meta';
     }
 

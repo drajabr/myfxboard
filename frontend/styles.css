@@ -282,18 +282,18 @@ body[data-layout='dense'] {
 
 .account-selector {
     min-width: 0;
-    flex: 1 1 0;
+    flex: 0 1 auto;
 }
 
 .account-picker {
     position: relative;
     min-width: 0;
-    flex: 1 1 0;
+    flex: 0 1 auto;
 }
 
 .header--controls-collapsed .account-selector,
 .header--controls-collapsed .account-picker {
-    flex: 1 1 0;
+    flex: 0 1 auto;
 }
 
 .account-selector--native {
@@ -301,7 +301,8 @@ body[data-layout='dense'] {
 }
 
 .account-selector-btn {
-    width: 100%;
+    width: max-content;
+    max-width: 100%;
     height: 36px;
     padding: 0 0.7rem;
     border-radius: 10px;

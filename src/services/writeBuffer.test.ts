@@ -7,7 +7,7 @@ vi.mock('../db/queries.js', () => ({
   },
 }));
 
-import { bufferSnapshot, flush, flushAndStop, startWriteBuffer } from './writeBuffer.js';
+import { bufferSnapshot, flush, flushAndStop } from './writeBuffer.js';
 import { snapshotQueries } from '../db/queries.js';
 
 const mockInsert = vi.mocked(snapshotQueries.insertSnapshot);
@@ -62,7 +62,7 @@ describe('writeBuffer', () => {
 
   it('guards against concurrent flushes (double-flush safe)', async () => {
     bufferSnapshot(makeSnapshot('acc1'));
-    const [r1, r2] = await Promise.all([flush(), flush()]);
+    await Promise.all([flush(), flush()]);
     // Both should resolve; only one should actually insert
     expect(mockInsert.mock.calls.length).toBeLessThanOrEqual(1);
   });
