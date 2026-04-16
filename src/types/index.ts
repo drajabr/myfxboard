@@ -11,6 +11,8 @@ export interface Account {
   last_history_hash: string | null;
   history_sync_cursor: string | null;
   history_in_sync: boolean;
+  equity: number | null;
+  balance: number | null;
 }
 
 export interface Position {

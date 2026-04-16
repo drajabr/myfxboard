@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   history_sync_cursor TEXT,
   history_in_sync BOOLEAN DEFAULT false,
   equity NUMERIC(20, 2),
+  balance NUMERIC(20, 2),
   nickname TEXT DEFAULT '',
   updated_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
 );
@@ -121,6 +122,7 @@ CREATE INDEX IF NOT EXISTS idx_unlock_sessions_expires ON unlock_sessions(expire
 
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_ingest_received_at BIGINT;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_history_hash TEXT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS balance NUMERIC(20, 2);
 
 DO $$
 BEGIN
