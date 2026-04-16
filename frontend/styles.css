@@ -293,6 +293,13 @@ body[data-layout='dense'] {
     flex: 1 1 120px;
 }
 
+.header--controls-collapsed .account-selector,
+.header--controls-collapsed .account-picker {
+    flex: 1 1 240px;
+    max-width: min(42vw, 420px);
+    min-width: 132px;
+}
+
 .account-selector--native {
     display: none;
 }
@@ -706,6 +713,34 @@ body[data-layout='dense'] {
     gap: var(--layout-gap);
 }
 
+.summary-spotlight.summary-spotlight--fit-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.summary-spotlight.summary-spotlight--fit-3 .metric-card {
+    grid-column: auto;
+}
+
+.summary-spotlight.summary-spotlight--fit-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.summary-spotlight.summary-spotlight--fit-2 .metric-card {
+    grid-column: auto;
+}
+
+.summary-spotlight.summary-spotlight--fit-2 .metric-card:first-child {
+    grid-column: 1 / -1;
+}
+
+.summary-spotlight.summary-spotlight--fit-1 {
+    grid-template-columns: 1fr;
+}
+
+.summary-spotlight.summary-spotlight--fit-1 .metric-card {
+    grid-column: 1 / -1;
+}
+
 .summary-spotlight .metric-card {
     grid-column: span 4;
 }
@@ -787,6 +822,11 @@ body[data-layout='dense'] .summary-spotlight .metric-card {
     display: flex;
     flex-wrap: wrap;
     gap: var(--layout-gap);
+}
+
+#periodStatsGrid.metric-grid--adaptive-fit {
+    display: grid;
+    grid-template-columns: repeat(var(--fit-cols, 5), minmax(0, 1fr));
 }
 
 #periodStatsGrid .metric-card {
@@ -1245,6 +1285,10 @@ body:not([data-layout='live']) .table-section--exposure {
     align-content: stretch;
 }
 
+#tradeMetricsGrid.metric-grid--adaptive-fit {
+    grid-template-columns: repeat(var(--fit-cols, 2), minmax(0, 1fr));
+}
+
 .table-section--with-table-head .data-table {
     margin-top: 0;
 }
@@ -1572,7 +1616,7 @@ body[data-layout='dense'] #monthCalendar {
 
 .year-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(var(--fit-cols-year, 3), minmax(0, 1fr));
     gap: 0.6rem;
 }
 
@@ -1883,15 +1927,22 @@ body[data-layout='dense'] .pos-combine-child {
     }
 
     .account-selector {
-        flex: 1 1 72px;
-        max-width: 96px;
-        min-width: 0;
+        flex: 1 1 38vw;
+        max-width: min(48vw, 240px);
+        min-width: 112px;
     }
 
     .account-picker {
-        flex: 1 1 72px;
-        max-width: 96px;
-        min-width: 0;
+        flex: 1 1 38vw;
+        max-width: min(48vw, 240px);
+        min-width: 112px;
+    }
+
+    .header--controls-collapsed .account-selector,
+    .header--controls-collapsed .account-picker {
+        flex: 1 1 54vw;
+        max-width: min(68vw, 320px);
+        min-width: 132px;
     }
 
     .account-selector-btn {
@@ -1899,10 +1950,33 @@ body[data-layout='dense'] .pos-combine-child {
     }
 
     .account-selector-menu {
-        right: auto;
+        left: auto;
+        right: 0;
         width: max-content;
         min-width: 100%;
-        max-width: min(82vw, 360px);
+        max-width: min(88vw, 360px);
+    }
+}
+
+@media (orientation: portrait) and (max-width: 900px) {
+    .account-selector,
+    .account-picker {
+        flex: 1 1 34vw;
+        max-width: min(50vw, 260px);
+        min-width: 120px;
+    }
+
+    .account-selector-menu {
+        left: auto;
+        right: 0;
+        max-width: min(92vw, 420px);
+    }
+
+    .header--controls-collapsed .account-selector,
+    .header--controls-collapsed .account-picker {
+        flex: 1 1 46vw;
+        max-width: min(66vw, 380px);
+        min-width: 130px;
     }
 }
 
@@ -1924,41 +1998,50 @@ body[data-layout='dense'] .pos-combine-child {
         grid-column: 1 / -1;
     }
 
-    .summary-spotlight {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .summary-spotlight .metric-card {
-        grid-column: auto;
-    }
-
-    .summary-spotlight .metric-card:first-child {
-        grid-column: 1 / -1;
-    }
-
     #tradeMetricsGrid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .year-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
 @media (max-width: 480px) {
-    .summary-spotlight {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .summary-spotlight .metric-card:first-child {
-        grid-column: 1 / -1;
-    }
-
     #tradeMetricsGrid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+}
 
-    .year-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+.header--compact .brand-title {
+    font-size: 1.78rem;
+}
+
+.header--compact .account-picker {
+    max-width: 150px;
+    flex-basis: 94px;
+}
+
+.header--compact.header--controls-collapsed .account-picker {
+    max-width: min(44vw, 360px);
+    flex-basis: 220px;
+}
+
+.header--ultra-compact .brand-title {
+    font-size: 1.58rem;
+}
+
+.header--ultra-compact .account-picker {
+    max-width: 96px;
+    flex-basis: 66px;
+}
+
+.header--ultra-compact.header--controls-collapsed .account-picker {
+    max-width: min(52vw, 320px);
+    flex-basis: 180px;
+}
+
+.header--allow-wrap {
+    flex-wrap: wrap;
+}
+
+.header--allow-wrap .header-left,
+.header--allow-wrap .header-right {
+    flex: 1 0 100%;
 }

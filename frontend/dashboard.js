@@ -174,7 +174,7 @@ const chartSignatures = {};
 const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
 let deferredInstallPrompt = null;
 const numericTweenRaf = new WeakMap();
-let quickControlsHoverCloseTimer = null;
+let adaptiveLayoutRaf = 0;
 
 
 function formatMoney(value) {
@@ -371,6 +371,146 @@ function formatDeltaPct(value) {
     const arrow = numeric > 0 ? '↑' : numeric < 0 ? '↓' : '→';
     const sign = numeric > 0 ? '+' : '';
     return `${arrow} ${sign}${numeric.toFixed(1)}%`;
+}
+
+function hasInlineOverflow(el) {
+    if (!el) {
+        return false;
+    }
+    return (el.scrollWidth - el.clientWidth) > 1;
+}
+
+function hasBlockOverflow(el) {
+    if (!el) {
+        return false;
+    }
+    return (el.scrollHeight - el.clientHeight) > 1;
+}
+
+function cardTextFits(card) {
+    if (!card) {
+        return true;
+    }
+    const probes = card.querySelectorAll('.label, .value, .metric-card__meta, .year-card__meta, .month, .calendar-pnl, .calendar-trades');
+    for (const probe of probes) {
+        if (hasInlineOverflow(probe) || hasBlockOverflow(probe)) {
+            return false;
+        }
+    }
+    return !hasInlineOverflow(card);
+}
+
+function chooseBestColumnCount(container, cards, maxCols, minCols, applyCols) {
+    if (!container || !cards.length) {
+        return minCols;
+    }
+
+    let chosen = minCols;
+    for (let cols = maxCols; cols >= minCols; cols -= 1) {
+        applyCols(cols);
+        void container.offsetWidth;
+        const overflowed = cards.some((card) => !cardTextFits(card));
+        if (!overflowed) {
+            chosen = cols;
+            break;
+        }
+    }
+
+    applyCols(chosen);
+    return chosen;
+}
+
+function adaptSummarySpotlightByContent() {
+    const container = document.querySelector('.summary-spotlight');
+    if (!container) {
+        return;
+    }
+
+    const cards = Array.from(container.querySelectorAll('.metric-card'));
+    if (!cards.length) {
+        return;
+    }
+
+    const applyCols = (cols) => {
+        container.classList.remove('summary-spotlight--fit-1', 'summary-spotlight--fit-2', 'summary-spotlight--fit-3');
+        container.classList.add(`summary-spotlight--fit-${cols}`);
+    };
+
+    chooseBestColumnCount(container, cards, 3, 1, applyCols);
+}
+
+function adaptMetricGridByContent(containerId, maxCols, minCols) {
+    const container = document.getElementById(containerId);
+    if (!container) {
+        return;
+    }
+    const cards = Array.from(container.querySelectorAll('.metric-card'));
+    if (!cards.length) {
+        return;
+    }
+
+    const applyCols = (cols) => {
+        container.classList.add('metric-grid--adaptive-fit');
+        container.style.setProperty('--fit-cols', String(cols));
+    };
+
+    chooseBestColumnCount(container, cards, maxCols, minCols, applyCols);
+}
+
+function adaptYearGridByContent() {
+    const container = document.getElementById('yearCalendar');
+    if (!container) {
+        return;
+    }
+
+    const cards = Array.from(container.querySelectorAll('.year-card'));
+    if (!cards.length) {
+        return;
+    }
+
+    const applyCols = (cols) => {
+        container.style.setProperty('--fit-cols-year', String(cols));
+    };
+
+    // Keep at least 2 columns even in tight portrait.
+    chooseBestColumnCount(container, cards, 3, 2, applyCols);
+}
+
+function adaptHeaderByContent() {
+    const header = document.querySelector('.header');
+    if (!header) {
+        return;
+    }
+
+    header.classList.remove('header--compact', 'header--ultra-compact', 'header--allow-wrap');
+    if (hasInlineOverflow(header)) {
+        header.classList.add('header--compact');
+    }
+    if (hasInlineOverflow(header)) {
+        header.classList.add('header--ultra-compact');
+    }
+    if (hasInlineOverflow(header)) {
+        header.classList.add('header--allow-wrap');
+    }
+}
+
+function applyContentAdaptiveLayout() {
+    adaptHeaderByContent();
+    adaptSummarySpotlightByContent();
+    adaptMetricGridByContent('periodStatsGrid', 5, 1);
+    adaptMetricGridByContent('tradeMetricsGrid', 2, 1);
+    adaptYearGridByContent();
+    syncHeaderHeightVar();
+}
+
+function scheduleContentAdaptiveLayout() {
+    if (adaptiveLayoutRaf) {
+        cancelAnimationFrame(adaptiveLayoutRaf);
+    }
+    adaptiveLayoutRaf = requestAnimationFrame(() => {
+        adaptiveLayoutRaf = 0;
+        applyContentAdaptiveLayout();
+    });
 }
 
 function buildAccountDisplay(accountId, primaryName, secondaryName) {
@@ -609,13 +749,19 @@ function applyFontSize(fontSizeKey) {
 function setQuickControlsCollapsed(collapsed) {
     const controls = document.getElementById('uiQuickControls');
     const toggleBtn = document.getElementById('uiControlsToggleBtn');
-    if (!controls || !toggleBtn) {
-        return;
+    if (controls) {
+        controls.classList.toggle('is-collapsed', collapsed);
     }
-    controls.classList.toggle('is-collapsed', collapsed);
-    toggleBtn.textContent = collapsed ? '⚙' : '✕';
-    toggleBtn.title = collapsed ? 'Show style controls' : 'Hide style controls';
-    toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    if (toggleBtn) {
+        toggleBtn.textContent = collapsed ? '⚙' : '✕';
+        toggleBtn.title = collapsed ? 'Show style controls' : 'Hide style controls';
+        toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    }
+    const header = document.querySelector('.header');
+    if (header) {
+        header.classList.toggle('header--controls-collapsed', collapsed);
+    }
+    scheduleContentAdaptiveLayout();
 }
 
 function cycleAccentTheme() {
@@ -684,13 +830,6 @@ function hideQuickPicker() {
     picker.classList.add('is-collapsed');
     picker.innerHTML = '';
     state.activeQuickPicker = null;
-}
-
-function clearQuickControlsHoverTimer() {
-    if (quickControlsHoverCloseTimer) {
-        clearTimeout(quickControlsHoverCloseTimer);
-        quickControlsHoverCloseTimer = null;
-    }
 }
 
 function setQuickControlsPinned(open) {
@@ -854,7 +993,8 @@ function showQuickPicker(type, triggerEl, action = {}) {
     }
 
     picker.querySelectorAll('.quick-picker-option').forEach((btn) => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', (event) => {
+            event.stopPropagation();
             const selectedType = btn.getAttribute('data-picker-type');
             const selectedKey = btn.getAttribute('data-picker-key');
             if (!selectedType || !selectedKey) {
@@ -897,7 +1037,7 @@ function syncHeaderHeightVar() {
 function applyLayout(layoutMode) {
     const mode = LAYOUT_MODES.includes(layoutMode) ? layoutMode : 'default';
     document.body.setAttribute('data-layout', mode);
-    syncHeaderHeightVar();
+    scheduleContentAdaptiveLayout();
     const layoutBtn = document.getElementById('layoutCycleBtn');
     const layoutModeLabel = document.getElementById('layoutModeLabel');
     if (layoutBtn) {
@@ -1001,41 +1141,37 @@ function applyThemeFromSystemIfNeeded() {
 }
 
 function setupEventListeners() {
-    document.getElementById('backgroundCycleBtn').addEventListener('click', (e) => showQuickPicker('background', e.currentTarget));
-    document.getElementById('themeToggleBtn').addEventListener('click', (e) => showQuickPicker('theme', e.currentTarget));
-    document.getElementById('accentCycleBtn').addEventListener('click', (e) => showQuickPicker('accent', e.currentTarget));
-    document.getElementById('fontCycleBtn').addEventListener('click', (e) => showQuickPicker('font', e.currentTarget));
-    document.getElementById('fontSizeCycleBtn').addEventListener('click', (e) => showQuickPicker('fontSize', e.currentTarget));
+    document.getElementById('backgroundCycleBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        showQuickPicker('background', e.currentTarget);
+    });
+    document.getElementById('themeToggleBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        showQuickPicker('theme', e.currentTarget);
+    });
+    document.getElementById('accentCycleBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        showQuickPicker('accent', e.currentTarget);
+    });
+    document.getElementById('fontCycleBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        showQuickPicker('font', e.currentTarget);
+    });
+    document.getElementById('fontSizeCycleBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        showQuickPicker('fontSize', e.currentTarget);
+    });
     const layoutCycleBtn = document.getElementById('layoutCycleBtn');
     if (layoutCycleBtn) {
-        layoutCycleBtn.addEventListener('click', (e) => showQuickPicker('layout', e.currentTarget));
+        layoutCycleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showQuickPicker('layout', e.currentTarget);
+        });
     }
     document.getElementById('uiControlsToggleBtn').addEventListener('click', toggleQuickControls);
 
     const controlsWrap = document.querySelector('.ui-controls-wrap');
     const quickControls = document.getElementById('uiQuickControls');
-    if (controlsWrap && quickControls) {
-        controlsWrap.addEventListener('mouseenter', () => {
-            if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
-                clearQuickControlsHoverTimer();
-                setQuickControlsPinned(true);
-                if (quickControls.classList.contains('is-collapsed')) {
-                    localStorage.setItem(QUICK_CONTROLS_COLLAPSED_KEY, '0');
-                    setQuickControlsCollapsed(false);
-                }
-            }
-        });
-
-        controlsWrap.addEventListener('mouseleave', () => {
-            if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
-                return;
-            }
-            clearQuickControlsHoverTimer();
-            quickControlsHoverCloseTimer = setTimeout(() => {
-                setQuickControlsPinned(false);
-            }, 180);
-        });
-    }
 
     const refreshNowBtn = document.getElementById('refreshNowBtn');
     if (refreshNowBtn) {
@@ -1080,7 +1216,8 @@ function setupEventListeners() {
 
     const accountBtn = document.getElementById('accountSelectorBtn');
     if (accountBtn) {
-        accountBtn.addEventListener('click', () => {
+        accountBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
             toggleAccountMenu();
         });
     }
@@ -1256,7 +1393,7 @@ function setupEventListeners() {
     themeMedia.addEventListener('change', applyThemeFromSystemIfNeeded);
 
     window.addEventListener('resize', () => {
-        syncHeaderHeightVar();
+        scheduleContentAdaptiveLayout();
         scheduleAutoFitOpenPositions();
         scheduleAutoFitHistoricTrades();
     });
@@ -1355,6 +1492,8 @@ function syncAccountSelector(accounts) {
         const activeOption = selector.options[selector.selectedIndex];
         selectorLabel.textContent = activeOption ? activeOption.textContent : `All Accounts (${accounts.length})`;
     }
+
+    scheduleContentAdaptiveLayout();
 }
 
 async function fetchAnalytics(accountId) {
@@ -1699,12 +1838,16 @@ function updatePositionsTable(positions) {
             const totalPnl = g.children.reduce((s, p) => s + toNum(p.unrealized_pnl || 0), 0);
             const signedEntryNotional = g.children.reduce((s, p) => s + (toNum(p.entry_price) * signedSize(p)), 0);
             const signedCurrentNotional = g.children.reduce((s, p) => s + (toNum(p.current_price || p.entry_price) * signedSize(p)), 0);
+            const absTotalSize = g.children.reduce((s, p) => s + Math.abs(toNum(p.size, 0)), 0);
+            const absCurrentNotional = g.children.reduce((s, p) => {
+                return s + (toNum(p.current_price || p.entry_price) * Math.abs(toNum(p.size, 0)));
+            }, 0);
             const avgEntry = !isHedged
                 ? signedEntryNotional / netSizeSigned
                 : null;
             const avgCurrent = !isHedged
                 ? signedCurrentNotional / netSizeSigned
-                : null;
+                : (absTotalSize > 0 ? absCurrentNotional / absTotalSize : null);
             const directionalChildren = isHedged
                 ? []
                 : g.children.filter((p) => String(p.direction || '').toUpperCase() === netDirection);
@@ -3410,6 +3553,8 @@ function renderDashboard(data) {
     if (yearResetBtn) {
         yearResetBtn.classList.toggle('is-filter-reset-off', !yearNeedsReset);
     }
+
+    scheduleContentAdaptiveLayout();
 }
 
 function simpleDataFingerprint(data) {
