@@ -141,14 +141,18 @@ string DC_BuildPositionsJson() {
       string symbol = PositionGetString(POSITION_SYMBOL);
       double tick_size = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
       double tick_value = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
+      if(tick_value <= 0)
+         tick_value = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE_PROFIT);
+      if(tick_value <= 0)
+         tick_value = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE_LOSS);
       if(tick_size <= 0 || tick_value <= 0) {
          if(g_dc.debug_log) PrintFormat("[DC] WARNING %s tick_size=%.10f tick_value=%.10f — SL$/TP$ will be unavailable", symbol, tick_size, tick_value);
       }
       double volume = PositionGetDouble(POSITION_VOLUME);
       double open_price = PositionGetDouble(POSITION_PRICE_OPEN);
-      double pos_margin = 0;
-      if(!OrderCalcMargin(dir == POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
-                           symbol, volume, open_price, pos_margin)) {
+      double pos_margin = PositionGetDouble(POSITION_MARGIN);
+      if(pos_margin <= 0 && !OrderCalcMargin(dir == POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
+                  symbol, volume, open_price, pos_margin)) {
          if(g_dc.debug_log) PrintFormat("[DC] WARNING OrderCalcMargin failed for %s vol=%.2f price=%.5f", symbol, volume, open_price);
       }
       j += StringFormat(
@@ -350,7 +354,7 @@ bool DC_Sync() {
    }
    if(g_dc.last_sync_ms > 0 && now_ms < g_dc.last_sync_ms + (ulong)g_dc.sync_interval_ms) return false;
    long   timestamp_ms     = (long)TimeGMT() * 1000;
-   string current_account  = StringFormat("%lld", (long)AccountInfoInteger(ACCOUNT_LOGIN));
+   string current_account  = LongToString(AccountInfoInteger(ACCOUNT_LOGIN));
    long   latest_closed_ms = 0;
    string latest_closed_id = "";
    string positions_json     = DC_BuildPositionsJson();

@@ -282,6 +282,20 @@ function estimatePositionTargetPnl(position, targetPrice) {
         return ticks * tickValue * size;
     }
 
+    // Fallback: infer per-price-unit PnL from current live position state.
+    // This keeps SL$/TP$ informative on brokers that don't expose tick specs.
+    const currentPrice = toNum(position?.current_price, NaN);
+    const currentPnl = toNum(position?.unrealized_pnl, NaN);
+    const priceDeltaNow = (currentPrice - entryPrice) * direction;
+    if (Number.isFinite(currentPrice)
+        && Number.isFinite(currentPnl)
+        && Number.isFinite(priceDeltaNow)
+        && Math.abs(priceDeltaNow) > 1e-9) {
+        const pnlPerPriceUnit = currentPnl / priceDeltaNow;
+        const targetDelta = (target - entryPrice) * direction;
+        return targetDelta * pnlPerPriceUnit;
+    }
+
     // Without symbol specifications (tick_size / tick_value) we cannot
     // reliably estimate the monetary SL/TP value — return null so the
     // UI shows '-' instead of a misleading number.

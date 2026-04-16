@@ -120,7 +120,7 @@ public:
 
       // Backend auth expects unix epoch milliseconds, not terminal uptime milliseconds.
       long timestamp_ms = (long)TimeGMT() * 1000;
-      string current_account = StringFormat("%lld", (long)AccountInfoInteger(ACCOUNT_LOGIN));
+      string current_account = LongToString(AccountInfoInteger(ACCOUNT_LOGIN));
 
       long latest_closed_time_ms = 0;
       string latest_closed_deal_id = "";
@@ -221,17 +221,23 @@ private:
          double volume      = PositionGetDouble(POSITION_VOLUME);
          double open_price  = PositionGetDouble(POSITION_PRICE_OPEN);
          double current_price = PositionGetDouble(POSITION_PRICE_CURRENT);
-         double tick_size   = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
-         double tick_value  = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
+         double tick_size = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+         double tick_value = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
+         if(tick_value <= 0)
+            tick_value = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE_PROFIT);
+         if(tick_value <= 0)
+            tick_value = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE_LOSS);
          double sl          = PositionGetDouble(POSITION_SL);
          double tp          = PositionGetDouble(POSITION_TP);
          ulong  open_time_ms = PositionGetInteger(POSITION_TIME_MSC);
          double pnl         = PositionGetDouble(POSITION_PROFIT);
          ENUM_POSITION_TYPE dir = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
          string direction = (dir == POSITION_TYPE_BUY) ? "BUY" : "SELL";
-         double pos_margin = 0;
-         OrderCalcMargin(dir == POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
-                          symbol, volume, open_price, pos_margin);
+         double pos_margin = PositionGetDouble(POSITION_MARGIN);
+         if(pos_margin <= 0) {
+            OrderCalcMargin(dir == POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
+                    symbol, volume, open_price, pos_margin);
+         }
 
          positions_json += StringFormat(
             "{\"symbol\":\"%s\",\"volume\":%.2f,\"direction\":\"%s\",\"open_price\":%.5f,\"current_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"tick_size\":%.10f,\"tick_value\":%.10f,\"margin\":%.2f,\"open_time_ms\":%lld,\"pnl\":%.2f}",

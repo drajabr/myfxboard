@@ -1162,33 +1162,70 @@ router.get('/:accountId/dashboard', async (req: Request, res: Response) => {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
-    const [positionsRaw, recentTradesRaw, latestSnapshotRaw, todayTradesRaw] = await Promise.all([
-      positionQueries.findByAccount(accountId),
+    const dashboardDays = Math.min(Math.max(parseInt(req.query.days as string, 10) || 90, 2), 3650);
+    const toMs = Date.now();
+    const fromMs = toMs - (dashboardDays * 24 * 60 * 60 * 1000);
+
+    const [recentTradesRaw, latestSnapshotRaw, todayTradesRaw, curveSnapshotsRaw, dbPositionsFallback] = await Promise.all([
       tradeQueries.findRecentByAccount(accountId, 20),
       snapshotQueries.findLatestByAccount(accountId),
       tradeQueries.findByExitRange(accountId, startOfDay.getTime(), Date.now()),
+      snapshotQueries.findByAccountAndRange(accountId, fromMs, toMs),
+      positionQueries.findByAccount(accountId),
     ]);
 
+    const cachePositionsRaw = getPositions(accountId);
+    const positionsRaw = cachePositionsRaw.length > 0 ? cachePositionsRaw : (dbPositionsFallback || []);
     const positions = positionsRaw.map(normalizePosition);
     const recentTrades = recentTradesRaw.map(normalizeTrade);
     const latestSnapshot = latestSnapshotRaw ? normalizeSnapshot(latestSnapshotRaw) : null;
+    const curveSnapshots = (curveSnapshotsRaw || []).map(normalizeSnapshot)
+      .sort((a, b) => a.snapshot_time_ms - b.snapshot_time_ms);
 
     const todaysTrades = todayTradesRaw.map(normalizeTrade);
     const todaysPnL = todaysTrades
       .reduce((sum, t) => sum + (t.profit || 0), 0);
 
-    // Calculate aggregates
-    const totalEquity = latestSnapshot?.equity || latestSnapshot?.balance || 0;
     const floatingPnL = positions.reduce((sum, p) => sum + (p.unrealized_pnl || 0), 0);
+    const liveSnap = getAggregated([accountId]);
+    const equity = liveSnap.equity !== undefined && liveSnap.equity > 0
+      ? liveSnap.equity
+      : (latestSnapshot?.equity || latestSnapshot?.balance || 0);
+    const balance = liveSnap.balance !== undefined && liveSnap.balance > 0
+      ? liveSnap.balance
+      : (latestSnapshot?.balance || 0);
+
+    const marginFromPositions = positions.reduce((sum, p) => sum + (p.margin || 0), 0);
+    const usedMargin = liveSnap.marginUsed !== undefined
+      ? liveSnap.marginUsed
+      : marginFromPositions;
+    const freeMargin = Math.max(0, equity - usedMargin);
+
+    const returnsDaily = curveSnapshots.map((s) => s.return_pct || 0);
+    const weeklyMap = new Map<string, number>();
+    const monthlyMap = new Map<string, number>();
+    for (const s of curveSnapshots) {
+      const ts = new Date(s.snapshot_time_ms);
+      const year = ts.getUTCFullYear();
+      const month = ts.getUTCMonth() + 1;
+      const day = ts.getUTCDate();
+      const week = Math.ceil(day / 7);
+      const weekKey = `${year}-W${String(week).padStart(2, '0')}`;
+      const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+      weeklyMap.set(weekKey, s.return_pct || 0);
+      monthlyMap.set(monthKey, s.return_pct || 0);
+    }
+
+    const equityCurve = curveSnapshots.map((s) => ({ ts: s.snapshot_time_ms, equity: s.equity }));
 
     const dashboard: DashboardSummary = {
       summary: {
-        equity: totalEquity,
-        balance: latestSnapshot?.balance || 0,
-        free_margin: Math.max(0, totalEquity - (positions.length > 0 ? floatingPnL : 0)),
-        used_margin: positions.length > 0 ? floatingPnL : 0,
+        equity,
+        balance,
+        free_margin: freeMargin,
+        used_margin: usedMargin,
         current_pnl: floatingPnL,
-        current_return_pct: totalEquity > 0 ? (floatingPnL / totalEquity) * 100 : 0,
+        current_return_pct: balance > 0 ? (floatingPnL / balance) * 100 : 0,
         risk_reward_ratio: 1.5,
       },
       positions,
@@ -1202,8 +1239,12 @@ router.get('/:accountId/dashboard', async (req: Request, res: Response) => {
         largest_loss: Math.min(...recentTrades.map(t => t.profit || 0), 0),
       },
       charts: {
-        equity_curve: [], // TODO: fetch from snapshots table
-        returns: { daily: [], weekly: [], monthly: [] },
+        equity_curve: equityCurve,
+        returns: {
+          daily: returnsDaily,
+          weekly: Array.from(weeklyMap.values()),
+          monthly: Array.from(monthlyMap.values()),
+        },
       },
     };
 
@@ -1221,8 +1262,13 @@ router.get('/:accountId/dashboard', async (req: Request, res: Response) => {
 router.get('/:accountId/positions', async (req: Request, res: Response) => {
   try {
     const { accountId } = req.params;
+    const cachedPositions = getPositions(accountId);
+    if (cachedPositions.length > 0) {
+      return res.json(cachedPositions.map(normalizePosition));
+    }
+
     const positions = await positionQueries.findByAccount(accountId);
-    res.json(positions.map(normalizePosition));
+    return res.json(positions.map(normalizePosition));
   } catch (error) {
     console.error('Positions endpoint error:', error);
     res.status(500).json({ error: 'Failed to fetch positions' });

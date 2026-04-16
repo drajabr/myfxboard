@@ -84,6 +84,7 @@ describe('GET /api/account/:accountId/dashboard', () => {
     vi.mocked(tradeQueries.findRecentByAccount).mockResolvedValue([]);
     vi.mocked(tradeQueries.findByExitRange).mockResolvedValue([]);
     vi.mocked(snapshotQueries.findLatestByAccount).mockResolvedValue(null);
+    vi.mocked(snapshotQueries.findByAccountAndRange).mockResolvedValue([]);
   });
 
   it('returns 404 for unknown account', async () => {
@@ -94,12 +95,31 @@ describe('GET /api/account/:accountId/dashboard', () => {
   });
 
   it('returns dashboard data for valid account', async () => {
+    vi.mocked(snapshotQueries.findLatestByAccount).mockResolvedValue({
+      id: 1,
+      account_id: '123',
+      date: '2026-01-01',
+      snapshot_time_ms: 1000,
+      equity: 10500,
+      balance: 10000,
+      return_pct: 5,
+      trades_count: 10,
+      wins: 6,
+      losses: 4,
+    } as any);
+    vi.mocked(snapshotQueries.findByAccountAndRange).mockResolvedValue([
+      { id: 1, account_id: '123', date: '2026-01-01', snapshot_time_ms: 1000, equity: 10000, balance: 9500, return_pct: 2, trades_count: 10, wins: 6, losses: 4 },
+      { id: 2, account_id: '123', date: '2026-01-02', snapshot_time_ms: 2000, equity: 10200, balance: 9600, return_pct: 3, trades_count: 12, wins: 7, losses: 5 },
+    ] as any);
     const app = makeApp();
     const res = await request(app).get('/api/account/123/dashboard');
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('summary');
     expect(res.body).toHaveProperty('positions');
     expect(res.body).toHaveProperty('todays_stats');
+    expect(res.body.summary.used_margin).toBe(0);
+    expect(res.body.charts.equity_curve).toHaveLength(2);
+    expect(res.body.charts.returns.daily).toHaveLength(2);
   });
 });
 
