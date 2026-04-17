@@ -178,6 +178,9 @@ const numericTweenRaf = new WeakMap();
 const numericTweenState = new Map();
 let adaptiveLayoutRaf = 0;
 const NON_LIVE_ANIM_MS = 2000;
+// Live tween duration must be shorter than LIVE_STREAM_MIN_EMIT_MS so each
+// tween finishes before the next pump fires, preventing cascading restarts.
+const LIVE_ANIM_MS = Math.max(100, LIVE_STREAM_MIN_EMIT_MS - 60); // ~273ms
 
 /* ── Scroll-into-view deferred animation ── */
 const deferredAnimations = new Map();
@@ -2115,7 +2118,7 @@ function scheduleAutoFitHistoricTrades() {
     });
 }
 
-function updatePositionsTable(positions) {
+function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
     const tbody = document.getElementById('positionsTable');
     const prevPositionValues = state.livePositionValues || new Map();
     const nextPositionValues = new Map();
@@ -2343,7 +2346,7 @@ function updatePositionsTable(positions) {
         }
     }
 
-    diffTableRows(tbody, rowDataList);
+    diffTableRows(tbody, rowDataList, durationMs);
 
     // Wire combine toggle handlers
     tbody.querySelectorAll('.pos-combine-toggle').forEach((td) => {
@@ -2654,7 +2657,7 @@ function updateTradesTable(trades) {
     scheduleAutoFitHistoricTrades();
 }
 
-function updateExposureTable(positions) {
+function updateExposureTable(positions, durationMs = NON_LIVE_ANIM_MS) {
     const tbody = document.getElementById('exposureTable');
     const source = Array.isArray(positions) ? positions : [];
 
@@ -2777,7 +2780,7 @@ function updateExposureTable(positions) {
         };
     });
 
-    diffTableRows(tbody, exposureRowData);
+    diffTableRows(tbody, exposureRowData, durationMs);
 }
 
 function updateTradeControls(data) {
@@ -4163,14 +4166,14 @@ function applyLivePnl(data) {
         }
     }
 
-    animateNumericText(floatingEl, floatingPnl, formatMoney);
+    animateNumericText(floatingEl, floatingPnl, formatMoney, LIVE_ANIM_MS);
     applyPnlClass(floatingEl, floatingPnl);
     if (equityEl) {
-        animateNumericText(equityEl, liveEquity, formatMoney);
+        animateNumericText(equityEl, liveEquity, formatMoney, LIVE_ANIM_MS);
         applyPnlClass(equityEl, liveEquity - balance);
     }
     if (floatingMetaEl) {
-        animateNumericByKey(floatingMetaEl, 'kpi-meta-floating-pct', floatingPct, formatDeltaPct);
+        animateNumericByKey(floatingMetaEl, 'kpi-meta-floating-pct', floatingPct, formatDeltaPct, LIVE_ANIM_MS);
         floatingMetaEl.className = `label metric-card__meta ${pnlClass(floatingPnl)}`;
     }
 
@@ -4184,14 +4187,14 @@ function applyLivePnl(data) {
         const marginUsed = toNum(state.lastData.summary.margin_used, 0);
         const bal = toNum(state.lastData.summary.balance, 0);
         const allocPct = bal !== 0 ? (marginUsed / bal) * 100 : 0;
-        animateNumericByKey(allocSpan, 'kpi-meta-allocated', marginUsed, formatMoney);
-        animateNumericByKey(pctSpan, 'kpi-meta-alloc-pct', allocPct, v => v.toFixed(1) + '%');
+        animateNumericByKey(allocSpan, 'kpi-meta-allocated', marginUsed, formatMoney, LIVE_ANIM_MS);
+        animateNumericByKey(pctSpan, 'kpi-meta-alloc-pct', allocPct, v => v.toFixed(1) + '%', LIVE_ANIM_MS);
         balanceMetaEl.className = 'label metric-card__meta';
     }
 
     if (Array.isArray(data.positions)) {
-        updatePositionsTable(data.positions);
-        updateExposureTable(data.positions);
+        updatePositionsTable(data.positions, LIVE_ANIM_MS);
+        updateExposureTable(data.positions, LIVE_ANIM_MS);
     }
 
     updateLastUpdatedLabel(Date.now());
