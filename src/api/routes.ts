@@ -1027,7 +1027,7 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
   try {
     const accountIdParam = (req.query.accountId as string) || 'all';
     const liveAccountRows = await resolveAccountRows(accountIdParam);
-    let accountIds: string[] = liveAccountRows.map((a) => a.account_id);
+    const accountIds: string[] = liveAccountRows.map((a) => a.account_id);
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
