@@ -148,7 +148,7 @@ export const accountQueries = {
           SET account_name = CASE WHEN COALESCE(NULLIF($2, ''), '') <> '' THEN $2 ELSE account_name END,
               broker = CASE WHEN COALESCE(NULLIF($3, ''), '') <> '' THEN $3 ELSE broker END,
               nickname = CASE WHEN COALESCE(NULLIF($4, ''), '') <> '' THEN $4 ELSE nickname END,
-              category = CASE WHEN $5 IS NOT NULL THEN $5 ELSE category END
+              category = CASE WHEN $5::TEXT IS NOT NULL THEN $5::TEXT ELSE category END
        WHERE account_id = $1
        RETURNING *`,
       [account_id, accountName, broker, nickname, category]
