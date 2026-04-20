@@ -134,22 +134,24 @@ export const accountQueries = {
 
   async updateIdentity(
     account_id: string,
-    identity: { account_name?: string; broker?: string; nickname?: string },
+    identity: { account_name?: string; broker?: string; nickname?: string; category?: string },
     client?: pg.PoolClient
   ) {
     const q = getQueryFn(client);
     const accountName = String(identity.account_name || '').trim();
     const broker = String(identity.broker || '').trim();
     const nickname = String(identity.nickname || '').trim();
+    const category = typeof identity.category === 'string' ? identity.category.trim() : null;
 
     const result = await q(
       `UPDATE accounts
           SET account_name = CASE WHEN COALESCE(NULLIF($2, ''), '') <> '' THEN $2 ELSE account_name END,
               broker = CASE WHEN COALESCE(NULLIF($3, ''), '') <> '' THEN $3 ELSE broker END,
-              nickname = CASE WHEN COALESCE(NULLIF($4, ''), '') <> '' THEN $4 ELSE nickname END
+              nickname = CASE WHEN COALESCE(NULLIF($4, ''), '') <> '' THEN $4 ELSE nickname END,
+              category = CASE WHEN $5 IS NOT NULL THEN $5 ELSE category END
        WHERE account_id = $1
        RETURNING *`,
-      [account_id, accountName, broker, nickname]
+      [account_id, accountName, broker, nickname, category]
     );
 
     return result.rows[0] || null;

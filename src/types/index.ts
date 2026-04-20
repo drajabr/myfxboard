@@ -13,6 +13,7 @@ export interface Account {
   history_in_sync: boolean;
   equity: number | null;
   balance: number | null;
+  category: string | null;
 }
 
 export interface Position {

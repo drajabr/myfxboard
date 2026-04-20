@@ -259,11 +259,13 @@ router.post(
       const nickname = String(accountData?.nickname || '').trim();
       const accountName = String(accountData?.account_name || nickname).trim();
       const broker = String(accountData?.broker || '').trim();
-      if (nickname || accountName || broker) {
+      const category = typeof accountData?.category === 'string' ? accountData.category : undefined;
+      if (nickname || accountName || broker || category !== undefined) {
         await accountQueries.updateIdentity(accountId, {
           nickname: nickname || undefined,
           account_name: accountName || undefined,
           broker: broker || undefined,
+          category,
         });
       }
 

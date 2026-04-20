@@ -76,6 +76,7 @@ export const ingestPayloadSchema = z.object({
     nickname: z.string().optional(),
     account_name: z.string().optional(),
     broker: z.string().optional(),
+    category: z.string().optional(),
   }),
   sync_id: z.string().min(1),
   ea_latest_closed_time_ms: z.number(),

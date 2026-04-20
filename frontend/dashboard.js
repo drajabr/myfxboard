@@ -1714,6 +1714,19 @@ function syncAccountSelector(accounts) {
     const selectorBtn = document.getElementById('accountSelectorBtn');
     const selectorChevron = selectorBtn ? selectorBtn.querySelector('.account-selector-btn__chevron') : null;
     const selected = localStorage.getItem('selectedAccount') || '';
+
+    // Collect all distinct categories across accounts (each account may have comma-separated categories)
+    const categoryCountMap = new Map(); // category → count of accounts
+    accounts.forEach((acc) => {
+        const raw = String(acc.category || '').trim();
+        if (!raw) return;
+        raw.split(',').forEach((c) => {
+            const cat = c.trim();
+            if (cat) categoryCountMap.set(cat, (categoryCountMap.get(cat) || 0) + 1);
+        });
+    });
+    const categories = [...categoryCountMap.keys()].sort((a, b) => a.localeCompare(b));
+
     selector.innerHTML = `<option value="">All Accounts (${accounts.length})</option>`;
     const menuItems = [{
         value: '',
@@ -1721,7 +1734,27 @@ function syncAccountSelector(accounts) {
         title: `All Accounts (${accounts.length})`,
         fullLabel: `All Accounts (${accounts.length})`,
         compactLabel: `All Accounts (${accounts.length})`,
+        isGroup: false,
     }];
+
+    // Category group options
+    categories.forEach((cat) => {
+        const count = categoryCountMap.get(cat);
+        const value = `cat:${cat}`;
+        const label = `${cat} (${count})`;
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        selector.appendChild(option);
+        menuItems.push({
+            value,
+            label,
+            title: `Category: ${cat} — ${count} account${count !== 1 ? 's' : ''}`,
+            fullLabel: label,
+            compactLabel: cat,
+            isGroup: true,
+        });
+    });
 
     const now = Date.now();
     const healthThresholdMs = 5 * 60 * 1000;
@@ -1744,6 +1777,7 @@ function syncAccountSelector(accounts) {
             title: fullLabelText,
             fullLabel: fullLabelText,
             compactLabel: compactLabelText,
+            isGroup: false,
         });
     });
 
@@ -1753,9 +1787,36 @@ function syncAccountSelector(accounts) {
     }
 
     if (selectorMenu) {
-        selectorMenu.innerHTML = menuItems.map((item) => `
-            <button class="account-option ${item.value === selector.value ? 'is-active' : ''}" type="button" data-account-value="${item.value}" title="${item.title}">${item.label}</button>
-        `).join('');
+        const parts = [];
+        let lastWasGroup = false;
+        for (const item of menuItems) {
+            if (item.isGroup && !lastWasGroup && parts.length > 0) {
+                parts.push(`<div class="account-option-separator"></div>`);
+            }
+            const groupClass = item.isGroup ? ' account-option--group' : '';
+            parts.push(`<button class="account-option${groupClass} ${item.value === selector.value ? 'is-active' : ''}" type="button" data-account-value="${item.value}" title="${item.title}">${item.label}</button>`);
+            lastWasGroup = item.isGroup;
+        }
+        // Add a separator before the individual accounts section if there are categories
+        if (categories.length > 0) {
+            const catEnd = 1 + categories.length; // index after last category item
+            // Already inserted inline above; rebuild with separator after categories
+            const allParts = [];
+            for (let i = 0; i < menuItems.length; i++) {
+                const item = menuItems[i];
+                const groupClass = item.isGroup ? ' account-option--group' : '';
+                // Separator between "All Accounts" and first category
+                if (i === 1 && item.isGroup) allParts.push(`<div class="account-option-separator"></div>`);
+                // Separator after last category, before first individual account
+                if (i === catEnd && !item.isGroup && i > 1) allParts.push(`<div class="account-option-separator"></div>`);
+                allParts.push(`<button class="account-option${groupClass} ${item.value === selector.value ? 'is-active' : ''}" type="button" data-account-value="${item.value}" title="${item.title}">${item.label}</button>`);
+            }
+            selectorMenu.innerHTML = allParts.join('');
+        } else {
+            selectorMenu.innerHTML = menuItems.map((item) => `
+                <button class="account-option ${item.value === selector.value ? 'is-active' : ''}" type="button" data-account-value="${item.value}" title="${item.title}">${item.label}</button>
+            `).join('');
+        }
 
         selectorMenu.querySelectorAll('.account-option').forEach((btn) => {
             btn.addEventListener('click', () => {

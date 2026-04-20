@@ -384,6 +384,19 @@ body[data-layout='dense'] {
     background: color-mix(in srgb, var(--accent) 14%, var(--surface));
 }
 
+.account-option--group {
+    font-size: 0.88em;
+    font-weight: 600;
+    opacity: 0.85;
+    padding-left: 0.75rem;
+}
+
+.account-option-separator {
+    height: 1px;
+    background: color-mix(in srgb, var(--text) 12%, transparent);
+    margin: 0.2rem 0.3rem;
+}
+
 .header-reset-btn {
     font-size: 1.05rem;
     font-weight: 700;

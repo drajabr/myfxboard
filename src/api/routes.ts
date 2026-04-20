@@ -413,6 +413,29 @@ const buildEmptyAnalyticsResponse = (
   };
 };
 
+/**
+ * Resolves an `accountId` query param to a list of account rows.
+ * Supports three forms:
+ *   'all'     → every account in the DB
+ *   'cat:X'   → accounts whose category field includes the label X (comma-separated)
+ *   '<id>'    → single account by account_id
+ */
+const resolveAccountRows = async (accountIdParam: string): Promise<any[]> => {
+  if (accountIdParam === 'all') {
+    return accountQueries.list();
+  }
+  if (accountIdParam.startsWith('cat:')) {
+    const label = accountIdParam.slice(4).trim().toLowerCase();
+    const all = await accountQueries.list();
+    return all.filter((a: any) => {
+      const cats = String(a.category || '').split(',').map((c: string) => c.trim().toLowerCase()).filter(Boolean);
+      return cats.includes(label);
+    });
+  }
+  const account = await accountQueries.findById(accountIdParam);
+  return account ? [account] : [];
+};
+
 router.get('/analytics', async (req: Request, res: Response) => {
   try {
     const accountIdParam = (req.query.accountId as string) || 'all';
@@ -425,19 +448,11 @@ router.get('/analytics', async (req: Request, res: Response) => {
     const hasTradeFilter = Number.isFinite(tradeFromMs) || Number.isFinite(tradeToMs);
     const nowMs = Date.now();
 
-    let accountIds: string[] = [];
-    let accountRows: any[] = [];
-    if (accountIdParam === 'all') {
-      accountRows = await accountQueries.list();
-      accountIds = accountRows.map((a) => a.account_id);
-    } else {
-      const account = await accountQueries.findById(accountIdParam);
-      accountRows = account ? [account] : [];
-      accountIds = accountRows.map((a) => a.account_id);
-    }
+    const accountRows: any[] = await resolveAccountRows(accountIdParam);
+    const accountIds = accountRows.map((a) => a.account_id);
 
     if (accountIds.length === 0) {
-      if (accountIdParam === 'all') {
+      if (accountIdParam === 'all' || accountIdParam.startsWith('cat:')) {
         return res.json(buildEmptyAnalyticsResponse(accountIdParam, nowMs, monthShift, yearShift, curveDays));
       }
       return res.status(404).json({ error: 'No matching accounts found' });
@@ -1011,14 +1026,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
 router.get('/live-pnl/stream', async (req: Request, res: Response) => {
   try {
     const accountIdParam = (req.query.accountId as string) || 'all';
-    let accountIds: string[] = [];
-    if (accountIdParam === 'all') {
-      const allAccounts = await accountQueries.list();
-      accountIds = allAccounts.map((a) => a.account_id);
-    } else {
-      const account = await accountQueries.findById(accountIdParam);
-      accountIds = account ? [account.account_id] : [];
-    }
+    const liveAccountRows = await resolveAccountRows(accountIdParam);
+    let accountIds: string[] = liveAccountRows.map((a) => a.account_id);
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -1105,14 +1114,8 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
 router.get('/history/stream', async (req: Request, res: Response) => {
   try {
     const accountIdParam = (req.query.accountId as string) || 'all';
-    let accountIds: string[] = [];
-    if (accountIdParam === 'all') {
-      const allAccounts = await accountQueries.list();
-      accountIds = allAccounts.map((a) => a.account_id);
-    } else {
-      const account = await accountQueries.findById(accountIdParam);
-      accountIds = account ? [account.account_id] : [];
-    }
+    const histAccountRows = await resolveAccountRows(accountIdParam);
+    const accountIds: string[] = histAccountRows.map((a) => a.account_id);
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -1356,6 +1359,7 @@ router.get('', async (_req: Request, res: Response) => {
       account_name: a.account_name,
       broker: a.broker,
       nickname: a.nickname || '',
+      category: a.category || '',
       created_at: a.created_at,
       last_sync_at: a.last_sync_at,
       last_ingest_received_at: a.last_ingest_received_at,
