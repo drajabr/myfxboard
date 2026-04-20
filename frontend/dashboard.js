@@ -177,7 +177,7 @@ let deferredInstallPrompt = null;
 const numericTweenRaf = new WeakMap();
 const numericTweenState = new Map();
 let adaptiveLayoutRaf = 0;
-const NON_LIVE_ANIM_MS = 2000;
+const NON_LIVE_ANIM_MS = 1000;
 // Live tween duration must be shorter than LIVE_STREAM_MIN_EMIT_MS so each
 // tween finishes before the next pump fires, preventing cascading restarts.
 const LIVE_ANIM_MS = Math.max(100, LIVE_STREAM_MIN_EMIT_MS - 60); // ~273ms
