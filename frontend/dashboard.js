@@ -181,6 +181,7 @@ const NON_LIVE_ANIM_MS = 1000;
 // Live tween duration must be shorter than LIVE_STREAM_MIN_EMIT_MS so each
 // tween finishes before the next pump fires, preventing cascading restarts.
 const LIVE_ANIM_MS = Math.max(100, LIVE_STREAM_MIN_EMIT_MS - 60); // ~273ms
+const HISTORIC_TRADES_VIEWPORT_PAD_PX = 16;
 
 /* ── Scroll-into-view deferred animation ── */
 const deferredAnimations = new Map();
@@ -1303,6 +1304,8 @@ function applyLayout(layoutMode) {
     const mode = LAYOUT_MODES.includes(layoutMode) ? layoutMode : 'default';
     document.body.setAttribute('data-layout', mode);
     scheduleContentAdaptiveLayout();
+    scheduleHistoricTradesViewportHeight();
+    scheduleAutoFitHistoricTrades();
     const layoutBtn = document.getElementById('layoutCycleBtn');
     const layoutModeLabel = document.getElementById('layoutModeLabel');
     if (layoutBtn) {
@@ -1664,6 +1667,7 @@ function setupEventListeners() {
         }
         scheduleContentAdaptiveLayout();
         scheduleAutoFitOpenPositions();
+        scheduleHistoricTradesViewportHeight();
         scheduleAutoFitHistoricTrades();
     });
 
@@ -1682,6 +1686,7 @@ function setupEventListeners() {
                     } else if (y < lastScrollY - 2 || y <= 0) {
                         header.classList.remove('header--hidden');
                     }
+                    scheduleHistoricTradesViewportHeight();
                     lastScrollY = y;
                     ticking = false;
                 });
@@ -2109,6 +2114,7 @@ const TRADES_TABLE_PRIORITY_LEVELS = [7, 6, 5, 4, 3, 2];
 const tableAutoFitRaf = {
     positions: 0,
     trades: 0,
+    historicHeight: 0,
 };
 
 function getTableScrollHost(table) {
@@ -2179,7 +2185,35 @@ function scheduleAutoFitHistoricTrades() {
     }
     tableAutoFitRaf.trades = requestAnimationFrame(() => {
         tableAutoFitRaf.trades = 0;
+        fitHistoricTradesViewportHeight();
         autoFitPriorityColumns('tradesTable', 'col-trades-prio-', TRADES_TABLE_PRIORITY_LEVELS);
+    });
+}
+
+function fitHistoricTradesViewportHeight() {
+    const section = document.querySelector('.table-section--historic');
+    if (!section || section.offsetParent === null) {
+        return;
+    }
+
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    if (!viewportHeight) {
+        return;
+    }
+
+    const sectionTop = section.getBoundingClientRect().top;
+    const clampedTop = Math.min(Math.max(sectionTop, 0), viewportHeight);
+    const sectionHeight = Math.max(320, Math.floor(viewportHeight - clampedTop - HISTORIC_TRADES_VIEWPORT_PAD_PX));
+    section.style.height = `${sectionHeight}px`;
+}
+
+function scheduleHistoricTradesViewportHeight() {
+    if (tableAutoFitRaf.historicHeight) {
+        cancelAnimationFrame(tableAutoFitRaf.historicHeight);
+    }
+    tableAutoFitRaf.historicHeight = requestAnimationFrame(() => {
+        tableAutoFitRaf.historicHeight = 0;
+        fitHistoricTradesViewportHeight();
     });
 }
 
@@ -4371,6 +4405,7 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error('Error loading accounts:', error);
     });
     loadDashboard();
+    scheduleHistoricTradesViewportHeight();
     syncAdaptiveRefreshMode();
     startLivePnlPolling();
     startHistoryPolling();
