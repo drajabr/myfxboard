@@ -14,6 +14,7 @@ input group "myfxboard Dashboard Connection"
 input string InpDashboardUrl         = "http://localhost:3000"; // Server URL
 input string InpDashboardPSK         = "";                      // Shared Secret (PSK)
 input string InpAccountNickname      = "";                      // Account Nickname (optional)
+input string InpAccountCategory      = "";                      // Account Category (optional, comma-separated)
 input int    InpSyncIntervalSec      = 1;                       // Sync Interval (seconds)
 input int    InpKeepaliveSec         = 0;                       // Legacy unused field
 input datetime InpHistoryStartDate   = 0;                       // History Start Date (0=all history)
@@ -120,7 +121,7 @@ public:
 
       // Backend auth expects unix epoch milliseconds, not terminal uptime milliseconds.
       long timestamp_ms = (long)TimeGMT() * 1000;
-      string current_account = LongToString(AccountInfoInteger(ACCOUNT_LOGIN));
+      string current_account = StringFormat("%lld", AccountInfoInteger(ACCOUNT_LOGIN));
 
       long latest_closed_time_ms = 0;
       string latest_closed_deal_id = "";
@@ -233,10 +234,11 @@ private:
          double pnl         = PositionGetDouble(POSITION_PROFIT);
          ENUM_POSITION_TYPE dir = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
          string direction = (dir == POSITION_TYPE_BUY) ? "BUY" : "SELL";
-         double pos_margin = PositionGetDouble(POSITION_MARGIN);
-         if(pos_margin <= 0) {
-            OrderCalcMargin(dir == POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
-                    symbol, volume, open_price, pos_margin);
+         double pos_margin = 0.0;
+         if(!OrderCalcMargin(dir == POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
+                    symbol, volume, open_price, pos_margin)) {
+            if(s_debug_log)
+               PrintFormat("[DashboardConnector] WARNING OrderCalcMargin failed for %s vol=%.2f price=%.5f", symbol, volume, open_price);
          }
 
          positions_json += StringFormat(
@@ -384,10 +386,12 @@ private:
       string broker_name  = AccountInfoString(ACCOUNT_COMPANY);
       string nickname     = InpAccountNickname;
       string display_name = (StringTrimLeft(StringTrimRight(nickname)) != "") ? nickname : broker_name;
+      string category     = InpAccountCategory;
+      StringTrimLeft(category); StringTrimRight(category);
 
       string account_json = StringFormat(
-         "{\"equity\":%.2f,\"balance\":%.2f,\"margin_used\":%.2f,\"margin_free\":%.2f,\"margin_level\":%.2f,\"nickname\":\"%s\"}",
-         equity, balance, margin_used, margin_free, margin_level, display_name
+         "{\"equity\":%.2f,\"balance\":%.2f,\"margin_used\":%.2f,\"margin_free\":%.2f,\"margin_level\":%.2f,\"nickname\":\"%s\",\"category\":\"%s\"}",
+         equity, balance, margin_used, margin_free, margin_level, display_name, category
       );
 
       return account_json;

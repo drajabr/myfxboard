@@ -1541,8 +1541,10 @@ function setupEventListeners() {
     document.getElementById('combineTradesBtn').addEventListener('click', () => {
         state.combinePositions = !state.combinePositions;
         saveStoredBoolean(COMBINE_TRADES_KEY, state.combinePositions);
+        state.expandedTradeGroups.clear();
         applyGroupingButtonState();
         if (state.lastData) {
+            document.getElementById('tradesTable').innerHTML = '';
             updateTradesTable(getRecentTrades(state.lastData));
             updateTradeControls(state.lastData);
         }
@@ -1551,8 +1553,10 @@ function setupEventListeners() {
     document.getElementById('combinePositionsBtn').addEventListener('click', () => {
         state.combineOpenPositions = !state.combineOpenPositions;
         saveStoredBoolean(COMBINE_POSITIONS_KEY, state.combineOpenPositions);
+        state.expandedPositionGroups.clear();
         applyGroupingButtonState();
         if (state.lastData) {
+            document.getElementById('positionsTable').innerHTML = '';
             updatePositionsTable(state.lastData.positions);
         }
     });
@@ -3322,7 +3326,7 @@ function updateCharts(data) {
     });
 
     const baseCurveRows = tradePnlCurveRows.length > 0 ? tradePnlCurveRows : fallbackCurve;
-    const visibleBaseCurveRows = baseCurveRows.slice(-MAX_PNL_CURVE_POINTS);
+    const visibleBaseCurveRows = state.activeTradeFilter ? baseCurveRows.slice(-MAX_PNL_CURVE_POINTS) : baseCurveRows;
     const mainCurveRows = visibleBaseCurveRows.slice();
     const lastBaseValue = mainCurveRows.length > 0 ? toNum(mainCurveRows[mainCurveRows.length - 1].cumulative_pnl) : 0;
     const floatingTs = mainCurveRows.length > 0 ? toNum(mainCurveRows[mainCurveRows.length - 1].ts, Date.now()) + 1 : Date.now();

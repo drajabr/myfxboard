@@ -150,8 +150,8 @@ string DC_BuildPositionsJson() {
       }
       double volume = PositionGetDouble(POSITION_VOLUME);
       double open_price = PositionGetDouble(POSITION_PRICE_OPEN);
-      double pos_margin = PositionGetDouble(POSITION_MARGIN);
-      if(pos_margin <= 0 && !OrderCalcMargin(dir == POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
+      double pos_margin = 0.0;
+      if(!OrderCalcMargin(dir == POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
                   symbol, volume, open_price, pos_margin)) {
          if(g_dc.debug_log) PrintFormat("[DC] WARNING OrderCalcMargin failed for %s vol=%.2f price=%.5f", symbol, volume, open_price);
       }
@@ -262,9 +262,11 @@ string DC_BuildAccountJson() {
    string nickname = InpAccountNickname;
    StringTrimRight(nickname); StringTrimLeft(nickname);
    string display_name = (nickname != "") ? nickname : AccountInfoString(ACCOUNT_COMPANY);
+   string category = InpAccountCategory;
+   StringTrimRight(category); StringTrimLeft(category);
    return StringFormat(
-      "{\"equity\":%.2f,\"balance\":%.2f,\"margin_used\":%.2f,\"margin_free\":%.2f,\"margin_level\":%.2f,\"nickname\":\"%s\"}",
-      equity, balance, margin_used, margin_free, margin_level, display_name);
+      "{\"equity\":%.2f,\"balance\":%.2f,\"margin_used\":%.2f,\"margin_free\":%.2f,\"margin_level\":%.2f,\"nickname\":\"%s\",\"category\":\"%s\"}",
+      equity, balance, margin_used, margin_free, margin_level, display_name, category);
 }
 
 void DC_PostSync(string payload, string account_number, string signature, long timestamp_ms,
@@ -364,7 +366,7 @@ bool DC_Sync() {
    }
    if(g_dc.last_sync_ms > 0 && now_ms < g_dc.last_sync_ms + (ulong)g_dc.sync_interval_ms) return false;
    long   timestamp_ms     = (long)TimeGMT() * 1000;
-   string current_account  = LongToString(AccountInfoInteger(ACCOUNT_LOGIN));
+   string current_account  = StringFormat("%lld", AccountInfoInteger(ACCOUNT_LOGIN));
    long   latest_closed_ms = 0;
    string latest_closed_id = "";
    string positions_json     = DC_BuildPositionsJson();
@@ -592,6 +594,7 @@ input int    InpDashboardSyncIntervalSec = 1;        // Sync Interval (seconds)
 input datetime InpDashboardHistoryStartDate = 0;     // History Start Date (0=all history)
 input bool   InpDashboardDebugLog = false;           // Debug Logging
 input string InpAccountNickname = ""; // Account Nickname (optional)
+input string InpAccountCategory = ""; // Account Category (optional, comma-separated)
 
 // === GLOBALS ==="
 CTrade trade;
