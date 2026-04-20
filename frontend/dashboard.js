@@ -2276,7 +2276,7 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
         const tpDecimals = pos._tpDecimals || inferPriceDecimals([pos], 'avg_tp');
         const rowKey = pos._combined
             ? `combined|${normalizeSymbol(pos.symbol)}`
-            : `${normalizeSymbol(pos.symbol)}|${String(pos.account_id || '-')}|${String(pos.direction || '-')}`
+            : `${isChild ? 'pos-child' : 'pos'}|${normalizeSymbol(pos.symbol)}|${String(pos.account_id || '-')}|${String(pos.direction || '-')}`
               + `|${String(toNum(pos.open_time_ms, 0))}|${String(toNum(pos.size, 0))}`;
         const pnlValue = toNum(pos.unrealized_pnl || 0);
         const marginValue = toNum(pos.margin, 0);
@@ -2570,7 +2570,7 @@ function updateTradesTable(trades) {
         const profitValue = toNum(trade.profit || 0);
         const rowKey = trade._combined
             ? `trade-combined|${normalizeSymbol(trade.symbol)}|${trade.direction}`
-            : `trade|${normalizeSymbol(trade.symbol)}|${String(trade.account_id || '-')}|${toNum(trade.entry_time_ms)}|${toNum(trade.exit_time_ms)}`;
+            : `${isChild ? 'trade-child' : 'trade'}|${normalizeSymbol(trade.symbol)}|${String(trade.account_id || '-')}|${toNum(trade.entry_time_ms)}|${toNum(trade.exit_time_ms)}`;
         const fmtEntryP = v => formatPrice(v, entryDecimals);
         const fmtExitP = v => formatPrice(v, exitDecimals);
         const entryPriceVal = toNum(trade.entry_price, NaN);
