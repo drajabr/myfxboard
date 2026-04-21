@@ -2382,8 +2382,8 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
         const groups = {};
         for (const pos of rows) {
             const normSym = pos._sortSymbol || normalizeSymbol(pos.symbol);
-            const acctKey = String(pos.account_id || '-');
-            const groupKey = `${normSym}|${acctKey}`;
+            // Group by symbol only — combines positions from all accounts for same instrument
+            const groupKey = normSym;
             if (!groups[groupKey]) {
                 groups[groupKey] = { symbol: pos.symbol, normSymbol: normSym, children: [] };
             }
@@ -2394,8 +2394,12 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
                 return { ...g.children[0], _combined: false };
             }
             const children = g.children.slice().sort((a, b) => {
+                // Stable sort: account → direction → open time. Never sort by live values (PnL/price)
                 const acctCmp = positionAccountLabel(a).localeCompare(positionAccountLabel(b));
-                return acctCmp || (toNum(b.unrealized_pnl) - toNum(a.unrealized_pnl));
+                if (acctCmp !== 0) return acctCmp;
+                const dirCmp = String(a.direction || '').localeCompare(String(b.direction || ''));
+                if (dirCmp !== 0) return dirCmp;
+                return toNum(a.open_time_ms) - toNum(b.open_time_ms);
             });
             const eps = 1e-9;
             const buySize = g.children.reduce((s, p) => {
@@ -2491,6 +2495,9 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
         } else {
             cmp = toNum(aVal) - toNum(bVal);
         }
+        // Stable secondary sort: symbol → open_time_ms so equal-key rows never swap
+        if (cmp === 0) cmp = (a._sortSymbol || '').localeCompare(b._sortSymbol || '');
+        if (cmp === 0) cmp = toNum(a.open_time_ms) - toNum(b.open_time_ms);
         return state.positionsSort.direction === 'asc' ? cmp : -cmp;
     });
 
@@ -2513,7 +2520,7 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
         const rowKey = pos._combined
             ? `combined|${normalizeSymbol(pos.symbol)}`
             : `${isChild ? 'pos-child' : 'pos'}|${normalizeSymbol(pos.symbol)}|${String(pos.account_id || '-')}|${String(pos.direction || '-')}`
-              + `|${String(toNum(pos.open_time_ms, 0))}|${String(toNum(pos.size, 0))}`;
+              + `|${String(toNum(pos.open_time_ms, 0))}`;
         const pnlValue = toNum(pos.unrealized_pnl || 0);
         const marginValue = toNum(pos.margin, 0);
         const entryValue = pos.entry_price !== null ? toNum(pos.entry_price, NaN) : NaN;
