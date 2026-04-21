@@ -226,6 +226,7 @@ router.post(
           for (const trade of closed_trades) {
             const tradeRecord: Omit<Trade, 'id'> = {
               account_id: accountId,
+              currency: typeof accountData?.currency === 'string' ? accountData.currency.trim().toUpperCase() || null : null,
               symbol: trade.symbol,
               size: trade.volume,
               entry_price: trade.entry,

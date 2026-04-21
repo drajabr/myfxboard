@@ -12,6 +12,7 @@ import type { CachedPosition } from '../types/index.js';
 
 const makePosition = (overrides: Partial<CachedPosition> = {}): CachedPosition => ({
   account_id: 'acc1',
+  currency: null,
   symbol: 'EURUSD',
   size: 0.1,
   direction: 'BUY',

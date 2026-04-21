@@ -274,7 +274,7 @@ string DC_BuildClosedTradesJson(long &latest_closed_time_ms, string &latest_clos
       long first_entry_time_ms;
       bool active;
    };
-   PositionEntry entries[2000];
+   static PositionEntry entries[2000];
    int entry_count = 0;
    for(int i = 0; i < deals_total; i++) {
       ulong deal_ticket = HistoryDealGetTicket(i);
@@ -472,7 +472,6 @@ bool DC_Sync() {
       return false;
    }
    if(g_dc.last_sync_ms > 0 && now_ms < g_dc.last_sync_ms + (ulong)g_dc.sync_interval_ms) return false;
-   DC_RefreshAccountToReportingRate();
    long   timestamp_ms     = (long)TimeGMT() * 1000;
    string current_account  = StringFormat("%lld", AccountInfoInteger(ACCOUNT_LOGIN));
    if(!g_dc.startup_health_checked) {
@@ -483,10 +482,10 @@ bool DC_Sync() {
       string startup_history_hash = (g_dc.last_ack_history_hash != "") ? g_dc.last_ack_history_hash : "0";
       if(DC_PostHealthCheck(current_account, timestamp_ms, startup_history_hash, hsr, srv_hash, reporting_currency)) {
          if(reporting_currency != "") g_server_reporting_currency = reporting_currency;
-         DC_RefreshAccountToReportingRate();
          if(srv_hash != "") g_dc.last_ack_history_hash = srv_hash;
       }
    }
+   DC_RefreshAccountToReportingRate();
    long   latest_closed_ms = 0;
    string latest_closed_id = "";
    string positions_json     = DC_BuildPositionsJson();
@@ -569,11 +568,6 @@ void UpdateStatusDot() {
       ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_HIDDEN,      true);
       ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_BACK,        false);
    }
-   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_CORNER,    CORNER_RIGHT_UPPER);
-   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_XDISTANCE, 18);
-   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_YDISTANCE, 5);
-   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_XSIZE,     13);
-   ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_YSIZE,     13);
    if(dot_color != g_last_dot_color) {
       ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_BGCOLOR, dot_color);
       ObjectSetInteger(chart_id, MFXB_DOT_OBJ, OBJPROP_COLOR,   dot_color);
@@ -2753,13 +2747,6 @@ void OnTick() {
    // DASHBOARD: Update only P&L (price changes)
    if(InpEnableDashboard && state.exists) {
       UpdatePnLOnly();
-   }
-   
-   // PARTIALS: Check if price crossed levels
-   if(InpEnablePartials && state.exists && state.partialsValid) {
-      if(state.partialMethod == PARTIAL_STOP || state.partialMethod == PARTIAL_LIMIT) {
-         // execution stubs removed
-      }
    }
    
    // PARTIALS: Check for TP changes (catch manual TP moves that might miss transaction events)
