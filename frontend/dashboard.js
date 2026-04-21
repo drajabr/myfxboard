@@ -888,6 +888,14 @@ function comparablePositionSizeAbs(position) {
     return Math.abs(toNum(position?.size, 0));
 }
 
+function comparableTradeSizeAbs(trade) {
+    const units = toNum(trade?.size_units, NaN);
+    if (Number.isFinite(units) && Math.abs(units) > 0) {
+        return Math.abs(units);
+    }
+    return Math.abs(toNum(trade?.size, 0));
+}
+
 function positionAccountLabel(position) {
     const groupedCount = toNum(position?._accountCount, 0);
     if (groupedCount > 1) {
@@ -2478,6 +2486,8 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
             } else {
                 cmp = String(aVal || '').localeCompare(String(bVal || ''));
             }
+        } else if (key === 'size') {
+            cmp = comparablePositionSizeAbs(a) - comparablePositionSizeAbs(b);
         } else {
             cmp = toNum(aVal) - toNum(bVal);
         }
@@ -2540,7 +2550,7 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
         <tr${childAttr} data-row-key="${rowKey}">
             ${symbolCell}
             <td><span class="dir-badge ${side === 'BUY' ? 'dir-buy' : side === 'SELL' ? 'dir-sell' : ''}">${side}</span></td>
-            <td>${formatSize(pos.size)}</td>
+            <td>${formatSize(comparablePositionSizeAbs(pos))}</td>
             <td class="col-pos-prio-4">${Number.isFinite(entryValue) ? fmtEntry(entryValue) : '-'}</td>
             <td class="col-pos-prio-5">${Number.isFinite(slValue) ? fmtSl(slValue) : '-'}</td>
             <td class="col-pos-prio-5 ${pnlClass(slMoneyValue || 0)}">${Number.isFinite(slMoneyValue) ? formatMoney(slMoneyValue, moneyCtx) : '-'}</td>
@@ -2707,13 +2717,13 @@ function combineOverlappingTrades(trades) {
             const t = g.children[0];
             return { ...t, direction: g.direction, _combined: false };
         }
-        const totalSize = g.children.reduce((s, t) => s + toNum(t.size), 0);
+        const totalSize = g.children.reduce((s, t) => s + comparableTradeSizeAbs(t), 0);
         const totalPnl = g.children.reduce((s, t) => s + toNum(t.profit), 0);
         const avgEntry = totalSize > 0
-            ? g.children.reduce((s, t) => s + toNum(t.entry_price) * toNum(t.size), 0) / totalSize
+            ? g.children.reduce((s, t) => s + toNum(t.entry_price) * comparableTradeSizeAbs(t), 0) / totalSize
             : 0;
         const avgExit = totalSize > 0
-            ? g.children.reduce((s, t) => s + (t.exit_price !== null ? toNum(t.exit_price) : toNum(t.entry_price)) * toNum(t.size), 0) / totalSize
+            ? g.children.reduce((s, t) => s + (t.exit_price !== null ? toNum(t.exit_price) : toNum(t.entry_price)) * comparableTradeSizeAbs(t), 0) / totalSize
             : 0;
         const firstOpen = Math.min(...g.children.map(c => toNum(c.entry_time_ms)));
         const lastClose = Math.max(...g.children.map(c => toNum(c.exit_time_ms) || toNum(c.entry_time_ms)));
@@ -2772,6 +2782,8 @@ function updateTradesTable(trades) {
             } else {
                 cmp = String(a[key] || '').localeCompare(String(b[key] || ''));
             }
+        } else if (key === 'size') {
+            cmp = comparableTradeSizeAbs(a) - comparableTradeSizeAbs(b);
         } else {
             cmp = toNum(a[key]) - toNum(b[key]);
         }
@@ -2818,7 +2830,7 @@ function updateTradesTable(trades) {
         <tr${childAttr} data-row-key="${rowKey}">
             ${symbolCell}
             <td>${dirBadge(trade.direction || deriveDirection(trade))}</td>
-            <td>${Number(trade.size || 0).toFixed(2)}</td>
+            <td>${formatSize(comparableTradeSizeAbs(trade))}</td>
             <td class="col-trades-prio-4">${Number.isFinite(entryPriceVal) ? fmtEntryP(entryPriceVal) : '-'}</td>
             <td class="col-trades-prio-5">${openTime}</td>
             <td class="col-trades-prio-5">${closeTime}</td>
