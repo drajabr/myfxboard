@@ -1808,7 +1808,6 @@ function setupEventListeners() {
                     } else if (y < lastScrollY - 2 || y <= 0) {
                         header.classList.remove('header--hidden');
                     }
-                    scheduleHistoricTradesViewportHeight();
                     lastScrollY = y;
                     ticking = false;
                 });
