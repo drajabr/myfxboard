@@ -1,4 +1,17 @@
 
+// Strip common broker suffixes to get the canonical/base symbol name for display and dashboard sync.
+// e.g. "XAUUSD-STD.c" → "XAUUSD", "EURUSD.c" → "EURUSD"
+string NormalizeSymbol(const string raw) {
+   string s = raw;
+   string suffixes[] = {"-STD.c","-ECN.c","-STP.c","-PRO.c","-MINI.c",".c",
+                        "-STD","-ECN","-STP","-PRO","-MINI",".pro",".Pro"};
+   for(int i = 0; i < ArraySize(suffixes); i++) {
+      int p = StringFind(s, suffixes[i]);
+      if(p > 0) { s = StringSubstr(s, 0, p); break; }
+   }
+   return s;
+}
+
 string SanitizeUrl(string url) {
    int len = StringLen(url);
    while(len > 0 && StringSubstr(url, len - 1, 1) == "/") {
@@ -157,11 +170,12 @@ string DC_BuildPositionsJson() {
       }
       j += StringFormat(
          "{\"symbol\":\"%s\",\"volume\":%.2f,\"direction\":\"%s\",\"open_price\":%.5f,\"current_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"tick_size\":%.10f,\"tick_value\":%.10f,\"margin\":%.2f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
-         symbol, volume,
+         NormalizeSymbol(symbol), volume,
          dir == POSITION_TYPE_BUY ? "BUY" : "SELL",
          open_price, PositionGetDouble(POSITION_PRICE_CURRENT), PositionGetDouble(POSITION_SL),
-         PositionGetDouble(POSITION_TP), tick_size, tick_value, pos_margin, (long)PositionGetInteger(POSITION_TIME_MSC),
-         PositionGetDouble(POSITION_PROFIT));
+         PositionGetDouble(POSITION_TP), tick_size, tick_value / g_centFactor, pos_margin / g_centFactor,
+         (long)PositionGetInteger(POSITION_TIME_MSC),
+         PositionGetDouble(POSITION_PROFIT) / g_centFactor);
    }
    return j + "]";
 }
@@ -243,7 +257,8 @@ string DC_BuildClosedTradesJson(long &latest_closed_time_ms, string &latest_clos
          first_trade = false;
          j += StringFormat(
             "{\"symbol\":\"%s\",\"volume\":%.2f,\"entry\":%.5f,\"exit\":%.5f,\"profit\":%.5f,\"entry_time_ms\":%lld,\"exit_time_ms\":%lld,\"duration_sec\":%lld,\"method\":\"deal_out\"}",
-            deal_symbol, deal_volume, entry_price, deal_price, deal_profit, entry_time, deal_time_ms, duration_sec);
+            NormalizeSymbol(deal_symbol), deal_volume, entry_price, deal_price, deal_profit / g_centFactor,
+            entry_time, deal_time_ms, duration_sec);
          if(deal_time_ms > latest_closed_time_ms) {
             latest_closed_time_ms = deal_time_ms;
             latest_closed_deal_id = StringFormat("%llu", deal_ticket);
@@ -264,9 +279,27 @@ string DC_BuildAccountJson() {
    string display_name = (nickname != "") ? nickname : AccountInfoString(ACCOUNT_COMPANY);
    string category = InpAccountCategory;
    StringTrimRight(category); StringTrimLeft(category);
+   // For cent accounts map to the ISO base currency (values are already divided by g_centFactor)
+   string raw_currency = AccountInfoString(ACCOUNT_CURRENCY);
+   string report_currency = raw_currency;
+   if(g_isCentAccount && StringLen(raw_currency) >= 2) {
+      string base = StringSubstr(raw_currency, 0, StringLen(raw_currency) - 1);
+      StringToUpper(base);
+      if     (base == "US") report_currency = "USD";
+      else if(base == "EU") report_currency = "EUR";
+      else if(base == "GB") report_currency = "GBP";
+      else if(base == "ZA") report_currency = "ZAR";
+      else if(base == "AU") report_currency = "AUD";
+      else if(base == "CA") report_currency = "CAD";
+      else if(base == "CH") report_currency = "CHF";
+      else if(base == "JP") report_currency = "JPY";
+      else                  report_currency = base;  // best-effort
+   }
+   // margin_level is a ratio (%) so no cent conversion needed
    return StringFormat(
-      "{\"equity\":%.2f,\"balance\":%.2f,\"margin_used\":%.2f,\"margin_free\":%.2f,\"margin_level\":%.2f,\"nickname\":\"%s\",\"category\":\"%s\"}",
-      equity, balance, margin_used, margin_free, margin_level, display_name, category);
+      "{\"equity\":%.2f,\"balance\":%.2f,\"margin_used\":%.2f,\"margin_free\":%.2f,\"margin_level\":%.2f,\"nickname\":\"%s\",\"category\":\"%s\",\"currency\":\"%s\"}",
+      equity / g_centFactor, balance / g_centFactor, margin_used / g_centFactor, margin_free / g_centFactor,
+      margin_level, display_name, category, report_currency);
 }
 
 void DC_PostSync(string payload, string account_number, string signature, long timestamp_ms,
@@ -599,6 +632,8 @@ input string InpAccountCategory = ""; // Account Category (optional, comma-separ
 // === GLOBALS ==="
 CTrade trade;
 string currencySymbol;
+bool   g_isCentAccount = false;  // true for cent accounts (e.g. USC, ZAC)
+double g_centFactor    = 1.0;    // 100.0 for cent accounts; divide to convert to base currency
 color colorText, colorProfit, colorLoss, colorSL, colorTP;
 
 struct SymbolInfo {
@@ -2854,6 +2889,26 @@ int OnInit() {
    else if(acc == "GBP") currencySymbol = "£";
    else if(acc != "") currencySymbol = acc + " ";
    else currencySymbol = "$";  // Default fallback
+
+      // Detect cent accounts (currency ends in 'c', e.g. USC, ZAC)
+      // All MT5 monetary values (profit, balance, tick_value) will be in cents;
+      // divide by g_centFactor before display or dashboard sync.
+      g_isCentAccount = false;
+      g_centFactor    = 1.0;
+      if(StringLen(acc) >= 2) {
+         string last = StringSubstr(acc, StringLen(acc) - 1, 1);
+         if(last == "c" || last == "C") {
+            g_isCentAccount = true;
+            g_centFactor    = 100.0;
+            // Show base currency symbol (strip trailing 'c'/'C')
+            string base = StringSubstr(acc, 0, StringLen(acc) - 1);
+            StringToUpper(base);
+            if(base == "US")      currencySymbol = "$";
+            else if(base == "EU") currencySymbol = "€";
+            else if(base == "GB") currencySymbol = "£";
+            else                  currencySymbol = base + " ";
+         }
+      }
    
    // Initialize colors
    color bg = (color)ChartGetInteger(0, CHART_COLOR_BACKGROUND);
@@ -3100,13 +3155,13 @@ void UpdateDashboard() {
    string dir = state.isBuy ? "BUY  " : "SELL ";
    string pos_text = dir + DoubleToString(MathAbs(state.netVolume), 2) + " @" + DoubleToString(state.avgEntry, sym.displayDecimals);
    
-   string pnl_text = "P&L " + ((state.currentPnL >= 0) ? "+" : "-") + currencySymbol + DoubleToString(MathAbs(state.currentPnL), 2) + " RR(" + currentRR + "/" + targetRR + ")";
+   string pnl_text = "P&L " + ((state.currentPnL >= 0) ? "+" : "-") + currencySymbol + DoubleToString(MathAbs(state.currentPnL) / g_centFactor, 2) + " RR(" + currentRR + "/" + targetRR + ")";
    
    string sl_text = "SL:  ";
    if(state.avgSL > 0) {
       // Show positive sign if SL is in profit (sl_value < 0), negative if in loss (sl_value > 0)
       string sl_sign = (sl_value < 0) ? "+" : "-";
-      sl_text += "@" + DoubleToString(state.avgSL, sym.displayDecimals) + " " + sl_sign + currencySymbol + DoubleToString(MathAbs(sl_value), 2);
+      sl_text += "@" + DoubleToString(state.avgSL, sym.displayDecimals) + " " + sl_sign + currencySymbol + DoubleToString(MathAbs(sl_value) / g_centFactor, 2);
       if(MathAbs(sl_value) > 0 && account_balance > 0) {
          double sl_percent = (MathAbs(sl_value) / account_balance) * 100.0;
          sl_text += " (" + ((sl_value < 0) ? "+" : "-") + DoubleToString(sl_percent, 2) + "%)";
@@ -3115,7 +3170,7 @@ void UpdateDashboard() {
    
    string tp_text = "TP:  ";
    if(display_tp > 0) {
-      tp_text += "@" + DoubleToString(display_tp, sym.displayDecimals) + " " + currencySymbol + DoubleToString(reward, 2);
+      tp_text += "@" + DoubleToString(display_tp, sym.displayDecimals) + " " + currencySymbol + DoubleToString(reward / g_centFactor, 2);
       if(reward > 0 && account_balance > 0) tp_text += " (" + DoubleToString((reward / account_balance) * 100.0, 2) + "%)";
    } else tp_text += "Open";
    
@@ -3138,7 +3193,7 @@ void UpdateDashboard() {
       if(state.avgSL > 0) {
          // Show positive sign if SL is in profit (sl_value < 0), negative if in loss (sl_value > 0)
          string sl_sign = (sl_value < 0) ? "+" : "-";
-         sl_text_single += "@" + DoubleToString(state.avgSL, sym.displayDecimals) + " " + sl_sign + currencySymbol + DoubleToString(MathAbs(sl_value), 2);
+         sl_text_single += "@" + DoubleToString(state.avgSL, sym.displayDecimals) + " " + sl_sign + currencySymbol + DoubleToString(MathAbs(sl_value) / g_centFactor, 2);
          if(MathAbs(sl_value) > 0 && account_balance > 0) {
             double sl_percent = (MathAbs(sl_value) / account_balance) * 100.0;
             sl_text_single += " (" + ((sl_value < 0) ? "+" : "-") + DoubleToString(sl_percent, 2) + "%)";
@@ -3147,7 +3202,7 @@ void UpdateDashboard() {
       
       string tp_text_single = "TP ";
       if(display_tp > 0) {
-         tp_text_single += "@" + DoubleToString(display_tp, sym.displayDecimals) + " " + currencySymbol + DoubleToString(reward, 2);
+         tp_text_single += "@" + DoubleToString(display_tp, sym.displayDecimals) + " " + currencySymbol + DoubleToString(reward / g_centFactor, 2);
          if(reward > 0 && account_balance > 0) tp_text_single += " (" + DoubleToString((reward / account_balance) * 100.0, 2) + "%)";
       } else tp_text_single += "Open";
       
@@ -3298,6 +3353,7 @@ string FormatNumberSmart(double value, int decimals) {
 }
 
 string FormatMoneyCompact(double value_money) {
+   value_money /= g_centFactor;   // convert cents → base currency for cent accounts
    if(value_money < 0) value_money = 0;
    string symbol = currencySymbol;
    if(StringLen(symbol) > 0 && StringSubstr(symbol, StringLen(symbol) - 1, 1) == " ") {
@@ -3307,6 +3363,7 @@ string FormatMoneyCompact(double value_money) {
 }
 
 string FormatSignedMoneyCompact(double value_money) {
+   value_money /= g_centFactor;   // convert cents → base currency for cent accounts
    string symbol = currencySymbol;
    if(StringLen(symbol) > 0 && StringSubstr(symbol, StringLen(symbol) - 1, 1) == " ") {
       symbol = StringSubstr(symbol, 0, StringLen(symbol) - 1);
@@ -3557,7 +3614,7 @@ void UpdatePnLOnly() {
    
    string currentRR = risk > 0 ? (MathAbs(state.currentPnL) / risk <= 99 ? DoubleToString(MathAbs(state.currentPnL) / risk, 1) : "∞") : "∞";
    string targetRR = (risk > 0 && reward > 0) ? (reward / risk <= 99 ? DoubleToString(reward / risk, 1) : "∞") : "∞";
-   string pnl_text = "P&L " + ((state.currentPnL >= 0) ? "+" : "-") + currencySymbol + DoubleToString(MathAbs(state.currentPnL), 2) + " RR(" + currentRR + "/" + targetRR + ")";
+   string pnl_text = "P&L " + ((state.currentPnL >= 0) ? "+" : "-") + currencySymbol + DoubleToString(MathAbs(state.currentPnL) / g_centFactor, 2) + " RR(" + currentRR + "/" + targetRR + ")";
    
    string dir = state.isBuy ? "BUY  " : "SELL ";
    string pos_text = dir + DoubleToString(total_vol, 2) + " @" + DoubleToString(state.avgEntry, sym.displayDecimals);
@@ -4052,7 +4109,7 @@ void UpdateLines() {
          bool is_buy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
          double profit = CalculateProjectedPnL(is_buy, vol, entry, tp);
          if(profit < 0) profit = 0;
-         string label = "Entry#" + IntegerToString(manual_tp_label_idx + 1) + " TP@" + DoubleToString(tp, sym.displayDecimals) + " " + currencySymbol + DoubleToString(profit, 2);
+         string label = "Entry#" + IntegerToString(manual_tp_label_idx + 1) + " TP@" + DoubleToString(tp, sym.displayDecimals) + " " + currencySymbol + DoubleToString(profit / g_centFactor, 2);
          DrawSingleLineLabel("TM_Line_ManualTP" + IntegerToString(manual_tp_label_idx), tp, clrDodgerBlue, label, reference_width, is_buy);
          manual_tp_label_idx++;
       }
