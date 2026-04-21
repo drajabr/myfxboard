@@ -350,13 +350,18 @@ body[data-layout='dense'] {
     width: max-content;
     min-width: 100%;
     max-width: min(92vw, 560px);
-    max-height: min(280px, calc(100vh - 84px));
+    max-height: calc(100vh - 84px);
     overflow-x: hidden;
     overflow-y: auto;
+    scrollbar-width: none;
     z-index: 40;
 }
 
 .account-selector-menu.is-collapsed {
+    display: none;
+}
+
+.account-selector-menu::-webkit-scrollbar {
     display: none;
 }
 
