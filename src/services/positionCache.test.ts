@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   updateAccountCache,
+  updateAccountData,
   getPositions,
   getAggregatedPositions,
   seedAccountPositions,
@@ -52,6 +53,14 @@ describe('positionCache', () => {
     const agg = getAggregated(['pnl1', 'pnl2']);
     expect(agg.floatingPnl).toBeCloseTo(270);
     expect(agg.openPositions).toBe(3);
+  });
+
+  it('getAggregated marks mixed currencies across accounts', () => {
+    updateAccountData('cur1', { equity: 1000, balance: 900, marginUsed: 100, currency: 'USD' });
+    updateAccountData('cur2', { equity: 800, balance: 700, marginUsed: 50, currency: 'EUR' });
+    const agg = getAggregated(['cur1', 'cur2']);
+    expect((agg as any).currency).toBeNull();
+    expect((agg as any).mixedCurrencies).toBe(true);
   });
 
   it('seedAccountPositions populates cache without emitting SSE event', () => {

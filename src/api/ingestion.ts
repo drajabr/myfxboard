@@ -15,6 +15,12 @@ const MIN_INGEST_INTERVAL_MS = Math.max(0, Number(process.env.MIN_INGEST_INTERVA
 const HISTORY_CHUNK_SIZE = 200;
 const DEFAULT_BREAKEVEN_TOLERANCE_FLOOR = 1.0;
 const DEFAULT_BREAKEVEN_TOLERANCE_MAX = 5.0;
+const DEFAULT_REPORTING_CURRENCY = 'USD';
+
+const resolveReportingCurrency = () => {
+  const raw = String(process.env.REPORTING_CURRENCY || DEFAULT_REPORTING_CURRENCY).trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(raw) ? raw : DEFAULT_REPORTING_CURRENCY;
+};
 
 const resolveAccountId = (req: Request) => String(req.accountId || req.body?.account_number || '').trim();
 
@@ -65,6 +71,7 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
+      const reportingCurrency = resolveReportingCurrency();
 
       const account = await accountQueries.findById(accountId);
       const serverHistoryHash = String(account?.last_history_hash || '');
@@ -75,6 +82,7 @@ router.post(
         status: 'ok',
         sync_id: req.body.sync_id,
         account_id: accountId,
+        reporting_currency: reportingCurrency,
         server_history_hash: serverHistoryHash,
         history_sync_required: historySyncRequired,
       });
@@ -98,6 +106,7 @@ router.post(
     try {
       const accountId = resolveAccountId(req);
       const sharedSecret = requireSharedSecret();
+      const reportingCurrency = resolveReportingCurrency();
 
       const account = await accountQueries.ensureByAccountNumber(accountId, sharedSecret);
       const nowMs = Date.now();
@@ -116,6 +125,7 @@ router.post(
           status: 'throttled',
           sync_id: req.body.sync_id,
           account_id: accountId,
+          reporting_currency: reportingCurrency,
           min_ingest_interval_ms: minIngestIntervalMs,
           retry_after_ms: minIngestIntervalMs - sinceLastIngestMs,
           server_history_hash: serverHistoryHash,
@@ -160,6 +170,7 @@ router.post(
         accountId,
         positionsWithMargin.map((p: any): CachedPosition => ({
           account_id: accountId,
+          currency: typeof accountData?.currency === 'string' ? accountData.currency.trim().toUpperCase() || null : null,
           symbol: p.symbol,
           size: p.volume,
           direction: p.direction,
@@ -182,6 +193,7 @@ router.post(
         equity: safeEquity,
         balance: safeBalance,
         marginUsed: safeMarginUsed,
+        currency: typeof accountData?.currency === 'string' ? accountData.currency.trim().toUpperCase() || null : null,
       });
 
       // Snapshot (daily equity/balance record) — idempotent day-keyed upsert, buffered at 5s.
@@ -259,13 +271,15 @@ router.post(
       const nickname = String(accountData?.nickname || '').trim();
       const accountName = String(accountData?.account_name || nickname).trim();
       const broker = String(accountData?.broker || '').trim();
+      const currency = typeof accountData?.currency === 'string' ? accountData.currency.trim().toUpperCase() : undefined;
       const rawCategory = typeof accountData?.category === 'string' ? accountData.category.trim() : undefined;
       const category = rawCategory !== undefined && rawCategory !== '' ? rawCategory : undefined;
-      if (nickname || accountName || broker || category !== undefined) {
+      if (nickname || accountName || broker || currency || category !== undefined) {
         await accountQueries.updateIdentity(accountId, {
           nickname: nickname || undefined,
           account_name: accountName || undefined,
           broker: broker || undefined,
+          currency,
           category,
         });
       }
@@ -279,6 +293,7 @@ router.post(
         status: 'ok',
         sync_id,
         account_id: accountId,
+        reporting_currency: reportingCurrency,
         history_status: historyStatus,
         from_time_ms: historyStatus === 'backfill_required' ? accountLastClosedMs : undefined,
         chunk_size: HISTORY_CHUNK_SIZE,
@@ -313,6 +328,7 @@ router.post(
     try {
       const accountId = resolveAccountId(req);
       const sharedSecret = requireSharedSecret();
+      const reportingCurrency = resolveReportingCurrency();
       await accountQueries.ensureByAccountNumber(accountId, sharedSecret);
       const { closed_trades, sync_id } = req.body;
       const breakevenToleranceFloor = resolveBreakevenToleranceFloor();
@@ -345,6 +361,7 @@ router.post(
       res.status(200).json({
         status: 'ok',
         sync_id,
+        reporting_currency: reportingCurrency,
         trades_inserted: closed_trades.length,
       });
     } catch (error) {

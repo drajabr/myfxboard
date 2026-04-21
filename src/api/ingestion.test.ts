@@ -23,6 +23,10 @@ vi.mock('../db/queries.js', () => ({
     getBreakevenTolerance: vi.fn().mockResolvedValue(1.0),
     summarizeByExitRange: vi.fn().mockResolvedValue({ trades_count: 0, wins: 0, losses: 0 }),
   },
+  snapshotQueries: {
+    insertSnapshot: vi.fn(),
+    upsertDailySnapshot: vi.fn(),
+  },
   invalidateBreakevenCache: vi.fn(),
 }));
 
@@ -55,7 +59,7 @@ const validPayload = {
   account_number: '662240',
   positions: [],
   closed_trades: [],
-  account: { equity: 10000, balance: 9500, margin_used: 500 },
+  account: { equity: 10000, balance: 9500, margin_used: 500, currency: 'USD' },
   sync_id: 'sync-1',
   ea_latest_closed_time_ms: 2000000,
   ea_latest_closed_deal_id: '12345',
@@ -65,6 +69,7 @@ const validPayload = {
 describe('POST /api/ingestion', () => {
   beforeEach(() => {
     vi.stubEnv('CONNECTOR_SHARED_SECRET', SECRET);
+    vi.stubEnv('REPORTING_CURRENCY', 'USD');
     vi.mocked(accountQueries.ensureByAccountNumber).mockResolvedValue({
       account_id: '662240',
       last_ingest_received_at: null,
@@ -107,6 +112,7 @@ describe('POST /api/ingestion', () => {
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ok');
     expect(res.body.account_id).toBe('662240');
+    expect(res.body.reporting_currency).toBe('USD');
   });
 
   it('accepts positions and returns success', async () => {
@@ -185,6 +191,7 @@ describe('POST /api/ingestion', () => {
       expect.objectContaining({
         nickname: 'My Broker Name',
         account_name: 'My Broker Name',
+        currency: 'USD',
       })
     );
   });
@@ -208,6 +215,7 @@ describe('POST /api/ingestion', () => {
 describe('POST /api/ingestion/health', () => {
   beforeEach(() => {
     vi.stubEnv('CONNECTOR_SHARED_SECRET', SECRET);
+    vi.stubEnv('REPORTING_CURRENCY', 'USD');
     vi.mocked(accountQueries.findById).mockResolvedValue({
       account_id: '662240',
       last_history_hash: 'server-hash',
@@ -225,6 +233,7 @@ describe('POST /api/ingestion/health', () => {
       .send({ account_number: '662240', sync_id: 'abc', history_hash: 'different-hash' });
     expect(res.status).toBe(200);
     expect(res.body.history_sync_required).toBe(true);
+    expect(res.body.reporting_currency).toBe('USD');
   });
 
   it('returns history_sync_required false when hashes match', async () => {
@@ -238,12 +247,14 @@ describe('POST /api/ingestion/health', () => {
       .send({ account_number: '662240', sync_id: 'abc', history_hash: 'server-hash' });
     expect(res.status).toBe(200);
     expect(res.body.history_sync_required).toBe(false);
+    expect(res.body.reporting_currency).toBe('USD');
   });
 });
 
 describe('POST /api/ingestion/backfill', () => {
   beforeEach(() => {
     vi.stubEnv('CONNECTOR_SHARED_SECRET', SECRET);
+    vi.stubEnv('REPORTING_CURRENCY', 'USD');
     vi.mocked(accountQueries.ensureByAccountNumber).mockResolvedValue({
       account_id: '662240',
     } as any);
@@ -276,6 +287,7 @@ describe('POST /api/ingestion/backfill', () => {
       .send(payload);
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ok');
+    expect(res.body.reporting_currency).toBe('USD');
     expect(tradeQueries.insertTradeBatch).toHaveBeenCalled();
   });
 });

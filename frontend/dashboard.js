@@ -209,8 +209,65 @@ function isElementVisible(el) {
 }
 
 
-function formatMoney(value) {
-    return `$ ${Number(value || 0).toFixed(2)}`;
+const moneyFormatterCache = new Map();
+
+function normalizeCurrencyCode(value) {
+    const currency = String(value || '').trim().toUpperCase();
+    return /^[A-Z]{3}$/.test(currency) ? currency : '';
+}
+
+function defaultMoneyContext() {
+    return {
+        currency: normalizeCurrencyCode(state?.lastData?.summary?.currency),
+        mixed: Boolean(state?.lastData?.summary?.mixed_currencies),
+    };
+}
+
+function resolveMoneyContext(options) {
+    if (typeof options === 'string') {
+        return { currency: normalizeCurrencyCode(options), mixed: false };
+    }
+    if (options && typeof options === 'object') {
+        return {
+            currency: normalizeCurrencyCode(options.currency),
+            mixed: Boolean(options.mixed),
+        };
+    }
+    return defaultMoneyContext();
+}
+
+function moneyFormatterFor(currency) {
+    const normalized = normalizeCurrencyCode(currency);
+    if (!normalized) return null;
+    if (!moneyFormatterCache.has(normalized)) {
+        try {
+            moneyFormatterCache.set(normalized, new Intl.NumberFormat(undefined, {
+                style: 'currency',
+                currency: normalized,
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+            }));
+        } catch {
+            moneyFormatterCache.set(normalized, null);
+        }
+    }
+    return moneyFormatterCache.get(normalized);
+}
+
+function formatMoney(value, options) {
+    const amount = Number(value || 0);
+    const { currency, mixed } = resolveMoneyContext(options);
+    if (mixed) {
+        return `${amount.toFixed(2)} mixed`;
+    }
+    const formatter = moneyFormatterFor(currency);
+    if (formatter) {
+        return formatter.format(amount);
+    }
+    if (currency) {
+        return `${currency} ${amount.toFixed(2)}`;
+    }
+    return `$ ${amount.toFixed(2)}`;
 }
 
 function formatPrice(value, decimals = 5) {
@@ -372,7 +429,7 @@ function diffTableRows(tbody, nextRows, durationMs = NON_LIVE_ANIM_MS) {
     const chooseFormatter = (cell) => {
         if (cell._fmt) return cell._fmt;
         const fmt = cell.format;
-        if (fmt === 'money') return formatMoney;
+        if (fmt === 'money') return v => formatMoney(v, { currency: cell.currency, mixed: cell.mixed });
         if (fmt === 'pct') return formatPct;
         if (fmt === 'int') return fmtInt;
         if (fmt === 'fixed2') return fmtFixed2;
@@ -753,6 +810,28 @@ function findAccountById(accountId) {
         return null;
     }
     return state.accounts.find((acc) => String(acc?.account_id || '').trim() === idText) || null;
+}
+
+function currencyForAccount(accountId) {
+    const account = findAccountById(accountId);
+    return normalizeCurrencyCode(account?.currency);
+}
+
+function moneyContextForItem(item) {
+    const children = Array.isArray(item?._children) ? item._children : [];
+    const childCurrencies = [...new Set(children
+        .map((child) => normalizeCurrencyCode(child?.currency || currencyForAccount(child?.account_id)))
+        .filter(Boolean))];
+    if (childCurrencies.length > 1) {
+        return { mixed: true, currency: '' };
+    }
+    if (childCurrencies.length === 1) {
+        return { mixed: false, currency: childCurrencies[0] };
+    }
+    return {
+        mixed: false,
+        currency: normalizeCurrencyCode(item?.currency || currencyForAccount(item?.account_id)),
+    };
 }
 
 function preferredAccountLabel(accountId, accountName) {
@@ -2305,11 +2384,14 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
             const totalMargin = g.children.reduce((s, p) => s + toNum(p.margin || 0), 0);
             const earliestOpen = Math.min(...g.children.map(p => toNum(p.open_time_ms)).filter(t => t > 0));
             const accounts = [...new Set(g.children.map((p) => String(p.account_id || '-')))];
+            const currencies = [...new Set(g.children.map((p) => normalizeCurrencyCode(p.currency || currencyForAccount(p.account_id))).filter(Boolean))];
             const combinedRow = {
                 _combined: true,
                 _children: children,
                 _accountCount: accounts.length,
                 account_id: accounts.length === 1 ? accounts[0] : '',
+                currency: currencies.length === 1 ? currencies[0] : '',
+                mixed_currencies: currencies.length > 1,
                 symbol: g.symbol,
                 _sortSymbol: g.normSymbol,
                 direction: netDirection,
@@ -2395,18 +2477,19 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
         const fmtCurrent = v => formatPrice(v, currentDecimals);
         const fmtSl = v => formatPrice(v, slDecimals);
         const fmtTp = v => formatPrice(v, tpDecimals);
+        const moneyCtx = moneyContextForItem(pos);
 
         // Columns: 0=symbol, 1=dir, 2=size, 3=entry, 4=sl, 5=sl$, 6=tp, 7=tp$, 8=age, 9=current, 10=margin, 11=pnl, 12=account
         const animCells = [];
         const updateCells = [];
         if (Number.isFinite(entryValue)) animCells.push({ col: 3, key: `pos-entry-${rowKey}`, value: entryValue, format: 'price', _fmt: fmtEntry });
         if (Number.isFinite(slValue)) animCells.push({ col: 4, key: `pos-sl-${rowKey}`, value: slValue, format: 'price', _fmt: fmtSl });
-        if (Number.isFinite(slMoneyValue)) animCells.push({ col: 5, key: `pos-sl$-${rowKey}`, value: slMoneyValue, format: 'money', className: `col-pos-prio-5 ${pnlClass(slMoneyValue)}` });
+        if (Number.isFinite(slMoneyValue)) animCells.push({ col: 5, key: `pos-sl$-${rowKey}`, value: slMoneyValue, format: 'money', currency: moneyCtx.currency, mixed: moneyCtx.mixed, className: `col-pos-prio-5 ${pnlClass(slMoneyValue)}` });
         if (Number.isFinite(tpValue)) animCells.push({ col: 6, key: `pos-tp-${rowKey}`, value: tpValue, format: 'price', _fmt: fmtTp });
-        if (Number.isFinite(tpMoneyValue)) animCells.push({ col: 7, key: `pos-tp$-${rowKey}`, value: tpMoneyValue, format: 'money', className: `col-pos-prio-6 ${pnlClass(tpMoneyValue)}` });
+        if (Number.isFinite(tpMoneyValue)) animCells.push({ col: 7, key: `pos-tp$-${rowKey}`, value: tpMoneyValue, format: 'money', currency: moneyCtx.currency, mixed: moneyCtx.mixed, className: `col-pos-prio-6 ${pnlClass(tpMoneyValue)}` });
         if (Number.isFinite(currentValue)) animCells.push({ col: 9, key: `pos-cur-${rowKey}`, value: currentValue, format: 'price', _fmt: fmtCurrent, className: `col-pos-prio-7 ${pnlClass(pnlValue)}` });
-        if (marginValue > 0) animCells.push({ col: 10, key: `pos-margin-${rowKey}`, value: marginValue, format: 'money' });
-        animCells.push({ col: 11, key: `pos-pnl-${rowKey}`, value: pnlValue, format: 'money', className: pnlClass(pnlValue) });
+        if (marginValue > 0) animCells.push({ col: 10, key: `pos-margin-${rowKey}`, value: marginValue, format: 'money', currency: moneyCtx.currency, mixed: moneyCtx.mixed });
+        animCells.push({ col: 11, key: `pos-pnl-${rowKey}`, value: pnlValue, format: 'money', currency: moneyCtx.currency, mixed: moneyCtx.mixed, className: pnlClass(pnlValue) });
 
         const html = `
         <tr${childAttr} data-row-key="${rowKey}">
@@ -2415,13 +2498,13 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
             <td>${formatSize(pos.size)}</td>
             <td class="col-pos-prio-4">${Number.isFinite(entryValue) ? fmtEntry(entryValue) : '-'}</td>
             <td class="col-pos-prio-5">${Number.isFinite(slValue) ? fmtSl(slValue) : '-'}</td>
-            <td class="col-pos-prio-5 ${pnlClass(slMoneyValue || 0)}">${Number.isFinite(slMoneyValue) ? formatMoney(slMoneyValue) : '-'}</td>
+            <td class="col-pos-prio-5 ${pnlClass(slMoneyValue || 0)}">${Number.isFinite(slMoneyValue) ? formatMoney(slMoneyValue, moneyCtx) : '-'}</td>
             <td class="col-pos-prio-6">${Number.isFinite(tpValue) ? fmtTp(tpValue) : '-'}</td>
-            <td class="col-pos-prio-6 ${pnlClass(tpMoneyValue || 0)}">${Number.isFinite(tpMoneyValue) ? formatMoney(tpMoneyValue) : '-'}</td>
+            <td class="col-pos-prio-6 ${pnlClass(tpMoneyValue || 0)}">${Number.isFinite(tpMoneyValue) ? formatMoney(tpMoneyValue, moneyCtx) : '-'}</td>
             <td class="col-pos-prio-7">${ageText}</td>
             <td class="col-pos-prio-7 ${pnlClass(pnlValue)}">${Number.isFinite(currentValue) ? fmtCurrent(currentValue) : '-'}</td>
-            <td class="col-pos-prio-8">${marginValue > 0 ? formatMoney(marginValue) : '-'}</td>
-            <td class="${pnlClass(pnlValue)}">${formatMoney(pnlValue)}</td>
+            <td class="col-pos-prio-8">${marginValue > 0 ? formatMoney(marginValue, moneyCtx) : '-'}</td>
+            <td class="${pnlClass(pnlValue)}">${formatMoney(pnlValue, moneyCtx)}</td>
             <td class="col-pos-prio-7">${accountInner}</td>
         </tr>`;
 
@@ -2592,6 +2675,7 @@ function combineOverlappingTrades(trades) {
         const entryDecimals = inferPriceDecimals(g.children, 'entry_price');
         const exitDecimals = inferPriceDecimals(g.children, 'exit_price');
         const accounts = [...new Set(g.children.map(c => c.account_id).filter(Boolean))];
+        const currencies = [...new Set(g.children.map((t) => normalizeCurrencyCode(t.currency || currencyForAccount(t.account_id))).filter(Boolean))];
         const beTol = state.beTolerance || 0;
         const result = totalPnl > beTol ? 'win' : totalPnl < -beTol ? 'loss' : 'breakeven';
         return {
@@ -2599,6 +2683,8 @@ function combineOverlappingTrades(trades) {
             _children: g.children,
             _accountCount: accounts.length,
             account_id: accounts.length === 1 ? accounts[0] : `${accounts.length} accts`,
+            currency: currencies.length === 1 ? currencies[0] : '',
+            mixed_currencies: currencies.length > 1,
             symbol: g.symbol,
             direction: g.direction,
             entry_price: avgEntry,
@@ -2672,11 +2758,12 @@ function updateTradesTable(trades) {
             : `${isChild ? 'trade-child' : 'trade'}|${normalizeSymbol(trade.symbol)}|${String(trade.account_id || '-')}|${toNum(trade.entry_time_ms)}|${toNum(trade.exit_time_ms)}`;
         const fmtEntryP = v => formatPrice(v, entryDecimals);
         const fmtExitP = v => formatPrice(v, exitDecimals);
+        const moneyCtx = moneyContextForItem(trade);
         const entryPriceVal = toNum(trade.entry_price, NaN);
         const exitPriceVal = trade.exit_price !== null ? toNum(trade.exit_price, NaN) : NaN;
         // Cols: 0=symbol, 1=dir, 2=size, 3=entry, 4=open, 5=close, 6=duration, 7=exit, 8=result, 9=profit, 10=account
         const animCells = [
-            { col: 9, key: `${rowKey}-pnl`, value: profitValue, format: 'money', className: pnlClass(profitValue) },
+            { col: 9, key: `${rowKey}-pnl`, value: profitValue, format: 'money', currency: moneyCtx.currency, mixed: moneyCtx.mixed, className: pnlClass(profitValue) },
         ];
         if (Number.isFinite(entryPriceVal)) animCells.push({ col: 3, key: `${rowKey}-entry`, value: entryPriceVal, format: 'price', _fmt: fmtEntryP });
         if (Number.isFinite(exitPriceVal)) animCells.push({ col: 7, key: `${rowKey}-exit`, value: exitPriceVal, format: 'price', _fmt: fmtExitP });
@@ -2693,7 +2780,7 @@ function updateTradesTable(trades) {
             <td class="col-trades-prio-6">${duration}</td>
             <td class="col-trades-prio-7">${Number.isFinite(exitPriceVal) ? fmtExitP(exitPriceVal) : '-'}</td>
             <td class="col-trades-prio-7">${resultShort}</td>
-            <td class="${pnlClass(profitValue)}">${formatMoney(profitValue)}</td>
+            <td class="${pnlClass(profitValue)}">${formatMoney(profitValue, moneyCtx)}</td>
             <td class="col-trades-prio-7">${accountInner}</td>
         </tr>`,
             animCells,
@@ -2785,6 +2872,7 @@ function updateExposureTable(positions, durationMs = NON_LIVE_ANIM_MS) {
         const symSize = posArr.reduce((s, p) => s + Math.abs(toNum(p.size)), 0);
         const symMargin = posArr.reduce((s, p) => s + toNum(p.margin, 0), 0);
         const accounts = [...new Set(posArr.map((p) => preferredAccountLabel(p.account_id, p.account_name || p.nickname)))];
+        const currencies = [...new Set(posArr.map((p) => normalizeCurrencyCode(p.currency || currencyForAccount(p.account_id))).filter(Boolean))];
 
         // Symbol total row always present
         rows.push({
@@ -2792,6 +2880,8 @@ function updateExposureTable(positions, durationMs = NON_LIVE_ANIM_MS) {
             symbol: sym,
             size: symSize,
             margin: symMargin,
+            currency: currencies.length === 1 ? currencies[0] : '',
+            mixed_currencies: currencies.length > 1,
             pct: effectiveTotalMargin > 0 && symMargin > 0
                 ? (symMargin / effectiveTotalMargin) * 100
                 : (symSize / safeTotal) * 100,
@@ -2809,6 +2899,7 @@ function updateExposureTable(positions, durationMs = NON_LIVE_ANIM_MS) {
                         size: 0,
                         margin: 0,
                         account: preferredAccountLabel(p.account_id, p.account_name || p.nickname),
+                        currency: normalizeCurrencyCode(p.currency || currencyForAccount(p.account_id)),
                     });
                 }
                 const entry = acctMap.get(acctKey);
@@ -2823,6 +2914,7 @@ function updateExposureTable(positions, durationMs = NON_LIVE_ANIM_MS) {
                         symbol: '',
                         size: data.size,
                         margin: data.margin,
+                        currency: data.currency,
                             pct: effectiveTotalMargin > 0 && data.margin > 0
                                 ? (data.margin / effectiveTotalMargin) * 100
                             : (data.size / safeTotal) * 100,
@@ -2858,12 +2950,13 @@ function updateExposureTable(positions, durationMs = NON_LIVE_ANIM_MS) {
         const sizeVal = toNum(row.size);
         const marginVal = toNum(row.margin, 0);
         const pctVal = toNum(row.pct);
+        const moneyCtx = { currency: normalizeCurrencyCode(row.currency), mixed: Boolean(row.mixed_currencies) };
         const animCells = [
             { col: 1, key: `${rowKey}-size`, value: sizeVal, format: 'size' },
             { col: 3, key: `${rowKey}-pct`, value: pctVal, format: 'pct' },
         ];
         if (marginVal > 0) {
-            animCells.push({ col: 2, key: `${rowKey}-margin`, value: marginVal, format: 'money' });
+            animCells.push({ col: 2, key: `${rowKey}-margin`, value: marginVal, format: 'money', currency: moneyCtx.currency, mixed: moneyCtx.mixed });
         }
         return {
             key: rowKey,
@@ -2871,7 +2964,7 @@ function updateExposureTable(positions, durationMs = NON_LIVE_ANIM_MS) {
         <tr class="${row.isSymbol ? 'exposure-symbol-row' : 'exposure-child-row'}" data-row-key="${rowKey}">
             <td>${row.isSymbol ? row.symbol : ''}</td>
             <td>${sizeVal.toFixed(2)}</td>
-            <td>${marginVal > 0 ? formatMoney(marginVal) : '-'}</td>
+            <td>${marginVal > 0 ? formatMoney(marginVal, moneyCtx) : '-'}</td>
             <td>${formatPct(pctVal)}</td>
             <td><span class="account-tag">${row.account || '-'}</span></td>
         </tr>`,
@@ -4053,7 +4146,10 @@ function renderMonthlyCalendar(monthly) {
     monthly.days.forEach((d) => {
         const canFilter = toNum(d.trades) > 0;
         const isMuted = toNum(d.trades) === 0 && toNum(d.pnl) === 0;
-        const pnlText = compact ? `$ ${toNum(d.pnl).toFixed(0)}` : formatMoney(d.pnl);
+        const summaryMoneyCtx = defaultMoneyContext();
+        const pnlText = compact
+            ? (summaryMoneyCtx.mixed ? `${toNum(d.pnl).toFixed(0)} mixed` : formatMoney(d.pnl, summaryMoneyCtx))
+            : formatMoney(d.pnl, summaryMoneyCtx);
         const winRateText = Number.isFinite(toNum(d.win_rate_pct, NaN)) ? ` · W ${formatPct(d.win_rate_pct)}` : '';
         const tradesText = tight ? '' : `${d.trades}t${winRateText}`;
         cells.push(`
@@ -4259,6 +4355,8 @@ function applyLivePnl(data) {
         state.lastData.summary.equity = liveEquity;
         state.lastData.summary.balance = balance;
         state.lastData.summary.margin_used = marginUsed;
+        if (data.currency !== undefined) state.lastData.summary.currency = data.currency;
+        if (data.mixed_currencies !== undefined) state.lastData.summary.mixed_currencies = Boolean(data.mixed_currencies);
         state.lastData.summary.open_positions = toNum(data.open_positions, state.lastData.summary.open_positions || 0);
         if (Array.isArray(data.positions)) {
             state.lastData.positions = data.positions;

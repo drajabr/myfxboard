@@ -143,6 +143,81 @@ string DC_CreateSignature(string account_number, long timestamp_ms) {
    return DC_ToHex(digest);
 }
 
+// Normalize MT5 account currency to a 3-letter ISO-ish code used for FX lookup.
+// Examples: USD -> USD, USC -> USD, EUR -> EUR, ZAC -> ZAR.
+string DC_NormalizeAccountCurrencyToIso(string raw_currency) {
+   string c = raw_currency;
+   StringTrimLeft(c);
+   StringTrimRight(c);
+   StringToUpper(c);
+   if(c == "") return "USD";
+   if(StringLen(c) == 3) {
+      if(c == "USC") return "USD";
+      if(c == "EUC") return "EUR";
+      if(c == "GBC") return "GBP";
+      if(c == "ZAC") return "ZAR";
+      if(c == "AUC") return "AUD";
+      if(c == "CAC") return "CAD";
+      if(c == "CHC") return "CHF";
+      if(c == "JPC") return "JPY";
+      return c;
+   }
+   return c;
+}
+
+double DC_GetMidPrice(const string symbol) {
+   if(!SymbolSelect(symbol, true)) return 0.0;
+   double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
+   if(bid > 0 && ask > 0) return (bid + ask) * 0.5;
+   if(bid > 0) return bid;
+   if(ask > 0) return ask;
+   return 0.0;
+}
+
+string DC_NormalizeReportingCurrency(string raw_currency) {
+   string c = raw_currency;
+   StringTrimLeft(c);
+   StringTrimRight(c);
+   StringToUpper(c);
+   if(StringLen(c) != 3) return "USD";
+   return c;
+}
+
+bool DC_ResolveFxRate(const string from_currency, const string to_currency, double &rate_from_to) {
+   string from = from_currency;
+   string to = to_currency;
+   StringToUpper(from);
+   StringToUpper(to);
+   if(from == to) { rate_from_to = 1.0; return true; }
+
+   string direct  = from + to;
+   double direct_mid = DC_GetMidPrice(direct);
+   if(direct_mid > 0) { rate_from_to = direct_mid; return true; }
+
+   string inverse = to + from;
+   double inverse_mid = DC_GetMidPrice(inverse);
+   if(inverse_mid > 0) { rate_from_to = 1.0 / inverse_mid; return true; }
+
+   rate_from_to = 1.0;
+   return false;
+}
+
+void DC_RefreshAccountToReportingRate() {
+   string raw_currency = AccountInfoString(ACCOUNT_CURRENCY);
+   g_account_iso_currency = DC_NormalizeAccountCurrencyToIso(raw_currency);
+   g_account_to_reporting_ok = DC_ResolveFxRate(g_account_iso_currency, g_server_reporting_currency, g_account_to_reporting_rate);
+   if(g_dc.debug_log && !g_account_to_reporting_ok)
+      PrintFormat("[DC] WARNING FX %s->%s not found; using fallback rate=1.0", g_account_iso_currency, g_server_reporting_currency);
+}
+
+double DC_ConvertAccountMoneyToReporting(double amount_account_units) {
+   // Step 1: convert cent-account native units to base account currency units.
+   double base_amount = amount_account_units / g_centFactor;
+   // Step 2: convert account base currency units to server reporting currency units.
+   return base_amount * g_account_to_reporting_rate;
+}
+
 string DC_BuildPositionsJson() {
    string j = "[";
    bool first = true;
@@ -173,9 +248,11 @@ string DC_BuildPositionsJson() {
          NormalizeSymbol(symbol), volume,
          dir == POSITION_TYPE_BUY ? "BUY" : "SELL",
          open_price, PositionGetDouble(POSITION_PRICE_CURRENT), PositionGetDouble(POSITION_SL),
-         PositionGetDouble(POSITION_TP), tick_size, tick_value / g_centFactor, pos_margin / g_centFactor,
+         PositionGetDouble(POSITION_TP), tick_size,
+         DC_ConvertAccountMoneyToReporting(tick_value),
+         DC_ConvertAccountMoneyToReporting(pos_margin),
          (long)PositionGetInteger(POSITION_TIME_MSC),
-         PositionGetDouble(POSITION_PROFIT) / g_centFactor);
+         DC_ConvertAccountMoneyToReporting(PositionGetDouble(POSITION_PROFIT)));
    }
    return j + "]";
 }
@@ -257,7 +334,8 @@ string DC_BuildClosedTradesJson(long &latest_closed_time_ms, string &latest_clos
          first_trade = false;
          j += StringFormat(
             "{\"symbol\":\"%s\",\"volume\":%.2f,\"entry\":%.5f,\"exit\":%.5f,\"profit\":%.5f,\"entry_time_ms\":%lld,\"exit_time_ms\":%lld,\"duration_sec\":%lld,\"method\":\"deal_out\"}",
-            NormalizeSymbol(deal_symbol), deal_volume, entry_price, deal_price, deal_profit / g_centFactor,
+            NormalizeSymbol(deal_symbol), deal_volume, entry_price, deal_price,
+            DC_ConvertAccountMoneyToReporting(deal_profit),
             entry_time, deal_time_ms, duration_sec);
          if(deal_time_ms > latest_closed_time_ms) {
             latest_closed_time_ms = deal_time_ms;
@@ -279,27 +357,15 @@ string DC_BuildAccountJson() {
    string display_name = (nickname != "") ? nickname : AccountInfoString(ACCOUNT_COMPANY);
    string category = InpAccountCategory;
    StringTrimRight(category); StringTrimLeft(category);
-   // For cent accounts map to the ISO base currency (values are already divided by g_centFactor)
-   string raw_currency = AccountInfoString(ACCOUNT_CURRENCY);
-   string report_currency = raw_currency;
-   if(g_isCentAccount && StringLen(raw_currency) >= 2) {
-      string base = StringSubstr(raw_currency, 0, StringLen(raw_currency) - 1);
-      StringToUpper(base);
-      if     (base == "US") report_currency = "USD";
-      else if(base == "EU") report_currency = "EUR";
-      else if(base == "GB") report_currency = "GBP";
-      else if(base == "ZA") report_currency = "ZAR";
-      else if(base == "AU") report_currency = "AUD";
-      else if(base == "CA") report_currency = "CAD";
-      else if(base == "CH") report_currency = "CHF";
-      else if(base == "JP") report_currency = "JPY";
-      else                  report_currency = base;  // best-effort
-   }
-   // margin_level is a ratio (%) so no cent conversion needed
+   // margin_level is a ratio (%) so no currency conversion needed.
+   // All monetary fields are sent in the server reporting currency.
    return StringFormat(
       "{\"equity\":%.2f,\"balance\":%.2f,\"margin_used\":%.2f,\"margin_free\":%.2f,\"margin_level\":%.2f,\"nickname\":\"%s\",\"category\":\"%s\",\"currency\":\"%s\"}",
-      equity / g_centFactor, balance / g_centFactor, margin_used / g_centFactor, margin_free / g_centFactor,
-      margin_level, display_name, category, report_currency);
+      DC_ConvertAccountMoneyToReporting(equity),
+      DC_ConvertAccountMoneyToReporting(balance),
+      DC_ConvertAccountMoneyToReporting(margin_used),
+      DC_ConvertAccountMoneyToReporting(margin_free),
+      margin_level, display_name, category, g_server_reporting_currency);
 }
 
 void DC_PostSync(string payload, string account_number, string signature, long timestamp_ms,
@@ -319,6 +385,11 @@ void DC_PostSync(string payload, string account_number, string signature, long t
    } else {
       string body = CharArrayToString(resp, 0, WHOLE_ARRAY, CP_UTF8);
       if(res >= 200 && res < 300) {
+         string reporting_currency = DC_ExtractJsonString(body, "reporting_currency");
+         if(reporting_currency != "") {
+            g_server_reporting_currency = DC_NormalizeReportingCurrency(reporting_currency);
+            DC_RefreshAccountToReportingRate();
+         }
          string srv_hash = DC_ExtractJsonString(body, "server_history_hash");
          if(srv_hash != "") g_dc.last_ack_history_hash = srv_hash;
          else if(include_history) g_dc.last_ack_history_hash = history_hash;
@@ -338,11 +409,11 @@ void DC_PostSync(string payload, string account_number, string signature, long t
 }
 
 bool DC_PostHealthCheck(string account_number, long timestamp_ms, string history_hash,
-                        bool &history_sync_required, string &server_history_hash) {
+            bool &history_sync_required, string &server_history_hash, string &reporting_currency_out) {
    string sig = DC_CreateSignature(account_number, timestamp_ms);
    string payload = StringFormat(
-      "{\"account_number\":\"%s\",\"sync_id\":\"%lld\",\"history_hash\":\"%s\"}",
-      account_number, timestamp_ms, history_hash);
+   "{\"account_number\":\"%s\",\"sync_id\":\"%lld\",\"history_hash\":\"%s\",\"account_currency\":\"%s\"}",
+   account_number, timestamp_ms, history_hash, g_account_iso_currency);
    uchar req[], resp[];
    string resp_hdrs = "";
    string hdrs = "Content-Type: application/json\r\n"
@@ -362,6 +433,7 @@ bool DC_PostHealthCheck(string account_number, long timestamp_ms, string history
    string body = CharArrayToString(resp, 0, WHOLE_ARRAY, CP_UTF8);
    server_history_hash   = DC_ExtractJsonString(body, "server_history_hash");
    history_sync_required = DC_ExtractJsonBool(body, "history_sync_required", true);
+   reporting_currency_out = DC_NormalizeReportingCurrency(DC_ExtractJsonString(body, "reporting_currency"));
    return true;
 }
 
@@ -384,6 +456,8 @@ void DC_Init(string url, string psk, int interval_sec, bool debug, datetime hist
    g_dc.startup_health_checked    = false;
    g_dc.last_sync_ok              = false;
    g_dc.history_start_time_ms     = (history_start_date > 0) ? ((long)history_start_date * 1000) : 0;
+   g_server_reporting_currency    = "USD";
+   DC_RefreshAccountToReportingRate();
    if(g_dc.debug_log) Print("[DC] Initialized: url=", g_dc.url, " interval=", interval_sec, "s");
 }
 
@@ -398,8 +472,21 @@ bool DC_Sync() {
       return false;
    }
    if(g_dc.last_sync_ms > 0 && now_ms < g_dc.last_sync_ms + (ulong)g_dc.sync_interval_ms) return false;
+   DC_RefreshAccountToReportingRate();
    long   timestamp_ms     = (long)TimeGMT() * 1000;
    string current_account  = StringFormat("%lld", AccountInfoInteger(ACCOUNT_LOGIN));
+   if(!g_dc.startup_health_checked) {
+      g_dc.startup_health_checked = true;
+      bool   hsr = true;
+      string srv_hash = "";
+      string reporting_currency = "";
+      string startup_history_hash = (g_dc.last_ack_history_hash != "") ? g_dc.last_ack_history_hash : "0";
+      if(DC_PostHealthCheck(current_account, timestamp_ms, startup_history_hash, hsr, srv_hash, reporting_currency)) {
+         if(reporting_currency != "") g_server_reporting_currency = reporting_currency;
+         DC_RefreshAccountToReportingRate();
+         if(srv_hash != "") g_dc.last_ack_history_hash = srv_hash;
+      }
+   }
    long   latest_closed_ms = 0;
    string latest_closed_id = "";
    string positions_json     = DC_BuildPositionsJson();
@@ -407,13 +494,6 @@ bool DC_Sync() {
    string account_json       = DC_BuildAccountJson();
    uint   live_hash    = DC_HashPayload(positions_json + "|acct:" + account_json + "|ct:" + StringFormat("%lld", latest_closed_ms));
    string history_hash = StringFormat("%u", DC_HashPayload(closed_trades_json));
-   if(!g_dc.startup_health_checked) {
-      g_dc.startup_health_checked = true;
-      bool   hsr = true;
-      string srv_hash = "";
-      if(DC_PostHealthCheck(current_account, timestamp_ms, history_hash, hsr, srv_hash))
-         if(srv_hash != "") g_dc.last_ack_history_hash = srv_hash;
-   }
    bool payload_unchanged = (live_hash == g_dc.last_live_payload_hash && live_hash != 0
                               && history_hash == g_dc.last_ack_history_hash);
    long since_ms = (g_dc.last_live_payload_sent_ms > 0) ? (timestamp_ms - g_dc.last_live_payload_sent_ms) : 60001;
@@ -634,6 +714,10 @@ CTrade trade;
 string currencySymbol;
 bool   g_isCentAccount = false;  // true for cent accounts (e.g. USC, ZAC)
 double g_centFactor    = 1.0;    // 100.0 for cent accounts; divide to convert to base currency
+string g_account_iso_currency = "USD";
+string g_server_reporting_currency = "USD";
+double g_account_to_reporting_rate = 1.0;
+bool   g_account_to_reporting_ok   = true;
 color colorText, colorProfit, colorLoss, colorSL, colorTP;
 
 struct SymbolInfo {

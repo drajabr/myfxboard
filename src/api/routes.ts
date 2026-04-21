@@ -40,6 +40,7 @@ const toNum = (value: unknown, fallback = 0): number => {
 const normalizeTrade = (t: any) => ({
   ...t,
   symbol: normalizeSymbol(t.symbol),
+  currency: typeof t.currency === 'string' && t.currency.trim() !== '' ? t.currency.trim().toUpperCase() : null,
   size: toNum(t.size),
   entry_price: toNum(t.entry_price),
   exit_price: t.exit_price === null ? null : toNum(t.exit_price),
@@ -108,6 +109,7 @@ function normalizeSymbol(sym: string): string {
 const normalizePosition = (p: any) => ({
   ...p,
   symbol: normalizeSymbol(p.symbol),
+  currency: typeof p.currency === 'string' && p.currency.trim() !== '' ? p.currency.trim().toUpperCase() : null,
   size: toNum(p.size),
   direction: String(p.direction || ''),
   entry_price: toNum(p.entry_price),
@@ -336,6 +338,8 @@ const buildEmptyAnalyticsResponse = (
       equity: 0,
       balance: 0,
       floating_pnl: 0,
+      currency: null,
+      mixed_currencies: false,
     },
     periods: {
       today: zeroPeriod,
@@ -436,6 +440,16 @@ const resolveAccountRows = async (accountIdParam: string): Promise<any[]> => {
   return account ? [account] : [];
 };
 
+const buildCurrencyContext = (accountRows: any[]) => {
+  const currencies = [...new Set(accountRows
+    .map((row) => String(row?.currency || '').trim().toUpperCase())
+    .filter(Boolean))];
+  return {
+    currency: currencies.length === 1 ? currencies[0] : null,
+    mixedCurrencies: currencies.length > 1,
+  };
+};
+
 router.get('/analytics', async (req: Request, res: Response) => {
   try {
     const accountIdParam = (req.query.accountId as string) || 'all';
@@ -450,6 +464,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
 
     const accountRows: any[] = await resolveAccountRows(accountIdParam);
     const accountIds = accountRows.map((a) => a.account_id);
+    const accountCurrencyById = new Map(accountRows.map((acc) => [String(acc.account_id), String(acc.currency || '').trim().toUpperCase() || null]));
+    const currencyContext = buildCurrencyContext(accountRows);
 
     if (accountIds.length === 0) {
       if (accountIdParam === 'all' || accountIdParam.startsWith('cat:')) {
@@ -607,9 +623,10 @@ router.get('/analytics', async (req: Request, res: Response) => {
 
       const { today: todayStats, last7d: last7dStats, last30d: last30dStats, ytd: ytdStats, all_time: allTimeStats } = allPeriodStats;
 
-      const accPositions = accPositionsRaw.map(normalizePosition);
-      const accRecentTrades = recentTradesRaw.map(normalizeTrade);
-        const curveTrades = curveTradesRaw.map(normalizeTrade);
+      const accountCurrency = accountCurrencyById.get(String(accountId)) || null;
+      const accPositions = accPositionsRaw.map((p: any) => normalizePosition({ ...p, currency: p.currency ?? accountCurrency }));
+      const accRecentTrades = recentTradesRaw.map((t: any) => normalizeTrade({ ...t, currency: t.currency ?? accountCurrency }));
+      const curveTrades = curveTradesRaw.map((t: any) => normalizeTrade({ ...t, currency: t.currency ?? accountCurrency }));
       const latestSnapshot = latestSnapshotRaw ? normalizeSnapshot(latestSnapshotRaw) : null;
 
       positions = positions.concat(accPositions);
@@ -960,6 +977,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
         balance,
         floating_pnl: floatingPnl,
         margin_used: marginUsed,
+        currency: currencyContext.currency,
+        mixed_currencies: currencyContext.mixedCurrencies,
       },
       periods,
       trade_metrics: { ...tradeMetrics, max_drawdown: maxDrawdown },
@@ -1028,6 +1047,7 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
     const accountIdParam = (req.query.accountId as string) || 'all';
     const liveAccountRows = await resolveAccountRows(accountIdParam);
     const accountIds: string[] = liveAccountRows.map((a) => a.account_id);
+    const currencyContext = buildCurrencyContext(liveAccountRows);
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -1051,6 +1071,8 @@ router.get('/live-pnl/stream', async (req: Request, res: Response) => {
         equity: snap.equity ?? null,
         balance: snap.balance ?? null,
         margin_used: snap.marginUsed ?? null,
+        currency: (snap as any).currency ?? currencyContext.currency,
+        mixed_currencies: Boolean((snap as any).mixedCurrencies ?? currencyContext.mixedCurrencies),
         open_positions: snap.openPositions,
         positions,
       })}\n\n`);
@@ -1358,6 +1380,7 @@ router.get('', async (_req: Request, res: Response) => {
       account_id: a.account_id,
       account_name: a.account_name,
       broker: a.broker,
+      currency: a.currency || '',
       nickname: a.nickname || '',
       category: a.category || '',
       created_at: a.created_at,

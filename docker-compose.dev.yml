@@ -36,6 +36,7 @@ services:
       DATABASE_URL: postgresql://dashboard:dashboard_pass@postgres:5432/myfxboard
       PORT: 3000
       CONNECTOR_SHARED_SECRET: ${CONNECTOR_SHARED_SECRET:-dev-secret}
+      REPORTING_CURRENCY: ${REPORTING_CURRENCY:-USD}
     ports:
       - "3000:3000"
     volumes:

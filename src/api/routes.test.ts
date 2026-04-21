@@ -59,6 +59,7 @@ describe('GET /api/account (list accounts)', () => {
       account_name: 'MT5 123',
       secret_hash: 'should-be-stripped',
       broker: 'MT5',
+      currency: 'EUR',
       nickname: 'My Account',
       created_at: 1000,
       last_sync_at: 2000,
@@ -71,6 +72,7 @@ describe('GET /api/account (list accounts)', () => {
     expect(res.body).toHaveLength(1);
     expect(res.body[0]).not.toHaveProperty('secret_hash');
     expect(res.body[0].account_id).toBe('123');
+    expect(res.body[0].currency).toBe('EUR');
   });
 });
 
@@ -171,8 +173,8 @@ describe('GET /api/account/:accountId/equity-curve', () => {
 
 describe('GET /api/account/analytics', () => {
   beforeEach(() => {
-    vi.mocked(accountQueries.list).mockResolvedValue([{ account_id: '123' }] as any);
-    vi.mocked(accountQueries.findById).mockResolvedValue({ account_id: '123' } as any);
+    vi.mocked(accountQueries.list).mockResolvedValue([{ account_id: '123', currency: 'USD' }] as any);
+    vi.mocked(accountQueries.findById).mockResolvedValue({ account_id: '123', currency: 'USD' } as any);
     vi.mocked(tradeQueries.getBreakevenTolerance).mockResolvedValue(1.0);
     vi.mocked(positionQueries.findByAccount).mockResolvedValue([]);
     vi.mocked(snapshotQueries.findLatestByAccount).mockResolvedValue(null);
@@ -214,6 +216,20 @@ describe('GET /api/account/analytics', () => {
     expect(res.status).toBe(200);
     expect(res.body.scope).toBe('single');
     expect(res.body.account_id).toBe('123');
+    expect(res.body.summary.currency).toBe('USD');
+    expect(res.body.summary.mixed_currencies).toBe(false);
+  });
+
+  it('marks analytics as mixed-currency for multi-account views', async () => {
+    vi.mocked(accountQueries.list).mockResolvedValue([
+      { account_id: '123', currency: 'USD' },
+      { account_id: '456', currency: 'EUR' },
+    ] as any);
+    const app = makeApp();
+    const res = await request(app).get('/api/account/analytics');
+    expect(res.status).toBe(200);
+    expect(res.body.summary.currency).toBeNull();
+    expect(res.body.summary.mixed_currencies).toBe(true);
   });
 
   it('returns 404 for unknown single account', async () => {

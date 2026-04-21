@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   account_name TEXT NOT NULL,
   secret_hash TEXT NOT NULL,
   broker TEXT DEFAULT 'MT5',
+  currency TEXT DEFAULT '',
   created_at BIGINT NOT NULL,
   last_sync_at BIGINT,
   last_ingest_received_at BIGINT,
@@ -125,6 +126,7 @@ ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_ingest_received_at BIGINT;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_history_hash TEXT;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS balance NUMERIC(20, 2);
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS category TEXT DEFAULT '';
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT '';
 
 DO $$
 BEGIN

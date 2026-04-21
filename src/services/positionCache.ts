@@ -24,6 +24,7 @@ export interface AccountSnapshot {
   equity: number;
   balance: number;
   marginUsed: number;
+  currency?: string | null;
 }
 
 // Account-id → latest PnL summary (for SSE / live-pnl)
@@ -114,6 +115,7 @@ export function getAggregated(accountIds: string[]): PnlSnapshot & Partial<Accou
   let equity = 0;
   let balance = 0;
   let marginUsed = 0;
+  const currencies = new Set<string>();
   let hasAccountData = false;
   for (const id of accountIds) {
     const s = cache.get(id);
@@ -127,12 +129,20 @@ export function getAggregated(accountIds: string[]): PnlSnapshot & Partial<Accou
       equity += ad.equity;
       balance += ad.balance;
       marginUsed += ad.marginUsed;
+      const currency = String(ad.currency || '').trim().toUpperCase();
+      if (currency) currencies.add(currency);
     }
   }
   return {
     floatingPnl,
     openPositions,
-    ...(hasAccountData ? { equity, balance, marginUsed } : {}),
+    ...(hasAccountData ? {
+      equity,
+      balance,
+      marginUsed,
+      currency: currencies.size === 1 ? Array.from(currencies)[0] : null,
+      mixedCurrencies: currencies.size > 1,
+    } : {}),
   };
 }
 

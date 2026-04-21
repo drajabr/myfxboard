@@ -3,6 +3,7 @@ export interface Account {
   account_name: string;
   secret_hash: string;
   broker: string;
+  currency: string | null;
   created_at: number;
   last_sync_at: number | null;
   last_ingest_received_at: number | null;
@@ -19,6 +20,7 @@ export interface Account {
 export interface Position {
   id: number;
   account_id: string;
+  currency: string | null;
   symbol: string;
   size: number;
   direction: 'BUY' | 'SELL';
@@ -37,6 +39,7 @@ export interface Position {
 export interface Trade {
   id: number;
   account_id: string;
+  currency: string | null;
   symbol: string;
   size: number;
   entry_price: number;
@@ -52,6 +55,7 @@ export interface Trade {
 
 export interface CachedPosition {
   account_id: string;
+  currency: string | null;
   symbol: string;
   size: number;
   direction: 'BUY' | 'SELL';
@@ -134,6 +138,7 @@ export interface IngestPayload {
     equity: number;
     balance: number;
     margin_used: number;
+    currency?: string;
     margin_free?: number;
     margin_level?: number;
     nickname?: string;
@@ -164,6 +169,8 @@ export interface DashboardSummary {
   summary: {
     equity: number;
     balance: number;
+    currency?: string | null;
+    mixed_currencies?: boolean;
     free_margin: number;
     used_margin: number;
     current_pnl: number;

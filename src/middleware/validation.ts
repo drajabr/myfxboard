@@ -71,6 +71,7 @@ export const ingestPayloadSchema = z.object({
     equity: z.number().finite(),
     balance: z.number().finite(),
     margin_used: z.number().finite(),
+    currency: z.string().optional(),
     margin_free: z.number().optional(),
     margin_level: z.number().optional(),
     nickname: z.string().optional(),
@@ -92,4 +93,5 @@ export const ingestHealthPayloadSchema = z.object({
   }),
   sync_id: z.string().min(1),
   history_hash: z.string().min(1),
+  account_currency: z.string().optional(),
 });
