@@ -45,6 +45,8 @@ export const ingestPayloadSchema = z.object({
   positions: z.array(z.object({
     symbol: z.string(),
     volume: z.number().positive().finite(),
+    size_units: z.number().finite().optional(),
+    contract_size: z.number().positive().finite().optional(),
     direction: z.enum(['BUY', 'SELL']),
     open_price: z.number().finite(),
     current_price: z.number().finite().optional(),
@@ -59,6 +61,8 @@ export const ingestPayloadSchema = z.object({
   closed_trades: z.array(z.object({
     symbol: z.string(),
     volume: z.number().positive().finite(),
+    size_units: z.number().finite().optional(),
+    contract_size: z.number().positive().finite().optional(),
     entry: z.number().finite(),
     exit: z.number().finite(),
     profit: z.number().finite(),

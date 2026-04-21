@@ -42,6 +42,8 @@ const normalizeTrade = (t: any) => ({
   symbol: normalizeSymbol(t.symbol),
   currency: typeof t.currency === 'string' && t.currency.trim() !== '' ? t.currency.trim().toUpperCase() : null,
   size: toNum(t.size),
+  size_units: t.size_units === null || t.size_units === undefined ? null : toNum(t.size_units),
+  contract_size: t.contract_size === null || t.contract_size === undefined ? null : toNum(t.contract_size),
   entry_price: toNum(t.entry_price),
   exit_price: t.exit_price === null ? null : toNum(t.exit_price),
   profit: toNum(t.profit),
@@ -111,6 +113,8 @@ const normalizePosition = (p: any) => ({
   symbol: normalizeSymbol(p.symbol),
   currency: typeof p.currency === 'string' && p.currency.trim() !== '' ? p.currency.trim().toUpperCase() : null,
   size: toNum(p.size),
+  size_units: p.size_units === null || p.size_units === undefined ? null : toNum(p.size_units),
+  contract_size: p.contract_size === null || p.contract_size === undefined ? null : toNum(p.contract_size),
   direction: String(p.direction || ''),
   entry_price: toNum(p.entry_price),
   current_price: p.current_price === null ? null : toNum(p.current_price),
@@ -871,12 +875,24 @@ router.get('/analytics', async (req: Request, res: Response) => {
     };
 
     const exposureMap = new Map<string, number>();
+    const exposureUnitsMap = new Map<string, number>();
     positions.forEach((p) => {
       exposureMap.set(p.symbol, (exposureMap.get(p.symbol) || 0) + Math.abs(p.size || 0));
+      if (p.size_units !== null && p.size_units !== undefined) {
+        exposureUnitsMap.set(p.symbol, (exposureUnitsMap.get(p.symbol) || 0) + Math.abs(toNum(p.size_units)));
+      }
     });
     const symbolExposure = Array.from(exposureMap.entries())
-      .map(([symbol, size]) => ({ symbol, size }))
-      .sort((a, b) => b.size - a.size);
+      .map(([symbol, size]) => ({
+        symbol,
+        size,
+        size_units: exposureUnitsMap.get(symbol) ?? null,
+      }))
+      .sort((a, b) => {
+        const av = a.size_units !== null ? a.size_units : a.size;
+        const bv = b.size_units !== null ? b.size_units : b.size;
+        return bv - av;
+      });
 
     const monthDays = Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
       const entry = monthDayMap.get(day);

@@ -220,6 +220,9 @@ private:
 
          string symbol      = PositionGetString(POSITION_SYMBOL);
          double volume      = PositionGetDouble(POSITION_VOLUME);
+         double contract_size = SymbolInfoDouble(symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+         if(contract_size <= 0.0) contract_size = 1.0;
+         double size_units = volume * contract_size;
          double open_price  = PositionGetDouble(POSITION_PRICE_OPEN);
          double current_price = PositionGetDouble(POSITION_PRICE_CURRENT);
          double tick_size = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
@@ -242,8 +245,8 @@ private:
          }
 
          positions_json += StringFormat(
-            "{\"symbol\":\"%s\",\"volume\":%.2f,\"direction\":\"%s\",\"open_price\":%.5f,\"current_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"tick_size\":%.10f,\"tick_value\":%.10f,\"margin\":%.2f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
-            symbol, volume, direction, open_price, current_price, sl, tp, tick_size, tick_value, pos_margin, open_time_ms, pnl
+            "{\"symbol\":\"%s\",\"volume\":%.2f,\"contract_size\":%.8f,\"size_units\":%.8f,\"direction\":\"%s\",\"open_price\":%.5f,\"current_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"tick_size\":%.10f,\"tick_value\":%.10f,\"margin\":%.2f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
+            symbol, volume, contract_size, size_units, direction, open_price, current_price, sl, tp, tick_size, tick_value, pos_margin, open_time_ms, pnl
          );
       }
       positions_json += "]";
@@ -356,13 +359,16 @@ private:
                long duration_ms = deal_time_ms - entry_time;
                long duration_sec = duration_ms / 1000;
                if(duration_sec < 0) duration_sec = 0;
+               double deal_contract_size = SymbolInfoDouble(deal_symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+               if(deal_contract_size <= 0.0) deal_contract_size = 1.0;
+               double deal_size_units = deal_volume * deal_contract_size;
 
                if(!first_trade) closed_trades_json += ",";
                first_trade = false;
 
                closed_trades_json += StringFormat(
-                  "{\"symbol\":\"%s\",\"volume\":%.2f,\"entry\":%.5f,\"exit\":%.5f,\"profit\":%.5f,\"entry_time_ms\":%lld,\"exit_time_ms\":%lld,\"duration_sec\":%lld,\"method\":\"deal_out\"}",
-                  deal_symbol, deal_volume, entry_price, deal_price, deal_profit, entry_time, deal_time_ms, duration_sec
+                  "{\"symbol\":\"%s\",\"volume\":%.2f,\"contract_size\":%.8f,\"size_units\":%.8f,\"entry\":%.5f,\"exit\":%.5f,\"profit\":%.5f,\"entry_time_ms\":%lld,\"exit_time_ms\":%lld,\"duration_sec\":%lld,\"method\":\"deal_out\"}",
+                  deal_symbol, deal_volume, deal_contract_size, deal_size_units, entry_price, deal_price, deal_profit, entry_time, deal_time_ms, duration_sec
                );
 
                if(deal_time_ms > latest_closed_time_ms) {

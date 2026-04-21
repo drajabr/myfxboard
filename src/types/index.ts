@@ -23,6 +23,8 @@ export interface Position {
   currency: string | null;
   symbol: string;
   size: number;
+  size_units?: number | null;
+  contract_size?: number | null;
   direction: 'BUY' | 'SELL';
   entry_price: number;
   current_price: number | null;
@@ -42,6 +44,8 @@ export interface Trade {
   currency: string | null;
   symbol: string;
   size: number;
+  size_units?: number | null;
+  contract_size?: number | null;
   entry_price: number;
   exit_price: number | null;
   profit: number | null;
@@ -58,6 +62,8 @@ export interface CachedPosition {
   currency: string | null;
   symbol: string;
   size: number;
+  size_units?: number | null;
+  contract_size?: number | null;
   direction: 'BUY' | 'SELL';
   entry_price: number;
   current_price: number | null;
@@ -112,6 +118,8 @@ export interface IngestPayload {
   positions: Array<{
     symbol: string;
     volume: number;
+    size_units?: number;
+    contract_size?: number;
     direction: 'BUY' | 'SELL';
     open_price: number;
     current_price?: number;
@@ -126,6 +134,8 @@ export interface IngestPayload {
   closed_trades: Array<{
     symbol: string;
     volume: number;
+    size_units?: number;
+    contract_size?: number;
     entry: number;
     exit: number;
     profit: number;

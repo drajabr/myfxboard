@@ -237,6 +237,9 @@ string DC_BuildPositionsJson() {
          if(g_dc.debug_log) PrintFormat("[DC] WARNING %s tick_size=%.10f tick_value=%.10f — SL$/TP$ will be unavailable", symbol, tick_size, tick_value);
       }
       double volume = PositionGetDouble(POSITION_VOLUME);
+      double contract_size = SymbolInfoDouble(symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+      if(contract_size <= 0.0) contract_size = 1.0;
+      double size_units = volume * contract_size;
       double open_price = PositionGetDouble(POSITION_PRICE_OPEN);
       double pos_margin = 0.0;
       if(!OrderCalcMargin(dir == POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL,
@@ -244,8 +247,9 @@ string DC_BuildPositionsJson() {
          if(g_dc.debug_log) PrintFormat("[DC] WARNING OrderCalcMargin failed for %s vol=%.2f price=%.5f", symbol, volume, open_price);
       }
       j += StringFormat(
-         "{\"symbol\":\"%s\",\"volume\":%.2f,\"direction\":\"%s\",\"open_price\":%.5f,\"current_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"tick_size\":%.10f,\"tick_value\":%.10f,\"margin\":%.2f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
+         "{\"symbol\":\"%s\",\"volume\":%.2f,\"contract_size\":%.8f,\"size_units\":%.8f,\"direction\":\"%s\",\"open_price\":%.5f,\"current_price\":%.5f,\"avg_sl\":%.5f,\"avg_tp\":%.5f,\"tick_size\":%.10f,\"tick_value\":%.10f,\"margin\":%.2f,\"open_time_ms\":%lld,\"pnl\":%.2f}",
          NormalizeSymbol(symbol), volume,
+         contract_size, size_units,
          dir == POSITION_TYPE_BUY ? "BUY" : "SELL",
          open_price, PositionGetDouble(POSITION_PRICE_CURRENT), PositionGetDouble(POSITION_SL),
          PositionGetDouble(POSITION_TP), tick_size,
@@ -330,11 +334,16 @@ string DC_BuildClosedTradesJson(long &latest_closed_time_ms, string &latest_clos
          }
          if(history_start_ms > 0 && deal_time_ms < history_start_ms) continue;
          long duration_sec = MathMax(0, (deal_time_ms - entry_time) / 1000);
+         double deal_contract_size = SymbolInfoDouble(deal_symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+         if(deal_contract_size <= 0.0) deal_contract_size = 1.0;
+         double deal_size_units = deal_volume * deal_contract_size;
          if(!first_trade) j += ",";
          first_trade = false;
          j += StringFormat(
-            "{\"symbol\":\"%s\",\"volume\":%.2f,\"entry\":%.5f,\"exit\":%.5f,\"profit\":%.5f,\"entry_time_ms\":%lld,\"exit_time_ms\":%lld,\"duration_sec\":%lld,\"method\":\"deal_out\"}",
-            NormalizeSymbol(deal_symbol), deal_volume, entry_price, deal_price,
+            "{\"symbol\":\"%s\",\"volume\":%.2f,\"contract_size\":%.8f,\"size_units\":%.8f,\"entry\":%.5f,\"exit\":%.5f,\"profit\":%.5f,\"entry_time_ms\":%lld,\"exit_time_ms\":%lld,\"duration_sec\":%lld,\"method\":\"deal_out\"}",
+            NormalizeSymbol(deal_symbol), deal_volume,
+            deal_contract_size, deal_size_units,
+            entry_price, deal_price,
             DC_ConvertAccountMoneyToReporting(deal_profit),
             entry_time, deal_time_ms, duration_sec);
          if(deal_time_ms > latest_closed_time_ms) {
