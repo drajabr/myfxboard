@@ -845,6 +845,49 @@ function preferredAccountLabel(accountId, accountName) {
     return fallbackName || idText || '-';
 }
 
+function getSelectedAccountScope() {
+    const selector = document.getElementById('accountSelector');
+    const selected = selector?.value || localStorage.getItem('selectedAccount') || '';
+    return String(selected || '').trim();
+}
+
+function positionMatchesScope(position, scope) {
+    const normalizedScope = String(scope || '').trim();
+    if (!normalizedScope || normalizedScope === 'all') {
+        return true;
+    }
+
+    const accountId = String(position?.account_id || '').trim();
+    if (normalizedScope.startsWith('cat:')) {
+        const targetCategory = normalizedScope.slice(4).trim().toLowerCase();
+        if (!targetCategory) {
+            return true;
+        }
+        const account = findAccountById(accountId);
+        const categories = String(account?.category || '')
+            .split(',')
+            .map((c) => c.trim().toLowerCase())
+            .filter(Boolean);
+        return categories.includes(targetCategory);
+    }
+
+    return accountId === normalizedScope;
+}
+
+function filterPositionsBySelectedScope(positions) {
+    const source = Array.isArray(positions) ? positions : [];
+    const scope = getSelectedAccountScope();
+    return source.filter((position) => positionMatchesScope(position, scope));
+}
+
+function comparablePositionSizeAbs(position) {
+    const units = toNum(position?.size_units, NaN);
+    if (Number.isFinite(units) && Math.abs(units) > 0) {
+        return Math.abs(units);
+    }
+    return Math.abs(toNum(position?.size, 0));
+}
+
 function positionAccountLabel(position) {
     const groupedCount = toNum(position?._accountCount, 0);
     if (groupedCount > 1) {
@@ -2300,7 +2343,8 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
     const tbody = document.getElementById('positionsTable');
     const prevPositionValues = state.livePositionValues || new Map();
     const nextPositionValues = new Map();
-    if (!positions || positions.length === 0) {
+    const scopedPositions = filterPositionsBySelectedScope(positions);
+    if (!scopedPositions.length) {
         tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;">No open positions</td></tr>';
         state.livePositionValues = nextPositionValues;
         scheduleAutoFitOpenPositions();
@@ -2308,7 +2352,7 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
     }
 
     const nowMs = Date.now();
-    let rows = [...positions].map((pos) => ({
+    let rows = [...scopedPositions].map((pos) => ({
         ...pos,
         _combined: false,
         _sortSymbol: normalizeSymbol(pos.symbol),
@@ -2318,7 +2362,7 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
 
     if (state.combineOpenPositions && rows.length > 1) {
         const signedSize = (position) => {
-            const rawSize = Math.abs(toNum(position?.size, 0));
+            const rawSize = comparablePositionSizeAbs(position);
             const side = String(position?.direction || '').toUpperCase();
             if (side === 'SELL') {
                 return -rawSize;
@@ -2331,10 +2375,12 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
         const groups = {};
         for (const pos of rows) {
             const normSym = pos._sortSymbol || normalizeSymbol(pos.symbol);
-            if (!groups[normSym]) {
-                groups[normSym] = { symbol: pos.symbol, normSymbol: normSym, children: [] };
+            const acctKey = String(pos.account_id || '-');
+            const groupKey = `${normSym}|${acctKey}`;
+            if (!groups[groupKey]) {
+                groups[groupKey] = { symbol: pos.symbol, normSymbol: normSym, children: [] };
             }
-            groups[normSym].children.push(pos);
+            groups[groupKey].children.push(pos);
         }
         rows = Object.values(groups).map((g) => {
             if (g.children.length === 1) {
@@ -2346,10 +2392,10 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
             });
             const eps = 1e-9;
             const buySize = g.children.reduce((s, p) => {
-                return s + (String(p.direction || '').toUpperCase() === 'BUY' ? Math.abs(toNum(p.size, 0)) : 0);
+                return s + (String(p.direction || '').toUpperCase() === 'BUY' ? comparablePositionSizeAbs(p) : 0);
             }, 0);
             const sellSize = g.children.reduce((s, p) => {
-                return s + (String(p.direction || '').toUpperCase() === 'SELL' ? Math.abs(toNum(p.size, 0)) : 0);
+                return s + (String(p.direction || '').toUpperCase() === 'SELL' ? comparablePositionSizeAbs(p) : 0);
             }, 0);
             const netSizeSigned = buySize - sellSize;
             const isHedged = Math.abs(netSizeSigned) <= eps;
@@ -2358,9 +2404,9 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
             const totalPnl = g.children.reduce((s, p) => s + toNum(p.unrealized_pnl || 0), 0);
             const signedEntryNotional = g.children.reduce((s, p) => s + (toNum(p.entry_price) * signedSize(p)), 0);
             const signedCurrentNotional = g.children.reduce((s, p) => s + (toNum(p.current_price || p.entry_price) * signedSize(p)), 0);
-            const absTotalSize = g.children.reduce((s, p) => s + Math.abs(toNum(p.size, 0)), 0);
+            const absTotalSize = g.children.reduce((s, p) => s + comparablePositionSizeAbs(p), 0);
             const absCurrentNotional = g.children.reduce((s, p) => {
-                return s + (toNum(p.current_price || p.entry_price) * Math.abs(toNum(p.size, 0)));
+                return s + (toNum(p.current_price || p.entry_price) * comparablePositionSizeAbs(p));
             }, 0);
             const avgEntry = !isHedged
                 ? signedEntryNotional / netSizeSigned
@@ -2373,13 +2419,13 @@ function updatePositionsTable(positions, durationMs = NON_LIVE_ANIM_MS) {
                 : g.children.filter((p) => String(p.direction || '').toUpperCase() === netDirection);
             const slChildren = directionalChildren.filter((p) => p.avg_sl != null && p.avg_sl !== 0);
             const tpChildren = directionalChildren.filter((p) => p.avg_tp != null && p.avg_tp !== 0);
-            const slSize = slChildren.reduce((s, p) => s + Math.abs(toNum(p.size, 0)), 0);
-            const tpSize = tpChildren.reduce((s, p) => s + Math.abs(toNum(p.size, 0)), 0);
+            const slSize = slChildren.reduce((s, p) => s + comparablePositionSizeAbs(p), 0);
+            const tpSize = tpChildren.reduce((s, p) => s + comparablePositionSizeAbs(p), 0);
             const avgSl = slChildren.length > 0 && slSize > 0
-                ? slChildren.reduce((s, p) => s + (toNum(p.avg_sl) * Math.abs(toNum(p.size, 0))), 0) / slSize
+                ? slChildren.reduce((s, p) => s + (toNum(p.avg_sl) * comparablePositionSizeAbs(p)), 0) / slSize
                 : null;
             const avgTp = tpChildren.length > 0 && tpSize > 0
-                ? tpChildren.reduce((s, p) => s + (toNum(p.avg_tp) * Math.abs(toNum(p.size, 0))), 0) / tpSize
+                ? tpChildren.reduce((s, p) => s + (toNum(p.avg_tp) * comparablePositionSizeAbs(p)), 0) / tpSize
                 : null;
             const totalMargin = g.children.reduce((s, p) => s + toNum(p.margin || 0), 0);
             const earliestOpen = Math.min(...g.children.map(p => toNum(p.open_time_ms)).filter(t => t > 0));
@@ -2845,7 +2891,7 @@ function updateTradesTable(trades) {
 
 function updateExposureTable(positions, durationMs = NON_LIVE_ANIM_MS) {
     const tbody = document.getElementById('exposureTable');
-    const source = Array.isArray(positions) ? positions : [];
+    const source = filterPositionsBySelectedScope(positions);
 
     if (source.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No exposure</td></tr>';
@@ -2862,14 +2908,14 @@ function updateExposureTable(positions, durationMs = NON_LIVE_ANIM_MS) {
 
     // Use account-level margin_used from live data for total margin
     const totalMarginUsed = toNum(state.lastData?.summary?.margin_used, 0);
-    const totalSize = source.reduce((s, p) => s + Math.abs(toNum(p.size)), 0);
+    const totalSize = source.reduce((s, p) => s + comparablePositionSizeAbs(p), 0);
     const totalPositionMargin = source.reduce((s, p) => s + toNum(p.margin, 0), 0);
     const effectiveTotalMargin = totalMarginUsed > 0 ? totalMarginUsed : totalPositionMargin;
     const safeTotal = Math.max(totalSize, 1e-9);
     let rows = [];
 
     for (const [sym, posArr] of symbolGroups) {
-        const symSize = posArr.reduce((s, p) => s + Math.abs(toNum(p.size)), 0);
+        const symSize = posArr.reduce((s, p) => s + comparablePositionSizeAbs(p), 0);
         const symMargin = posArr.reduce((s, p) => s + toNum(p.margin, 0), 0);
         const accounts = [...new Set(posArr.map((p) => preferredAccountLabel(p.account_id, p.account_name || p.nickname)))];
         const currencies = [...new Set(posArr.map((p) => normalizeCurrencyCode(p.currency || currencyForAccount(p.account_id))).filter(Boolean))];
@@ -2903,7 +2949,7 @@ function updateExposureTable(positions, durationMs = NON_LIVE_ANIM_MS) {
                     });
                 }
                 const entry = acctMap.get(acctKey);
-                entry.size += Math.abs(toNum(p.size));
+                entry.size += comparablePositionSizeAbs(p);
                 entry.margin += toNum(p.margin, 0);
             });
             if (acctMap.size > 1) {
@@ -4340,6 +4386,9 @@ function applyLivePnl(data) {
     const floatingMetaEl = document.getElementById('floatingPnlMeta');
     if (!floatingEl) return;
     const floatingPnl = toNum(data.floating_pnl, 0);
+    const scopedPositions = filterPositionsBySelectedScope(Array.isArray(data.positions) ? data.positions : []);
+    const scopedFloatingPnl = scopedPositions.reduce((sum, p) => sum + toNum(p.unrealized_pnl, 0), 0);
+    const displayFloatingPnl = Array.isArray(data.positions) ? scopedFloatingPnl : floatingPnl;
     // Keep balance anchored to analytics summary (DB-backed) to avoid connector-timing jumps.
     const balance = toNum(state.lastData?.summary?.balance, toNum(data.balance, 0));
     const rawEquity = toNum(data.equity, NaN);
@@ -4348,30 +4397,33 @@ function applyLivePnl(data) {
         : toNum(state.lastData?.summary?.equity, balance + floatingPnl);
     const marginUsed = toNum(data.margin_used, toNum(state.lastData?.summary?.margin_used, 0));
     const balanceBase = Math.max(Math.abs(balance), 1);
-    const floatingPct = (floatingPnl / balanceBase) * 100;
+    const floatingPct = (displayFloatingPnl / balanceBase) * 100;
 
     if (state.lastData && state.lastData.summary) {
-        state.lastData.summary.floating_pnl = floatingPnl;
+        state.lastData.summary.floating_pnl = displayFloatingPnl;
         state.lastData.summary.equity = liveEquity;
         state.lastData.summary.balance = balance;
         state.lastData.summary.margin_used = marginUsed;
         if (data.currency !== undefined) state.lastData.summary.currency = data.currency;
         if (data.mixed_currencies !== undefined) state.lastData.summary.mixed_currencies = Boolean(data.mixed_currencies);
-        state.lastData.summary.open_positions = toNum(data.open_positions, state.lastData.summary.open_positions || 0);
+        state.lastData.summary.open_positions = scopedPositions.length;
         if (Array.isArray(data.positions)) {
-            state.lastData.positions = data.positions;
+            state.lastData.positions = scopedPositions;
+            const scopedMarginUsed = scopedPositions.reduce((sum, p) => sum + toNum(p.margin, 0), 0);
+            state.lastData.summary.floating_pnl = scopedFloatingPnl;
+            state.lastData.summary.margin_used = scopedMarginUsed > 0 ? scopedMarginUsed : marginUsed;
         }
     }
 
-    animateNumericText(floatingEl, floatingPnl, formatMoney, LIVE_ANIM_MS);
-    applyPnlClass(floatingEl, floatingPnl);
+    animateNumericText(floatingEl, displayFloatingPnl, formatMoney, LIVE_ANIM_MS);
+    applyPnlClass(floatingEl, displayFloatingPnl);
     if (equityEl) {
         animateNumericText(equityEl, liveEquity, formatMoney, LIVE_ANIM_MS);
         applyPnlClass(equityEl, liveEquity - balance);
     }
     if (floatingMetaEl) {
         animateNumericByKey(floatingMetaEl, 'kpi-meta-floating-pct', floatingPct, formatDeltaPct, LIVE_ANIM_MS);
-        floatingMetaEl.className = `label metric-card__meta ${pnlClass(floatingPnl)}`;
+        floatingMetaEl.className = `label metric-card__meta ${pnlClass(displayFloatingPnl)}`;
     }
 
     const balanceMetaEl = document.getElementById('balanceMeta');
@@ -4390,8 +4442,8 @@ function applyLivePnl(data) {
     }
 
     if (Array.isArray(data.positions)) {
-        updatePositionsTable(data.positions, LIVE_ANIM_MS);
-        updateExposureTable(data.positions, LIVE_ANIM_MS);
+        updatePositionsTable(scopedPositions, LIVE_ANIM_MS);
+        updateExposureTable(scopedPositions, LIVE_ANIM_MS);
     }
 
     updateLastUpdatedLabel(Date.now());
