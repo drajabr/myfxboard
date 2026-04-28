@@ -889,9 +889,7 @@ body[data-layout='dense'] .summary-spotlight .metric-card {
     min-width: 0;
     width: 100%;
     max-width: 100%;
-    white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 #tradeMetricsGrid .metric-card {
@@ -950,9 +948,7 @@ body[data-layout='dense'] #tradeMetricsGrid .metric-card {
     background: var(--surface-alt);
     min-width: 0;
     flex: 1 1 0;
-    white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .metric-card .label {
@@ -1603,9 +1599,7 @@ body:not([data-layout='live']) .table-section--exposure {
 
 .calendar-cell .calendar-pnl,
 .calendar-cell .calendar-trades {
-    white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .calendar-cell .calendar-trades {
